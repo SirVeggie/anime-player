@@ -1,0 +1,18 @@
+---
+description: Avoid using cd when the working_directory parameter is available
+alwaysApply: true
+---
+
+# Avoid Unnecessary `cd`
+
+When running shell commands, use the `working_directory` parameter on the Shell tool instead of prepending `cd <dir> &&`.
+
+```powershell
+# BAD
+cd src-tauri && cargo check
+
+# GOOD — set working_directory: "src-tauri" on the tool call
+cargo check
+```
+
+Only use `cd` when you genuinely need to change the shell's persistent working directory for a subsequent stateful step that cannot use `working_directory`.
