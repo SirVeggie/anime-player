@@ -1,669 +1,676 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  addRootFolder,
+  createCategory,
+  deleteCategory,
+  getLibraryState,
+  listEpisodes,
+  moveAnimeToCategory,
+  removeRootFolder,
+  rescanLibrary,
+} from "./api";
+import { PlayerView } from "./components/PlayerView";
+import type { AnimeSummary, Category, Episode, LibraryState, RootFolder } from "./types";
+import { errorMessage, formatEpisodeNumber, formatSize, formatTime, progressPercent } from "./utils";
 import "./App.css";
 
-type VideoFile = {
-  path: string;
-  name: string;
-  relative_path: string;
-  size: number;
-};
-
-const SIDEBAR_PX = 360;
-const appWindow = getCurrentWindow();
-
-function formatSize(bytes: number): string {
-  if (bytes <= 0) return "";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
-
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const total = Math.floor(seconds);
-  const s = total % 60;
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  const ss = s.toString().padStart(2, "0");
-  if (h > 0) {
-    const mm = m.toString().padStart(2, "0");
-    return `${h}:${mm}:${ss}`;
-  }
-  return `${m}:${ss}`;
-}
-
-function isTextInputTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  return target.isContentEditable;
-}
-
-/** Seek bar matching reference `SeekBar.vue` (custom track + thumb, pointer capture). */
-function SeekBar(props: {
-  duration: number;
-  position: number;
-  formatTime: (seconds: number) => string;
-  onSeek: (seconds: number) => void;
-}) {
-  const { duration, position, formatTime, onSeek } = props;
-  const areaRef = useRef<HTMLDivElement>(null);
-  const durationRef = useRef(duration);
-  const onSeekRef = useRef(onSeek);
-  durationRef.current = duration;
-  onSeekRef.current = onSeek;
-
-  const [isDragging, setIsDragging] = useState(false);
-  const isDraggingRef = useRef(false);
-  const activePointerId = useRef<number | null>(null);
-  const [dragRatio, setDragRatio] = useState<number | null>(null);
-  const [showHoverTime, setShowHoverTime] = useState(false);
-  const [hoverRatio, setHoverRatio] = useState(0);
-  const [hoverTime, setHoverTime] = useState(0);
-  const dragListenersCleanup = useRef<(() => void) | null>(null);
-
-  const clampRatio = (v: number) => Math.min(1, Math.max(0, v));
-
-  const getRatioFromClientX = (clientX: number) => {
-    const container = areaRef.current;
-    if (!container) return 0;
-    const rect = container.getBoundingClientRect();
-    if (rect.width <= 0) return 0;
-    return clampRatio((clientX - rect.left) / rect.width);
-  };
-
-  const detachDragListeners = () => {
-    dragListenersCleanup.current?.();
-    dragListenersCleanup.current = null;
-  };
-
-  useEffect(() => {
-    return () => {
-      detachDragListeners();
-    };
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = () => {
-      if (!isDraggingRef.current) setShowHoverTime(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const stopDragging = (event?: PointerEvent) => {
-    if (event && areaRef.current?.hasPointerCapture(event.pointerId)) {
-      areaRef.current.releasePointerCapture(event.pointerId);
-    }
-    activePointerId.current = null;
-    isDraggingRef.current = false;
-    setIsDragging(false);
-    setDragRatio(null);
-    detachDragListeners();
-  };
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || duration <= 0) return;
-    e.preventDefault();
-    detachDragListeners();
-    activePointerId.current = e.pointerId;
-    isDraggingRef.current = true;
-    setIsDragging(true);
-    areaRef.current?.setPointerCapture(e.pointerId);
-    const ratio = getRatioFromClientX(e.clientX);
-    setDragRatio(ratio);
-    setHoverRatio(ratio);
-    setHoverTime(ratio * durationRef.current);
-    setShowHoverTime(true);
-
-    const onMove = (ev: PointerEvent) => {
-      if (!isDraggingRef.current || ev.pointerId !== activePointerId.current) return;
-      const r = getRatioFromClientX(ev.clientX);
-      setDragRatio(r);
-      setHoverRatio(r);
-      setHoverTime(r * durationRef.current);
-    };
-    const onUp = (ev: PointerEvent) => {
-      if (!isDraggingRef.current || ev.pointerId !== activePointerId.current) return;
-      const r = getRatioFromClientX(ev.clientX);
-      onSeekRef.current(r * durationRef.current);
-      stopDragging(ev);
-      setShowHoverTime(false);
-    };
-    const onCancel = (ev: PointerEvent) => {
-      if (ev.pointerId !== activePointerId.current) return;
-      stopDragging(ev);
-      setShowHoverTime(false);
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    dragListenersCleanup.current = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-    };
-  };
-
-  const updateHoverTime = (e: React.MouseEvent) => {
-    if (isDraggingRef.current) return;
-    if (duration <= 0) {
-      setShowHoverTime(false);
-      return;
-    }
-    const ratio = getRatioFromClientX(e.clientX);
-    setHoverRatio(ratio);
-    setHoverTime(ratio * duration);
-    setShowHoverTime(true);
-  };
-
-  const hideHoverTime = () => {
-    if (isDraggingRef.current) return;
-    setShowHoverTime(false);
-  };
-
-  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
-  const displayProgressPercent =
-    isDragging && dragRatio !== null ? dragRatio * 100 : progressPercent;
-
-  return (
-    <div
-      ref={areaRef}
-      className={`progress-area${isDragging ? " is-dragging" : ""}`}
-      role="slider"
-      aria-label="Seek"
-      aria-valuemin={0}
-      aria-valuemax={Math.max(duration, 0)}
-      aria-valuenow={Math.min(position, duration)}
-      onPointerDown={onPointerDown}
-      onMouseMove={updateHoverTime}
-      onMouseLeave={hideHoverTime}
-    >
-      {showHoverTime ? (
-        <div className="time-tooltip" style={{ left: `${hoverRatio * 100}%` }}>
-          {formatTime(hoverTime)}
-        </div>
-      ) : null}
-      <div className="progress-bg">
-        <div className="progress-current" style={{ width: `${displayProgressPercent}%` }} />
-      </div>
-      <div
-        className="scrubber-head"
-        style={{ left: `${displayProgressPercent}%` }}
-      />
-    </div>
-  );
-}
+type View = "categories" | "anime" | "episodes" | "settings" | "player";
 
 function App() {
-  const [folder, setFolder] = useState<string>("");
-  const [files, setFiles] = useState<VideoFile[]>([]);
-  const [selected, setSelected] = useState<VideoFile | null>(null);
-  const [scanning, setScanning] = useState(false);
+  const [library, setLibrary] = useState<LibraryState | null>(null);
+  const [view, setView] = useState<View>("categories");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+  const [rootInput, setRootInput] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
 
-  const [paused, setPaused] = useState(true);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [fullscreen, setFullscreen] = useState(false);
-  /** True only after mpv signals playback has restarted (first frame path). */
-  const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
-
-  const mpvReadyRef = useRef(false);
-
-  async function handleScan(target?: string) {
-    const path = (target ?? folder).trim();
-    if (!path) {
-      setError("Please enter or pick a folder path.");
-      return;
+  const reloadLibrary = useCallback(async () => {
+    const state = await getLibraryState();
+    setLibrary(state);
+    if (selectedCategoryId === null && state.categories.length > 0) {
+      setSelectedCategoryId(state.categories[0].id);
     }
-    setScanning(true);
-    setError(null);
-    try {
-      const result = await invoke<VideoFile[]>("scan_videos", { folder: path });
-      setFiles(result);
-      if (result.length === 0) {
-        setError("No video files found in this folder.");
-      }
-    } catch (e) {
-      setError(typeof e === "string" ? e : String(e));
-      setFiles([]);
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  async function handlePickFolder() {
-    const picked = await open({ directory: true, multiple: false });
-    if (typeof picked === "string" && picked) {
-      setFolder(picked);
-      void handleScan(picked);
-    }
-  }
+    return state;
+  }, [selectedCategoryId]);
 
   useEffect(() => {
-    if (!selected) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!mpvReadyRef.current) {
-          await invoke("mpv_init", {
-            windowWidth: window.innerWidth,
-            sidebarPx: SIDEBAR_PX,
-          });
-          mpvReadyRef.current = true;
-        }
-        if (cancelled) return;
-        await invoke("mpv_load", { path: selected.path });
-      } catch (e) {
-        if (!cancelled) setError(typeof e === "string" ? e : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selected]);
-
-  useEffect(() => {
-    setVideoCompositorRevealed(false);
-  }, [selected?.path]);
-
-  useEffect(() => {
-    if (!selected || videoCompositorRevealed) return;
-    if (duration > 0 && !paused && position > 0.015) {
-      setVideoCompositorRevealed(true);
-    }
-  }, [selected, duration, paused, position, videoCompositorRevealed]);
-
-  useEffect(() => {
-    const unlisteners: UnlistenFn[] = [];
-    let cancelled = false;
-
-    (async () => {
-      const subs: Array<[string, (e: { payload: unknown }) => void]> = [
-        [
-          "mpv://time-pos",
-          (e) => {
-            if (typeof e.payload === "number") setPosition(e.payload);
-          },
-        ],
-        [
-          "mpv://duration",
-          (e) => {
-            if (typeof e.payload === "number") setDuration(e.payload);
-          },
-        ],
-        [
-          "mpv://pause",
-          (e) => {
-            if (typeof e.payload === "boolean") setPaused(e.payload);
-          },
-        ],
-        [
-          "mpv://eof-reached",
-          (e) => {
-            if (e.payload === true) setPaused(true);
-          },
-        ],
-        [
-          "mpv://playback-restart",
-          () => {
-            setVideoCompositorRevealed(true);
-          },
-        ],
-      ];
-
-      for (const [name, handler] of subs) {
-        const fn = await listen(name, handler);
-        if (cancelled) {
-          fn();
-          continue;
-        }
-        unlisteners.push(fn);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      unlisteners.forEach((fn) => fn());
-    };
-  }, []);
-
-  useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        setFullscreen(await appWindow.isFullscreen());
-      } catch {
-        /* ignore */
-      }
-      if (cancelled) return;
-      unlisten = await appWindow.onResized(async () => {
-        try {
-          setFullscreen(await appWindow.isFullscreen());
-        } catch {
-          /* ignore */
-        }
-      });
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  const onTogglePause = useCallback(() => {
-    void invoke("mpv_cycle_pause").catch((e) =>
-      setError(typeof e === "string" ? e : String(e))
-    );
-  }, []);
-
-  const onSeekCommit = useCallback((seconds: number) => {
-    setPosition(seconds);
-    void invoke("mpv_seek", { seconds }).catch((e) =>
-      setError(typeof e === "string" ? e : String(e))
-    );
-  }, []);
-
-  const toggleFullscreen = useCallback(async () => {
-    try {
-      const next = !(await appWindow.isFullscreen());
-      await appWindow.setFullscreen(next);
-      setFullscreen(next);
-    } catch (e) {
-      setError(typeof e === "string" ? e : String(e));
-    }
-  }, []);
-
-  const onCloseVideo = useCallback(() => {
     void (async () => {
       try {
-        await invoke("mpv_stop");
+        await reloadLibrary();
       } catch (e) {
-        setError(typeof e === "string" ? e : String(e));
+        setError(errorMessage(e));
       } finally {
-        setSelected(null);
-        setPosition(0);
-        setDuration(0);
-        setPaused(true);
+        setLoading(false);
       }
     })();
+  }, [reloadLibrary]);
+
+  const selectedCategory = useMemo(() => {
+    if (!library || selectedCategoryId === null) return null;
+    return library.categories.find((category) => category.id === selectedCategoryId) ?? null;
+  }, [library, selectedCategoryId]);
+
+  const animeInCategory = useMemo(() => {
+    if (!library || selectedCategoryId === null) return [];
+    return library.anime.filter((anime) => anime.category_id === selectedCategoryId);
+  }, [library, selectedCategoryId]);
+
+  const runAction = useCallback(
+    async (action: () => Promise<void>) => {
+      setBusy(true);
+      setError(null);
+      setStatus(null);
+      try {
+        await action();
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
+  const openAnime = useCallback(
+    async (anime: AnimeSummary) => {
+      setSelectedAnime(anime);
+      setError(null);
+      try {
+        const nextEpisodes = await listEpisodes(anime.id);
+        setEpisodes(nextEpisodes);
+        setView("episodes");
+      } catch (e) {
+        setError(errorMessage(e));
+      }
+    },
+    [],
+  );
+
+  const handleAddRoot = useCallback(
+    async (path: string) => {
+      const trimmed = path.trim();
+      if (!trimmed) {
+        setError("Choose or paste a folder path first.");
+        return;
+      }
+      await runAction(async () => {
+        await addRootFolder(trimmed);
+        setRootInput("");
+        await reloadLibrary();
+        setStatus("Root folder added.");
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handlePickFolder = useCallback(async () => {
+    const picked = await open({ directory: true, multiple: false });
+    if (typeof picked === "string" && picked) {
+      setRootInput(picked);
+      await handleAddRoot(picked);
+    }
+  }, [handleAddRoot]);
+
+  const handleRemoveRoot = useCallback(
+    async (root: RootFolder) => {
+      await runAction(async () => {
+        await removeRootFolder(root.id);
+        await reloadLibrary();
+        setStatus("Root folder removed. Existing library entries are preserved until rescanned.");
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleRescan = useCallback(async () => {
+    await runAction(async () => {
+      const summary = await rescanLibrary();
+      await reloadLibrary();
+      setStatus(
+        `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} imported, ${summary.unmatched_files} unmatched.`,
+      );
+    });
+  }, [reloadLibrary, runAction]);
+
+  const handleCreateCategory = useCallback(async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    await runAction(async () => {
+      const category = await createCategory(name);
+      setNewCategoryName("");
+      setSelectedCategoryId(category.id);
+      await reloadLibrary();
+      setStatus("Category created.");
+    });
+  }, [newCategoryName, reloadLibrary, runAction]);
+
+  const handleDeleteCategory = useCallback(
+    async (category: Category) => {
+      await runAction(async () => {
+        await deleteCategory(category.id);
+        const state = await reloadLibrary();
+        setSelectedCategoryId(state.categories[0]?.id ?? null);
+        setStatus("Category deleted. Anime were moved to the default category.");
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleMoveAnime = useCallback(
+    async (categoryId: number) => {
+      if (!selectedAnime) return;
+      await runAction(async () => {
+        await moveAnimeToCategory(selectedAnime.id, categoryId);
+        const state = await reloadLibrary();
+        const updated = state.anime.find((anime) => anime.id === selectedAnime.id);
+        if (updated) setSelectedAnime(updated);
+        setStatus("Anime moved.");
+      });
+    },
+    [reloadLibrary, runAction, selectedAnime],
+  );
+
+  const handleProgressSaved = useCallback(
+    (saved: Episode) => {
+      setEpisodes((current) => current.map((episode) => (episode.id === saved.id ? saved : episode)));
+      void reloadLibrary().catch((e) => setError(errorMessage(e)));
+    },
+    [reloadLibrary],
+  );
+
+  const navigateToCategory = useCallback((categoryId: number) => {
+    setSelectedCategoryId(categoryId);
+    setSelectedAnime(null);
+    setSelectedEpisode(null);
+    setEpisodes([]);
+    setView("anime");
   }, []);
 
-  const onCanvasMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return;
-      if (e.detail === 2) {
-        void toggleFullscreen();
-        return;
-      }
-      void appWindow.startDragging();
-    },
-    [toggleFullscreen]
-  );
+  if (loading) {
+    return (
+      <main className="app app--loading">
+        <div className="empty">
+          <h2>Loading library...</h2>
+        </div>
+      </main>
+    );
+  }
 
-  const onCanvasContextMenu = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      onTogglePause();
-    },
-    [onTogglePause]
-  );
+  if (!library) {
+    return (
+      <main className="app app--loading">
+        <div className="empty">
+          <h2>Library failed to load</h2>
+          {error ? <p className="muted">{error}</p> : null}
+        </div>
+      </main>
+    );
+  }
 
-  useEffect(() => {
-    if (!selected) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat) return;
-      if (isTextInputTarget(e.target)) return;
-      if (e.target instanceof HTMLElement && e.target.closest("aside.sidebar")) {
-        return;
-      }
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        void invoke("mpv_cycle_pause").catch((err) =>
-          setError(typeof err === "string" ? err : String(err))
-        );
-        return;
-      }
-      if (e.code === "ArrowLeft") {
-        e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: -5 }).catch((err) =>
-          setError(typeof err === "string" ? err : String(err))
-        );
-        return;
-      }
-      if (e.code === "ArrowRight") {
-        e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: 5 }).catch((err) =>
-          setError(typeof err === "string" ? err : String(err))
-        );
-        return;
-      }
-      if (e.code === "KeyF") {
-        e.preventDefault();
-        void toggleFullscreen();
-        return;
-      }
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [selected, toggleFullscreen]);
-
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return files;
-    const needle = filter.toLowerCase();
-    return files.filter((f) => f.relative_path.toLowerCase().includes(needle));
-  }, [files, filter]);
-
-  const selectedIndex = useMemo(
-    () => (selected ? files.findIndex((f) => f.path === selected.path) : -1),
-    [files, selected]
-  );
-
-  const loadSibling = useCallback(
-    (delta: number) => {
-      if (selectedIndex < 0 || files.length === 0) return;
-      const j = selectedIndex + delta;
-      if (j < 0 || j >= files.length) return;
-      setSelected(files[j]);
-    },
-    [files, selectedIndex]
-  );
-
-  const safeDuration = duration > 0 ? duration : 0;
-  const canPrev = selectedIndex > 0;
-  const canNext = selectedIndex >= 0 && selectedIndex < files.length - 1;
+  const showPlayer = view === "player" && selectedEpisode;
 
   return (
-    <main className="app">
+    <main className={`app${showPlayer ? " app--player-open" : ""}`}>
       <aside className="sidebar">
         <header className="sidebar-header">
           <h1>Anime Player</h1>
-          <p className="muted">Local lossless video library</p>
+          <p className="muted">Portable local library</p>
         </header>
 
+        <nav className="nav-list">
+          <button
+            type="button"
+            className={view === "categories" ? "nav-item active" : "nav-item"}
+            onClick={() => setView("categories")}
+          >
+            Library
+          </button>
+          {library.categories.map((category) => (
+            <button
+              type="button"
+              key={category.id}
+              className={
+                view === "anime" && selectedCategoryId === category.id ? "nav-item active" : "nav-item"
+              }
+              onClick={() => navigateToCategory(category.id)}
+            >
+              <span>{category.name}</span>
+              {category.is_default ? <span className="pill">Default</span> : null}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={view === "settings" ? "nav-item active" : "nav-item"}
+            onClick={() => setView("settings")}
+          >
+            Settings
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="stat-line">
+            <span>{library.anime.length} anime</span>
+            <span>{library.unmatched_count} unmatched</span>
+          </div>
+          <button type="button" onClick={() => void handleRescan()} disabled={busy}>
+            {busy ? "Working..." : "Rescan library"}
+          </button>
+        </div>
+      </aside>
+
+      {showPlayer ? (
+        <PlayerView
+          episode={selectedEpisode}
+          playlist={episodes}
+          onSelectEpisode={setSelectedEpisode}
+          onBack={() => setView("episodes")}
+          onProgressSaved={handleProgressSaved}
+          onError={setError}
+        />
+      ) : (
+        <section className="content">
+          <div className="content-inner">
+            {error ? <div className="error">{error}</div> : null}
+            {status ? <div className="status">{status}</div> : null}
+
+            {view === "categories" ? (
+              <CategoryScreen
+                library={library}
+                onOpenCategory={navigateToCategory}
+                onOpenAnime={openAnime}
+                onOpenSettings={() => setView("settings")}
+              />
+            ) : null}
+
+            {view === "anime" ? (
+              <AnimeGrid
+                category={selectedCategory}
+                anime={animeInCategory}
+                onOpenAnime={openAnime}
+                onOpenSettings={() => setView("settings")}
+              />
+            ) : null}
+
+            {view === "episodes" && selectedAnime ? (
+              <EpisodeScreen
+                anime={selectedAnime}
+                episodes={episodes}
+                categories={library.categories}
+                onBack={() => setView("anime")}
+                onPlay={(episode) => {
+                  setSelectedEpisode(episode);
+                  setView("player");
+                }}
+                onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
+              />
+            ) : null}
+
+            {view === "settings" ? (
+              <SettingsScreen
+                library={library}
+                busy={busy}
+                rootInput={rootInput}
+                newCategoryName={newCategoryName}
+                onRootInput={setRootInput}
+                onPickFolder={() => void handlePickFolder()}
+                onAddRoot={() => void handleAddRoot(rootInput)}
+                onRemoveRoot={(root) => void handleRemoveRoot(root)}
+                onRescan={() => void handleRescan()}
+                onNewCategoryName={setNewCategoryName}
+                onCreateCategory={() => void handleCreateCategory()}
+                onDeleteCategory={(category) => void handleDeleteCategory(category)}
+              />
+            ) : null}
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function CategoryScreen(props: {
+  library: LibraryState;
+  onOpenCategory: (categoryId: number) => void;
+  onOpenAnime: (anime: AnimeSummary) => void;
+  onOpenSettings: () => void;
+}) {
+  const { library, onOpenCategory, onOpenAnime, onOpenSettings } = props;
+  const animeByCategory = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const anime of library.anime) {
+      counts.set(anime.category_id, (counts.get(anime.category_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [library.anime]);
+
+  return (
+    <>
+      <ViewHeader
+        title="Library"
+        subtitle="Browse your local anime by category, or continue where you left off."
+        action={
+          <button type="button" onClick={onOpenSettings}>
+            Settings
+          </button>
+        }
+      />
+
+      {library.root_folders.length === 0 ? (
+        <div className="empty empty--wide">
+          <h2>Add a root folder to begin</h2>
+          <p className="muted">The library scanner will group matching anime filenames into shows and episodes.</p>
+          <button type="button" onClick={onOpenSettings}>
+            Open settings
+          </button>
+        </div>
+      ) : null}
+
+      {library.recent_anime.length > 0 ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <h2>Continue Watching</h2>
+            <span className="muted">Last {library.recent_anime.length}</span>
+          </div>
+          <div className="continue-row">
+            {library.recent_anime.map((anime) => (
+              <button type="button" className="continue-card" key={anime.id} onClick={() => onOpenAnime(anime)}>
+                <strong>{anime.title}</strong>
+                <span>{anime.episode_count} episodes</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="category-grid">
+        {library.categories.map((category) => (
+          <button
+            type="button"
+            className="category-card"
+            key={category.id}
+            onClick={() => onOpenCategory(category.id)}
+          >
+            <span className="category-name">{category.name}</span>
+            <span className="category-count">{animeByCategory.get(category.id) ?? 0} anime</span>
+          </button>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function AnimeGrid(props: {
+  category: Category | null;
+  anime: AnimeSummary[];
+  onOpenAnime: (anime: AnimeSummary) => void;
+  onOpenSettings: () => void;
+}) {
+  const { category, anime, onOpenAnime, onOpenSettings } = props;
+
+  return (
+    <>
+      <ViewHeader
+        title={category?.name ?? "Anime"}
+        subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
+      />
+      {anime.length === 0 ? (
+        <div className="empty empty--wide">
+          <h2>No anime found here yet</h2>
+          <p className="muted">Add root folders and rescan from settings, or move anime into this category later.</p>
+          <button type="button" onClick={onOpenSettings}>
+            Open settings
+          </button>
+        </div>
+      ) : (
+        <div className="anime-grid">
+          {anime.map((item) => (
+            <button type="button" className="anime-card" key={item.id} onClick={() => onOpenAnime(item)}>
+              <div className="poster-placeholder">{item.title.slice(0, 2).toUpperCase()}</div>
+              <div className="anime-card-title" title={item.title}>
+                {item.title}
+              </div>
+              <div className="anime-card-meta">
+                {item.episode_count} eps · {item.unwatched_count} unwatched
+              </div>
+              <div className="anime-tooltip">
+                <strong>{item.title}</strong>
+                <span>{item.episode_count} available episodes</span>
+                <span>{item.unwatched_count} unwatched</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function EpisodeScreen(props: {
+  anime: AnimeSummary;
+  episodes: Episode[];
+  categories: Category[];
+  onBack: () => void;
+  onPlay: (episode: Episode) => void;
+  onMoveAnime: (categoryId: number) => void;
+}) {
+  const { anime, episodes, categories, onBack, onPlay, onMoveAnime } = props;
+  const latestEpisodeId = useMemo(() => {
+    return episodes
+      .filter((episode) => episode.last_watched_at)
+      .sort((a, b) => String(b.last_watched_at).localeCompare(String(a.last_watched_at)))[0]?.id;
+  }, [episodes]);
+
+  return (
+    <>
+      <ViewHeader
+        title={anime.title}
+        subtitle={`${episodes.length} episode${episodes.length === 1 ? "" : "s"} · ${anime.unwatched_count} unwatched`}
+        action={
+          <button type="button" onClick={onBack}>
+            Back to grid
+          </button>
+        }
+      />
+
+      <section className="panel episode-toolbar">
+        <div>
+          <span className="muted">Category</span>
+          <select value={anime.category_id} onChange={(e) => onMoveAnime(Number(e.currentTarget.value))}>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="muted">
+          Current progress is saved when you leave or switch episodes.
+        </div>
+      </section>
+
+      <section className="episode-list">
+        {episodes.map((episode) => {
+          const percent = progressPercent(episode.position_seconds, episode.duration_seconds);
+          return (
+            <button
+              type="button"
+              key={episode.id}
+              className={`episode-row${episode.watched ? " episode-row--watched" : ""}${episode.id === latestEpisodeId ? " episode-row--last" : ""}`}
+              onClick={() => onPlay(episode)}
+              title={episode.path}
+            >
+              <div className="episode-thumb">{episode.file_type.toUpperCase()}</div>
+              <div className="episode-main">
+                <div className="episode-title">
+                  <span>{formatEpisodeNumber(episode.episode_number)}</span>
+                  {episode.id === latestEpisodeId ? <span className="pill">Last played</span> : null}
+                </div>
+                <div className="episode-meta">
+                  <span>{episode.file_name}</span>
+                  <span>{formatSize(episode.size)}</span>
+                  {episode.duration_seconds > 0 ? <span>{formatTime(episode.duration_seconds)}</span> : null}
+                </div>
+                <div className="episode-progress">
+                  <span style={{ width: `${percent}%` }} />
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </section>
+    </>
+  );
+}
+
+function SettingsScreen(props: {
+  library: LibraryState;
+  busy: boolean;
+  rootInput: string;
+  newCategoryName: string;
+  onRootInput: (value: string) => void;
+  onPickFolder: () => void;
+  onAddRoot: () => void;
+  onRemoveRoot: (root: RootFolder) => void;
+  onRescan: () => void;
+  onNewCategoryName: (value: string) => void;
+  onCreateCategory: () => void;
+  onDeleteCategory: (category: Category) => void;
+}) {
+  const {
+    library,
+    busy,
+    rootInput,
+    newCategoryName,
+    onRootInput,
+    onPickFolder,
+    onAddRoot,
+    onRemoveRoot,
+    onRescan,
+    onNewCategoryName,
+    onCreateCategory,
+    onDeleteCategory,
+  } = props;
+
+  return (
+    <>
+      <ViewHeader title="Settings" subtitle={`Portable database: ${library.db_path}`} />
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Root Folders</h2>
+          <button type="button" onClick={onRescan} disabled={busy || library.root_folders.length === 0}>
+            Rescan
+          </button>
+        </div>
         <form
-          className="folder-row"
+          className="form-row"
           onSubmit={(e) => {
             e.preventDefault();
-            void handleScan();
+            onAddRoot();
           }}
         >
           <input
             type="text"
-            value={folder}
-            onChange={(e) => setFolder(e.currentTarget.value)}
-            placeholder="Paste a folder path…"
+            value={rootInput}
+            onChange={(e) => onRootInput(e.currentTarget.value)}
+            placeholder="Paste a root folder path..."
             spellCheck={false}
           />
-          <button type="button" onClick={handlePickFolder} title="Browse for folder">
+          <button type="button" onClick={onPickFolder} disabled={busy}>
             Browse
           </button>
-          <button type="submit" disabled={scanning}>
-            {scanning ? "Scanning…" : "Scan"}
+          <button type="submit" disabled={busy}>
+            Add
           </button>
         </form>
-
-        {files.length > 0 && (
-          <input
-            className="filter"
-            type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.currentTarget.value)}
-            placeholder={`Filter ${files.length} file${files.length === 1 ? "" : "s"}…`}
-          />
-        )}
-
-        {error && <div className="error">{error}</div>}
-
-        <ul className="file-list">
-          {filtered.map((file) => (
-            <li
-              key={file.path}
-              className={selected?.path === file.path ? "active" : ""}
-              onClick={() => setSelected(file)}
-              title={file.path}
-            >
-              <span className="file-name">{file.relative_path}</span>
-              <span className="file-size">{formatSize(file.size)}</span>
-            </li>
+        <div className="settings-list">
+          {library.root_folders.map((root) => (
+            <div className="settings-item" key={root.id}>
+              <span title={root.path}>{root.path}</span>
+              <button type="button" onClick={() => onRemoveRoot(root)} disabled={busy}>
+                Remove
+              </button>
+            </div>
           ))}
-        </ul>
-      </aside>
-
-      <section
-        className={
-          !selected
-            ? "player"
-            : videoCompositorRevealed
-              ? "player player--playback"
-              : "player player--playback-pending"
-        }
-      >
-        {selected ? (
-          <>
-            <div
-              className="player-canvas"
-              onMouseDown={onCanvasMouseDown}
-              onContextMenu={onCanvasContextMenu}
-            />
-            <div className="now-playing" title={selected.path}>
-              {selected.relative_path}
-            </div>
-            <div className="player-controls ui-surface">
-              <div className="player-controls-content">
-                <SeekBar
-                  duration={safeDuration}
-                  position={Math.min(position, safeDuration || position)}
-                  formatTime={formatTime}
-                  onSeek={onSeekCommit}
-                />
-                <div className="controls-main-viewport">
-                  <div className="controls-main">
-                    <div className="controls-left">
-                      <button
-                        type="button"
-                        className={`icon-button icon-button--player icon-button--lg${canPrev ? "" : " icon-button--disabled"}`}
-                        disabled={!canPrev}
-                        onClick={() => loadSibling(-1)}
-                        title="Previous"
-                      >
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M6 18V6h2v12H6zm3.5-6 8.5 6V6l-8.5 6z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button icon-button--player icon-button--lg"
-                        onClick={onTogglePause}
-                        title={paused ? "Play" : "Pause"}
-                      >
-                        {paused ? (
-                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
-                          </svg>
-                        ) : (
-                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <path d="M14,19H18V5H14M6,19H10V5H6V19Z" />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className={`icon-button icon-button--player icon-button--lg${canNext ? "" : " icon-button--disabled"}`}
-                        disabled={!canNext}
-                        onClick={() => loadSibling(1)}
-                        title="Next"
-                      >
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M16 6v12h2V6h-2zm-1.5 6L6 18V6l8.5 6z" />
-                        </svg>
-                      </button>
-                      <div className="time-display">
-                        <span>{formatTime(Math.min(position, safeDuration || position))}</span>
-                        <span className="separator">/</span>
-                        <span>{formatTime(safeDuration)}</span>
-                      </div>
-                    </div>
-                    <div className="controls-right">
-                      <button
-                        type="button"
-                        className="icon-button icon-button--player icon-button--lg"
-                        onClick={() => void toggleFullscreen()}
-                        title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
-                      >
-                        {fullscreen ? (
-                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
-                          </svg>
-                        ) : (
-                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button icon-button--player icon-button--lg"
-                        onClick={onCloseVideo}
-                        title="Close video"
-                        aria-label="Close video"
-                      >
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="empty">
-            <h2>No video selected</h2>
-            <p className="muted">
-              {files.length === 0
-                ? "Choose a folder to scan for video files."
-                : "Pick a video from the list to start playing."}
-            </p>
-          </div>
-        )}
+          {library.root_folders.length === 0 ? <p className="muted">No root folders configured.</p> : null}
+        </div>
       </section>
-    </main>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Categories</h2>
+        </div>
+        <form
+          className="form-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onCreateCategory();
+          }}
+        >
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={(e) => onNewCategoryName(e.currentTarget.value)}
+            placeholder="New category name..."
+          />
+          <button type="submit" disabled={busy || !newCategoryName.trim()}>
+            Add
+          </button>
+        </form>
+        <div className="settings-list">
+          {library.categories.map((category) => (
+            <div className="settings-item" key={category.id}>
+              <span>
+                {category.name} {category.is_default ? <span className="pill">Default</span> : null}
+              </span>
+              <button
+                type="button"
+                onClick={() => onDeleteCategory(category)}
+                disabled={busy || category.is_default}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Detection Rules</h2>
+          <span className="muted">{library.regex_rules.length} configured</span>
+        </div>
+        <div className="settings-list">
+          {library.regex_rules.map((rule) => (
+            <div className="settings-item settings-item--stacked" key={rule.id}>
+              <strong>{rule.name}</strong>
+              <code>{rule.detection_regex}</code>
+              <code>{rule.title_regex}</code>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ViewHeader(props: { title: string; subtitle: string; action?: React.ReactNode }) {
+  const { title, subtitle, action } = props;
+  return (
+    <header className="view-header">
+      <div>
+        <h1>{title}</h1>
+        <p className="muted">{subtitle}</p>
+      </div>
+      {action ? <div className="view-actions">{action}</div> : null}
+    </header>
   );
 }
 

@@ -17,7 +17,7 @@ runtime prerequisites. See `README.md` for the full setup steps.
 
 ## Architecture
 
-### Frontend — `src/App.tsx`, `src/App.css`
+### Frontend — `src/App.tsx`, `src/App.css`, `src/api.ts`, `src/types.ts`
 
 - Visual design follows the local reference project
   (`reference/working-tauri-mpv-example-project` → Soia): `data-theme="dark"`,
@@ -27,9 +27,16 @@ runtime prerequisites. See `README.md` for the full setup steps.
   player pane share **`--ui-bg`** with **`backdrop-filter` blur** so the
   desktop shows through slightly frosted; during **`.player--playback`** blur
   is disabled so mpv stays sharp.
-- Two-pane layout: 360px sidebar (folder input, file list, filter) +
-  main player pane.
-- Sidebar talks to Rust via `invoke("scan_videos", { folder })`.
+- Two-pane layout: 280px sidebar (library navigation + settings/rescan) +
+  main content pane.
+- The MVP file list has been replaced by a SQLite-backed local library UI:
+  category screen, anime grid, episode list, settings, and player view.
+  `src/api.ts` contains the Tauri command bindings and `src/types.ts`
+  mirrors the serialized Rust DTOs.
+- Settings talks to Rust via library commands such as `get_library_state`,
+  `add_root_folder`, `rescan_library`, `list_episodes`,
+  `move_anime_to_category`, and `save_episode_progress`. The legacy
+  `scan_videos` command still exists for compatibility.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
@@ -47,7 +54,8 @@ runtime prerequisites. See `README.md` for the full setup steps.
   (each WM_SIZE was paying for a full IPC round-trip per animation
   frame). The frontend still calls `mpv_init` / `mpv_set_layout` once
   to register the initial sidebar width.
-- libmpv is initialized lazily on the first file selection via
+- `src/components/PlayerView.tsx` owns mpv playback UI/state. libmpv is
+  initialized lazily on the first episode selection via
   `mpv_init`. After init, switching files is `mpv_load`, which runs
   `loadfile` then **`set pause no`** so each new file autoplays instead
   of inheriting the previous pause state.
@@ -62,12 +70,21 @@ runtime prerequisites. See `README.md` for the full setup steps.
   A **Close video** control (and `mpv_stop`) returns to the no-selection
   empty player pane.
 
-### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/mpv/`
+### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/db.rs`,
+`src-tauri/src/library.rs`, `src-tauri/src/scanner.rs`, `src-tauri/src/mpv/`
 
-- `scan_videos(folder)` uses `walkdir` to recursively find files matching
-  the extensions in `VIDEO_EXTENSIONS` (`mkv`, `mp4`, `avi`, `webm`,
-  `ts`, `m2ts`, etc.). Returns `{ path, name, relative_path, size }[]`,
-  sorted by relative path.
+- `db.rs` opens a portable SQLite database at
+  `<current-exe>/data/anime-player.db`, creates the first schema, and
+  seeds default categories (`Ongoing`, `Completed`, `Finished`) plus a
+  fansub-style regex rule.
+- `scanner.rs` owns recursive video discovery, extension filtering, and
+  regex-based anime title / episode extraction. Unmatched video files are
+  preserved in SQLite for diagnostics instead of silently disappearing.
+- `library.rs` exposes the local-library Tauri commands and keeps the
+  legacy `scan_videos(folder)` command. Current commands include:
+  `get_library_state`, `add_root_folder`, `remove_root_folder`,
+  `create_category`, `delete_category`, `move_anime_to_category`,
+  `list_episodes`, `save_episode_progress`, and `rescan_library`.
 - `mpv/mod.rs` re-exports `MpvHandle` from the in-process libmpv module.
   All Win32 and FFI code is gated behind `#[cfg(windows)]`.
   - `mpv/ffi.rs` — minimal `extern "C"` declarations for the libmpv
@@ -83,8 +100,8 @@ runtime prerequisites. See `README.md` for the full setup steps.
   - `mpv/event_loop.rs` — observes `time-pos`, `duration`, `pause`,
     `eof-reached` and republishes each property change as a Tauri
     event named `mpv://<property>`.
-- Exposed Tauri commands: `scan_videos`, `mpv_init(window_width,
-  sidebar_px)`, `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_seek(seconds)`,
+- Exposed mpv Tauri commands: `mpv_init(window_width, sidebar_px)`,
+  `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_seek(seconds)`,
   `mpv_seek_relative(delta)`, `mpv_set_layout(window_width, sidebar_px)`,
   `mpv_stop()`.
 - `lib.rs` hooks the main window's `WindowEvent`:
@@ -195,6 +212,12 @@ push, no rebase without an explicit request) lives in
 - `README.md` — user-facing setup + run + project layout.
 - `TODO.md` — running list of follow-ups.
 - `CONTEXT.md` — this file.
+- `src/api.ts`, `src/types.ts`, `src/utils.ts` — frontend command
+  bindings, shared DTOs, and formatting helpers.
+- `src/components/PlayerView.tsx` — mpv-backed player view and controls.
+- `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
+  `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
+  regex scanner.
 - `scripts/update-mpv-libs.mjs` — refreshes `src-tauri/libs/mpv/`
   from the latest `shinchiro/mpv-winbuild-cmake` release.
 - `.cursor/rules/` — agent rules. `read-context.mdc` points new agents
