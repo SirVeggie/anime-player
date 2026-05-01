@@ -22,8 +22,8 @@ Example anime filename: [SubsPlease] Sousou no Frieren S2 - 09 (1080p) [A3A99C65
     - [x] ~~The user should be able to move anime to a new category~~
 - [x] ~~Anime grid should have vertical orientation thumbnails, with anime titles (at least as far as they fit on one line)~~
     - [x] ~~Hovering shows the full title, episode progress and available episodes in a custom tooltip~~
-- [ ] Custom window title bar for clean look, which can fade out when watching a video.
-- [ ] Custom window border (clean look without the classic 1px border seen in windows 11, not a priority)
+- [x] ~~Custom window title bar for clean look, which can fade out when watching a video.~~
+- [x] ~~Custom window border (clean look without the classic 1px border seen in windows 11, not a priority)~~
 - [x] ~~Settings view~~
     - [x] ~~Ability to add multiple root folders for anime~~
     - [x] ~~Add anime detection pairs with regex. One regex checks if a filename is an anime file, the other regex extracts the anime title from the filename.~~

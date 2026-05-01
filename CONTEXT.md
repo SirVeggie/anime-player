@@ -43,6 +43,10 @@ runtime prerequisites. See `README.md` for the full setup steps.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.
+- The app window is frameless (`decorations: false`) and draws its own
+  React title bar in `src/App.tsx`. The title bar owns dragging,
+  double-click maximize, and minimize / maximize / close controls; it
+  fades out over the player view and reappears on hover/focus.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
@@ -157,6 +161,9 @@ runtime prerequisites. See `README.md` for the full setup steps.
   this is what makes the video composite cleanly with the WebView2
   surface in the same DWM tree. See the design-decision section below
   for why this works now when an earlier transparent attempt failed.
+- The main window also has **`decorations: false`** so Windows does not
+  draw the native title bar or 1px frame; the frontend supplies the
+  custom title bar and window controls.
 - Permissions: `core:default`, `opener:default`, `dialog:default`. The
   dialog plugin is used for the native folder picker.
 - Window: `productName = "Anime Player"`, 1280x800 default, min 800x600.

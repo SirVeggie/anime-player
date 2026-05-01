@@ -18,6 +18,7 @@
   --player-controls-pad-x: 12px;
   --player-controls-pad-bottom: 8px;
   --shell-backdrop-blur: 14px;
+  --titlebar-height: 34px;
 }
 
 * {
@@ -41,12 +42,14 @@ body,
   grid-template-columns: 280px 1fr;
   height: 100vh;
   width: 100vw;
+  padding-top: var(--titlebar-height);
   overflow: hidden;
   background: transparent;
 }
 
 .app--player-open {
   grid-template-columns: 1fr;
+  padding-top: 0;
 }
 
 .app--player-open .sidebar,
@@ -57,6 +60,85 @@ body,
 .app--loading {
   display: flex;
   background: var(--ui-bg);
+}
+
+.window-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 120;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  height: var(--titlebar-height);
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(15, 15, 15, 0.92);
+  border-bottom: 1px solid var(--border-subtle);
+  -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
+  backdrop-filter: blur(var(--shell-backdrop-blur));
+  user-select: none;
+  transition:
+    opacity 180ms ease,
+    background-color 180ms ease;
+}
+
+.window-titlebar--player {
+  z-index: 9;
+  opacity: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.62), transparent);
+  border-bottom-color: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.window-titlebar--player:hover,
+.window-titlebar--player:focus-within {
+  opacity: 1;
+}
+
+.window-titlebar-title {
+  min-width: 0;
+  padding-left: 12px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.window-controls {
+  display: flex;
+  height: 100%;
+}
+
+.window-controls button.window-control {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.window-controls button.window-control:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: transparent;
+}
+
+.window-controls button.window-control--close:hover:not(:disabled) {
+  background: #c42b1c;
+  color: #fff;
+}
+
+.window-control svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
 }
 
 .sidebar,

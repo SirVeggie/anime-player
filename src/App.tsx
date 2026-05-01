@@ -1,5 +1,6 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
   createCategory,
@@ -40,6 +41,7 @@ const EMPTY_RULE: RegexRuleInput = {
 };
 
 const VIDEO_OPEN_FADE_MS = 180;
+const appWindow = getCurrentWindow();
 
 function App() {
   const [library, setLibrary] = useState<LibraryState | null>(null);
@@ -284,6 +286,7 @@ function App() {
   if (loading) {
     return (
       <main className="app app--loading">
+        <WindowTitleBar playerOpen={false} />
         <div className="empty">
           <h2>Loading library...</h2>
         </div>
@@ -294,6 +297,7 @@ function App() {
   if (!library) {
     return (
       <main className="app app--loading">
+        <WindowTitleBar playerOpen={false} />
         <div className="empty">
           <h2>Library failed to load</h2>
           {fatalError ? <p className="muted">{fatalError}</p> : null}
@@ -308,6 +312,7 @@ function App() {
     <main
       className={`app${showPlayer ? " app--player-open" : ""}${videoOpening ? " app--video-opening" : ""}`}
     >
+      <WindowTitleBar playerOpen={Boolean(showPlayer)} />
       <aside className="sidebar">
         <header className="sidebar-header">
           <h1>Anime Player</h1>
@@ -419,6 +424,77 @@ function App() {
       {videoOpening ? <div className="video-open-overlay" /> : null}
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </main>
+  );
+}
+
+function WindowTitleBar(props: { playerOpen: boolean }) {
+  const { playerOpen } = props;
+  const [maximized, setMaximized] = useState(false);
+
+  const refreshMaximized = useCallback(async () => {
+    try {
+      setMaximized(await appWindow.isMaximized());
+    } catch {
+      /* The title bar should never block the rest of the UI. */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshMaximized();
+  }, [refreshMaximized]);
+
+  const toggleMaximized = useCallback(async () => {
+    try {
+      await appWindow.toggleMaximize();
+      await refreshMaximized();
+    } catch {
+      /* ignore */
+    }
+  }, [refreshMaximized]);
+
+  const startDragOrMaximize = useCallback(
+    (e: ReactMouseEvent<HTMLElement>) => {
+      if (e.button !== 0) return;
+      if (e.detail === 2) {
+        e.preventDefault();
+        void toggleMaximized();
+        return;
+      }
+      void appWindow.startDragging().catch(() => undefined);
+    },
+    [toggleMaximized],
+  );
+
+  return (
+    <header
+      className={`window-titlebar${playerOpen ? " window-titlebar--player" : ""}`}
+      onMouseDown={startDragOrMaximize}
+    >
+      <div className="window-titlebar-title">Anime Player</div>
+      <div className="window-controls" onMouseDown={(e) => e.stopPropagation()}>
+        <button type="button" className="window-control" onClick={() => void appWindow.minimize()} aria-label="Minimize">
+          <svg viewBox="0 0 12 12" aria-hidden>
+            <path d="M2 6.5h8v1H2z" />
+          </svg>
+        </button>
+        <button type="button" className="window-control" onClick={() => void toggleMaximized()} aria-label={maximized ? "Restore" : "Maximize"}>
+          {maximized ? (
+            <svg viewBox="0 0 12 12" aria-hidden>
+              <path d="M3 2h7v7H8V8h1V3H4v1H3V2zm-1 3h6v5H2V5zm1 1v3h4V6H3z" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 12 12" aria-hidden>
+              <path d="M2 2h8v8H2V2zm1 1v6h6V3H3z" />
+            </svg>
+          )}
+        </button>
+        <button type="button" className="window-control window-control--close" onClick={() => void appWindow.close()} aria-label="Close">
+          <svg viewBox="0 0 12 12" aria-hidden>
+            <path d="m3.1 2.4 2.9 2.9 2.9-2.9.7.7L6.7 6l2.9 2.9-.7.7L6 6.7 3.1 9.6l-.7-.7L5.3 6 2.4 3.1l.7-.7z" />
+          </svg>
+        </button>
+      </div>
+    </header>
   );
 }
 
