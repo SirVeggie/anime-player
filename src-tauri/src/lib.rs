@@ -8,6 +8,8 @@ mod scanner;
 
 #[cfg(windows)]
 mod mpv;
+#[cfg(windows)]
+mod thumbnails;
 
 #[cfg(windows)]
 use mpv::MpvHandle;
@@ -96,6 +98,53 @@ fn mpv_cycle_pause(state: State<'_, AppState>) -> Result<(), String> {
         m.cycle_pause()?;
     }
     Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_set_pause(state: State<'_, AppState>, paused: bool) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        m.set_pause(paused)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_get_tracks(state: State<'_, AppState>) -> Result<Vec<mpv::MpvTrack>, String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
+    m.tracks()
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_select_audio_track(state: State<'_, AppState>, track_id: i64) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
+    m.select_audio_track(track_id)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_select_subtitle_track(
+    state: State<'_, AppState>,
+    track_id: Option<i64>,
+) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
+    m.select_subtitle_track(track_id)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_get_video_geometry(
+    state: State<'_, AppState>,
+) -> Result<Option<mpv::MpvVideoGeometry>, String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
+    m.video_geometry()
 }
 
 #[cfg(windows)]
@@ -235,9 +284,15 @@ pub fn run() {
         library::list_episodes,
         library::save_episode_progress,
         library::rescan_library,
+        thumbnails::get_file_thumbnail,
         mpv_init,
         mpv_load,
         mpv_cycle_pause,
+        mpv_set_pause,
+        mpv_get_tracks,
+        mpv_select_audio_track,
+        mpv_select_subtitle_track,
+        mpv_get_video_geometry,
         mpv_seek,
         mpv_seek_relative,
         mpv_set_layout,

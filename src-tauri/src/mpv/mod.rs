@@ -19,4 +19,4 @@ mod event_loop;
 mod ffi;
 mod handle;
 
-pub use handle::MpvHandle;
+pub use handle::{MpvHandle, MpvTrack, MpvVideoGeometry};

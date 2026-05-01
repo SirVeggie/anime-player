@@ -51,6 +51,19 @@ export type Episode = {
   last_watched_at: string | null;
 };
 
+export type MpvTrack = {
+  id: number;
+  kind: "audio" | "sub";
+  title: string | null;
+  lang: string | null;
+  selected: boolean;
+};
+
+export type MpvVideoGeometry = {
+  width: number;
+  height: number;
+};
+
 export type LibraryState = {
   db_path: string;
   root_folders: RootFolder[];

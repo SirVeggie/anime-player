@@ -35,22 +35,23 @@ Example anime filename: [SubsPlease] Sousou no Frieren S2 - 09 (1080p) [A3A99C65
 Episode selection page features
 - [x] ~~Show anime title, current progress~~
 - [x] ~~Add slight tint to already watched episodes~~
-- [ ] Show thumbnail also on this page (if available)
+- [x] ~~Show thumbnail also on this page (if available)~~
 - [ ] Delete episode
 - [ ] Delete anime (aka delete all episodes and database entries)
 - [ ] Unset watched status on episode
 
 ## Video Player
 
-- [ ] Video player view takes full size of the window
-- [ ] Video controls fade in and out. Video controls only visible if mouse is moved, but not when hotkeys pressed
+- [x] ~~Video player view takes full size of the window~~
+- [x] ~~Video controls fade in and out. Video controls only visible if mouse is moved, but not when hotkeys pressed~~
 - [x] ~~Filename is displayed in the center of the top part instead of the left~~
 - [x] ~~Exit video is moved to the top left with a back arrow symbol~~
-- [ ] Audio track selection
-- [ ] Subtitle track selection
+- [x] ~~Audio track selection~~
+- [x] ~~Subtitle track selection~~
 - [x] ~~Video player remembers the progress of the last played episode for each anime~~
-- [ ] Q key will toggle between the episode list and the video player
+- [x] ~~Q key will toggle between the episode list and the video player~~
 - [x] ~~The last played anime episode is highlighted on the episode select screen~~
+- [x] ~~Fit aspect ratio button. Pressing this will resize the window to match the aspect ratio of the video, so the are no black bars.~~
 
 ## AniList Support
 

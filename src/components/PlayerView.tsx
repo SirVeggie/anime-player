@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { saveEpisodeProgress } from "../api";
-import type { Episode } from "../types";
+import {
+  getMpvTracks,
+  getMpvVideoGeometry,
+  saveEpisodeProgress,
+  selectMpvAudioTrack,
+  selectMpvSubtitleTrack,
+} from "../api";
+import type { Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime } from "../utils";
 
 const APP_SIDEBAR_PX = 280;
+const PLAYER_SIDEBAR_PX = 0;
 const appWindow = getCurrentWindow();
 
 function isTextInputTarget(target: EventTarget | null): boolean {
@@ -20,8 +28,9 @@ function SeekBar(props: {
   duration: number;
   position: number;
   onSeek: (seconds: number) => void;
+  onInteractionChange?: (active: boolean) => void;
 }) {
-  const { duration, position, onSeek } = props;
+  const { duration, position, onSeek, onInteractionChange } = props;
   const areaRef = useRef<HTMLDivElement>(null);
   const durationRef = useRef(duration);
   const onSeekRef = useRef(onSeek);
@@ -71,11 +80,13 @@ function SeekBar(props: {
     setIsDragging(false);
     setDragRatio(null);
     detachDragListeners();
+    onInteractionChange?.(false);
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || duration <= 0) return;
     e.preventDefault();
+    onInteractionChange?.(true);
     detachDragListeners();
     activePointerId.current = e.pointerId;
     isDraggingRef.current = true;
@@ -121,8 +132,10 @@ function SeekBar(props: {
     if (isDraggingRef.current) return;
     if (duration <= 0) {
       setShowHoverTime(false);
+      onInteractionChange?.(false);
       return;
     }
+    onInteractionChange?.(true);
     const ratio = getRatioFromClientX(e.clientX);
     setHoverRatio(ratio);
     setHoverTime(ratio * duration);
@@ -132,6 +145,7 @@ function SeekBar(props: {
   const hideHoverTime = () => {
     if (isDraggingRef.current) return;
     setShowHoverTime(false);
+    onInteractionChange?.(false);
   };
 
   const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
@@ -167,28 +181,96 @@ function SeekBar(props: {
 export function PlayerView(props: {
   episode: Episode;
   playlist: Episode[];
+  visible: boolean;
+  canRestoreFromKeyboard: boolean;
   onSelectEpisode: (episode: Episode) => void;
   onBack: () => void;
+  onRestore: () => void;
+  onClose: () => void;
   onProgressSaved: (episode: Episode) => void;
   onError: (message: string) => void;
 }) {
-  const { episode, playlist, onSelectEpisode, onBack, onProgressSaved, onError } = props;
+  const {
+    episode,
+    playlist,
+    visible,
+    canRestoreFromKeyboard,
+    onSelectEpisode,
+    onBack,
+    onRestore,
+    onClose,
+    onProgressSaved,
+    onError,
+  } = props;
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(episode.position_seconds || 0);
   const [duration, setDuration] = useState(episode.duration_seconds || 0);
   const [fullscreen, setFullscreen] = useState(false);
   const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [seekInteracting, setSeekInteracting] = useState(false);
+  const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
+  const [tracks, setTracks] = useState<MpvTrack[]>([]);
+  const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
   const mpvReadyRef = useRef(false);
   const playbackRef = useRef({ episode, position, duration });
   const pendingResumeSecondsRef = useRef<number | null>(null);
+  const controlsHideTimerRef = useRef<number | null>(null);
+  const handlingEofRef = useRef(false);
 
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
   const canPrev = selectedIndex > 0;
   const canNext = selectedIndex >= 0 && selectedIndex < playlist.length - 1;
+  const controlsPinned = seekInteracting || activeTrackMenu !== null;
+  const audioTracks = tracks.filter((track) => track.kind === "audio");
+  const subtitleTracks = tracks.filter((track) => track.kind === "sub");
+  const selectedAudioTrack = audioTracks.find((track) => track.selected) ?? null;
+  const selectedSubtitleTrack = subtitleTracks.find((track) => track.selected) ?? null;
 
   useEffect(() => {
     playbackRef.current = { episode, position, duration };
   }, [duration, episode, position]);
+
+  const clearControlsHideTimer = useCallback(() => {
+    if (controlsHideTimerRef.current !== null) {
+      window.clearTimeout(controlsHideTimerRef.current);
+      controlsHideTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleControlsHide = useCallback(() => {
+    clearControlsHideTimer();
+    if (!visible || controlsPinned) return;
+    controlsHideTimerRef.current = window.setTimeout(() => {
+      setControlsVisible(false);
+      controlsHideTimerRef.current = null;
+    }, 2200);
+  }, [clearControlsHideTimer, controlsPinned, visible]);
+
+  const revealControlsFromPointer = useCallback(() => {
+    if (!visible) return;
+    setControlsVisible(true);
+    scheduleControlsHide();
+  }, [scheduleControlsHide, visible]);
+
+  useEffect(() => {
+    if (visible) {
+      setControlsVisible(true);
+      scheduleControlsHide();
+    } else {
+      clearControlsHideTimer();
+    }
+    return clearControlsHideTimer;
+  }, [clearControlsHideTimer, scheduleControlsHide, visible]);
+
+  useEffect(() => {
+    if (controlsPinned) {
+      setControlsVisible(true);
+      clearControlsHideTimer();
+    } else {
+      scheduleControlsHide();
+    }
+  }, [clearControlsHideTimer, controlsPinned, scheduleControlsHide]);
 
   const persistProgress = useCallback(
     async (forceWatched = false) => {
@@ -208,9 +290,52 @@ export function PlayerView(props: {
     [onProgressSaved],
   );
 
+  const refreshTracks = useCallback(async () => {
+    try {
+      setTracks(await getMpvTracks());
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  }, [onError]);
+
+  const refreshVideoGeometry = useCallback(async () => {
+    try {
+      setVideoGeometry(await getMpvVideoGeometry());
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  }, [onError]);
+
+  const handlePlaybackFinished = useCallback(() => {
+    if (handlingEofRef.current) return;
+    handlingEofRef.current = true;
+    const next = playlist[selectedIndex + 1];
+    void persistProgress(true)
+      .catch((err) => onError(errorMessage(err)))
+      .finally(() => {
+        if (next) {
+          onSelectEpisode(next);
+          return;
+        }
+
+        void invoke("mpv_stop")
+          .catch((err) => onError(errorMessage(err)))
+          .finally(() => {
+            setPosition(0);
+            setDuration(0);
+            setPaused(true);
+            onClose();
+          });
+      });
+  }, [onClose, onError, onSelectEpisode, persistProgress, playlist, selectedIndex]);
+
   useEffect(() => {
+    handlingEofRef.current = false;
     setPosition(episode.position_seconds || 0);
     setDuration(episode.duration_seconds || 0);
+    setTracks([]);
+    setVideoGeometry(null);
+    setActiveTrackMenu(null);
     setVideoCompositorRevealed(false);
   }, [episode.id, episode.duration_seconds, episode.position_seconds]);
 
@@ -221,13 +346,13 @@ export function PlayerView(props: {
         if (!mpvReadyRef.current) {
           await invoke("mpv_init", {
             windowWidth: window.innerWidth,
-            sidebarPx: APP_SIDEBAR_PX,
+            sidebarPx: visible ? PLAYER_SIDEBAR_PX : APP_SIDEBAR_PX,
           });
           mpvReadyRef.current = true;
         } else {
           await invoke("mpv_set_layout", {
             windowWidth: window.innerWidth,
-            sidebarPx: APP_SIDEBAR_PX,
+            sidebarPx: visible ? PLAYER_SIDEBAR_PX : APP_SIDEBAR_PX,
           });
         }
         if (cancelled) return;
@@ -243,6 +368,14 @@ export function PlayerView(props: {
       cancelled = true;
     };
   }, [episode.path, episode.position_seconds, episode.watched, onError]);
+
+  useEffect(() => {
+    if (!mpvReadyRef.current) return;
+    void invoke("mpv_set_layout", {
+      windowWidth: window.innerWidth,
+      sidebarPx: visible ? PLAYER_SIDEBAR_PX : APP_SIDEBAR_PX,
+    }).catch((err) => onError(errorMessage(err)));
+  }, [onError, visible]);
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -273,13 +406,15 @@ export function PlayerView(props: {
           (e) => {
             if (e.payload === true) {
               setPaused(true);
-              void persistProgress(true).catch((err) => onError(errorMessage(err)));
+              handlePlaybackFinished();
             }
           },
         ],
         [
           "mpv://file-loaded",
           () => {
+            void refreshTracks();
+            void refreshVideoGeometry();
             const seconds = pendingResumeSecondsRef.current;
             pendingResumeSecondsRef.current = null;
             if (seconds === null) return;
@@ -311,7 +446,7 @@ export function PlayerView(props: {
       cancelled = true;
       unlisteners.forEach((fn) => fn());
     };
-  }, [onError, persistProgress]);
+  }, [handlePlaybackFinished, onError, persistProgress, refreshTracks, refreshVideoGeometry]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
@@ -349,6 +484,32 @@ export function PlayerView(props: {
     [onError],
   );
 
+  const selectAudioTrack = useCallback(
+    async (trackId: number) => {
+      try {
+        await selectMpvAudioTrack(trackId);
+        await refreshTracks();
+        setActiveTrackMenu(null);
+      } catch (e) {
+        onError(errorMessage(e));
+      }
+    },
+    [onError, refreshTracks],
+  );
+
+  const selectSubtitleTrack = useCallback(
+    async (trackId: number | null) => {
+      try {
+        await selectMpvSubtitleTrack(trackId);
+        await refreshTracks();
+        setActiveTrackMenu(null);
+      } catch (e) {
+        onError(errorMessage(e));
+      }
+    },
+    [onError, refreshTracks],
+  );
+
   const toggleFullscreen = useCallback(async () => {
     try {
       const next = !(await appWindow.isFullscreen());
@@ -358,6 +519,25 @@ export function PlayerView(props: {
       onError(errorMessage(e));
     }
   }, [onError]);
+
+  const fitWindowToAspect = useCallback(async () => {
+    if (!videoGeometry || videoGeometry.width <= 0 || videoGeometry.height <= 0) {
+      onError("Video dimensions are not available yet.");
+      return;
+    }
+
+    try {
+      const aspect = videoGeometry.width / videoGeometry.height;
+      const currentWidth = window.innerWidth;
+      const currentHeight = window.innerHeight;
+      const currentAspect = currentWidth / currentHeight;
+      const nextWidth = currentAspect > aspect ? Math.round(currentHeight * aspect) : currentWidth;
+      const nextHeight = currentAspect > aspect ? currentHeight : Math.round(currentWidth / aspect);
+      await appWindow.setSize(new LogicalSize(nextWidth, nextHeight));
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  }, [onError, videoGeometry]);
 
   const closeVideo = useCallback(async () => {
     try {
@@ -369,9 +549,30 @@ export function PlayerView(props: {
       setPosition(0);
       setDuration(0);
       setPaused(true);
+      onClose();
+    }
+  }, [onClose, onError, persistProgress]);
+
+  const hidePlayer = useCallback(async () => {
+    try {
+      await persistProgress();
+      await invoke("mpv_set_pause", { paused: true });
+      setPaused(true);
       onBack();
+    } catch (e) {
+      onError(errorMessage(e));
     }
   }, [onBack, onError, persistProgress]);
+
+  const restorePlayer = useCallback(async () => {
+    try {
+      onRestore();
+      await invoke("mpv_set_pause", { paused: false });
+      setPaused(false);
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  }, [onError, onRestore]);
 
   const loadSibling = useCallback(
     (delta: number) => {
@@ -431,21 +632,34 @@ export function PlayerView(props: {
       if (e.code === "KeyF") {
         e.preventDefault();
         void toggleFullscreen();
+        return;
+      }
+      if (e.code === "KeyQ") {
+        if (visible) {
+          e.preventDefault();
+          void hidePlayer();
+          return;
+        }
+        if (canRestoreFromKeyboard) {
+          e.preventDefault();
+          void restorePlayer();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onError, onTogglePause, toggleFullscreen]);
+  }, [canRestoreFromKeyboard, hidePlayer, onError, onTogglePause, restorePlayer, toggleFullscreen, visible]);
 
   const safeDuration = duration > 0 ? duration : 0;
 
   return (
     <section
       className={
-        videoCompositorRevealed
-          ? "player player--playback"
-          : "player player--playback-pending"
+        `${videoCompositorRevealed ? "player player--playback" : "player player--playback-pending"}${
+          visible ? "" : " player--hidden"
+        }${controlsVisible ? " player--controls-visible" : " player--controls-hidden"}`
       }
+      onPointerMove={revealControlsFromPointer}
     >
       <div
         className="player-canvas"
@@ -459,7 +673,7 @@ export function PlayerView(props: {
             : "player-load-fade"
         }
       />
-      <button type="button" className="player-back back-button" onClick={() => void closeVideo()} aria-label="Back">
+      <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
         <ArrowLeftIcon />
       </button>
       <div className="now-playing" title={episode.path}>
@@ -471,6 +685,7 @@ export function PlayerView(props: {
             duration={safeDuration}
             position={Math.min(position, safeDuration || position)}
             onSeek={onSeekCommit}
+            onInteractionChange={setSeekInteracting}
           />
           <div className="controls-main-viewport">
             <div className="controls-main">
@@ -520,6 +735,36 @@ export function PlayerView(props: {
                 </div>
               </div>
               <div className="controls-right">
+                <TrackMenu
+                  kind="audio"
+                  label={selectedAudioTrack ? trackLabel(selectedAudioTrack) : "Audio"}
+                  tracks={audioTracks}
+                  selectedTrackId={selectedAudioTrack?.id ?? null}
+                  open={activeTrackMenu === "audio"}
+                  onToggle={() => setActiveTrackMenu((current) => (current === "audio" ? null : "audio"))}
+                  onSelect={(trackId) => void selectAudioTrack(trackId)}
+                />
+                <TrackMenu
+                  kind="sub"
+                  label={selectedSubtitleTrack ? trackLabel(selectedSubtitleTrack) : "Subs"}
+                  tracks={subtitleTracks}
+                  selectedTrackId={selectedSubtitleTrack?.id ?? null}
+                  open={activeTrackMenu === "sub"}
+                  onToggle={() => setActiveTrackMenu((current) => (current === "sub" ? null : "sub"))}
+                  onSelect={(trackId) => void selectSubtitleTrack(trackId)}
+                  onDisable={() => void selectSubtitleTrack(null)}
+                />
+                <button
+                  type="button"
+                  className="icon-button icon-button--player icon-button--lg"
+                  onClick={() => void fitWindowToAspect()}
+                  title="Fit window to video aspect"
+                  disabled={!videoGeometry}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <path d="M4 7h16v10H4V7zm2 2v6h12V9H6zm3-6h6v2H9V3zm0 16h6v2H9v-2z" />
+                  </svg>
+                </button>
                 <button
                   type="button"
                   className="icon-button icon-button--player icon-button--lg"
@@ -554,6 +799,57 @@ export function PlayerView(props: {
       </div>
     </section>
   );
+}
+
+function TrackMenu(props: {
+  kind: "audio" | "sub";
+  label: string;
+  tracks: MpvTrack[];
+  selectedTrackId: number | null;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (trackId: number) => void;
+  onDisable?: () => void;
+}) {
+  const { kind, label, tracks, selectedTrackId, open, onToggle, onSelect, onDisable } = props;
+  const emptyLabel = kind === "audio" ? "No audio tracks" : "No subtitles";
+
+  return (
+    <div className="track-menu">
+      <button type="button" className="track-menu-trigger" onClick={onToggle}>
+        {label}
+      </button>
+      {open ? (
+        <div className="track-menu-popover">
+          {onDisable ? (
+            <button
+              type="button"
+              className={selectedTrackId === null ? "track-menu-option active" : "track-menu-option"}
+              onClick={onDisable}
+            >
+              Off
+            </button>
+          ) : null}
+          {tracks.map((track) => (
+            <button
+              type="button"
+              key={track.id}
+              className={track.id === selectedTrackId ? "track-menu-option active" : "track-menu-option"}
+              onClick={() => onSelect(track.id)}
+            >
+              {trackLabel(track)}
+            </button>
+          ))}
+          {tracks.length === 0 ? <div className="track-menu-empty">{emptyLabel}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function trackLabel(track: MpvTrack) {
+  const parts = [track.lang?.toUpperCase(), track.title].filter(Boolean);
+  return parts.length > 0 ? parts.join(" - ") : `Track ${track.id}`;
 }
 
 function ArrowLeftIcon() {

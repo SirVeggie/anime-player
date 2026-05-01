@@ -88,6 +88,28 @@ pub struct MpvEventProperty {
     pub data: *mut c_void,
 }
 
+#[repr(C)]
+pub union MpvNodeValue {
+    pub string: *mut c_char,
+    pub flag: c_int,
+    pub int64: i64,
+    pub double_: f64,
+    pub list: *mut MpvNodeList,
+}
+
+#[repr(C)]
+pub struct MpvNode {
+    pub u: MpvNodeValue,
+    pub format: mpv_format,
+}
+
+#[repr(C)]
+pub struct MpvNodeList {
+    pub num: c_int,
+    pub values: *mut MpvNode,
+    pub keys: *mut *mut c_char,
+}
+
 #[link(name = "mpv")]
 unsafe extern "C" {
     pub fn mpv_create() -> *mut c_void;
@@ -107,6 +129,13 @@ unsafe extern "C" {
     ) -> c_int;
     pub fn mpv_wait_event(ctx: *mut c_void, timeout: f64) -> *mut MpvEvent;
     pub fn mpv_wakeup(ctx: *mut c_void);
+    pub fn mpv_get_property(
+        ctx: *mut c_void,
+        name: *const c_char,
+        format: mpv_format,
+        data: *mut c_void,
+    ) -> c_int;
     pub fn mpv_get_property_string(ctx: *mut c_void, name: *const c_char) -> *mut c_char;
+    pub fn mpv_free_node_contents(node: *mut MpvNode);
     pub fn mpv_free(data: *mut c_void);
 }

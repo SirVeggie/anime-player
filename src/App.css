@@ -45,6 +45,15 @@ body,
   background: transparent;
 }
 
+.app--player-open {
+  grid-template-columns: 1fr;
+}
+
+.app--player-open .sidebar,
+.app--player-open .content {
+  display: none;
+}
+
 .app--loading {
   display: flex;
   background: var(--ui-bg);
@@ -395,6 +404,17 @@ p {
   color: rgba(255, 255, 255, 0.65);
   font-size: 12px;
   font-weight: 700;
+  overflow: hidden;
+}
+
+.episode-thumb--image {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.episode-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .episode-main {
@@ -735,6 +755,13 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  grid-column: 1 / -1;
+  height: 100vh;
+  width: 100vw;
+}
+
+.player--hidden {
+  display: none;
 }
 
 .player--playback {
@@ -770,6 +797,9 @@ button:disabled {
   top: 12px;
   left: 12px;
   z-index: 12;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .now-playing {
@@ -787,18 +817,47 @@ button:disabled {
   text-overflow: ellipsis;
   pointer-events: none;
   z-index: 11;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .player-controls {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   flex-shrink: 0;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
   padding: 0 var(--player-controls-pad-x) var(--player-controls-pad-bottom);
   z-index: 10;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .player-controls-content {
   color: #fff;
+}
+
+.player--controls-hidden {
+  cursor: none;
+}
+
+.player--controls-hidden .player-back,
+.player--controls-hidden .now-playing,
+.player--controls-hidden .player-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player--controls-hidden .player-back,
+.player--controls-hidden .now-playing {
+  transform: translateY(-8px);
+}
+
+.player--controls-hidden .player-controls {
+  transform: translateY(12px);
 }
 
 .progress-area {
@@ -889,6 +948,66 @@ button:disabled {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.track-menu {
+  position: relative;
+}
+
+.track-menu-trigger {
+  height: 28px;
+  max-width: 130px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-menu-trigger:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.track-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  min-width: 180px;
+  max-width: 300px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(18, 18, 18, 0.98);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.38);
+}
+
+.track-menu-option {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border-color: transparent;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.track-menu-option:hover,
+.track-menu-option.active {
+  background: rgba(88, 166, 255, 0.16);
+  border-color: rgba(88, 166, 255, 0.28);
+}
+
+.track-menu-empty {
+  padding: 7px 9px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .player-controls button.icon-button {

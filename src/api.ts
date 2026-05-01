@@ -3,6 +3,8 @@ import type {
   Category,
   Episode,
   LibraryState,
+  MpvTrack,
+  MpvVideoGeometry,
   RegexRule,
   RegexRuleInput,
   RootFolder,
@@ -55,6 +57,26 @@ export function deleteRegexRule(id: number): Promise<void> {
 
 export function listEpisodes(animeId: number): Promise<Episode[]> {
   return invoke("list_episodes", { animeId });
+}
+
+export function getFileThumbnail(path: string, size: number): Promise<string | null> {
+  return invoke("get_file_thumbnail", { path, size });
+}
+
+export function getMpvTracks(): Promise<MpvTrack[]> {
+  return invoke("mpv_get_tracks");
+}
+
+export function selectMpvAudioTrack(trackId: number): Promise<void> {
+  return invoke("mpv_select_audio_track", { trackId });
+}
+
+export function selectMpvSubtitleTrack(trackId: number | null): Promise<void> {
+  return invoke("mpv_select_subtitle_track", { trackId });
+}
+
+export function getMpvVideoGeometry(): Promise<MpvVideoGeometry | null> {
+  return invoke("mpv_get_video_geometry");
 }
 
 export function saveEpisodeProgress(

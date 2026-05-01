@@ -37,8 +37,9 @@ runtime prerequisites. See `README.md` for the full setup steps.
 - Settings talks to Rust via library commands such as `get_library_state`,
   `add_root_folder`, `rescan_library`, `list_episodes`,
   `move_anime_to_category`, `set_default_category`, editable
-  `*_regex_rule` commands, and `save_episode_progress`. The legacy
-  `scan_videos` command still exists for compatibility.
+  `*_regex_rule` commands, `save_episode_progress`, and the Windows-only
+  `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
+  command still exists for compatibility.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.
@@ -61,20 +62,32 @@ runtime prerequisites. See `README.md` for the full setup steps.
   frame). The frontend still calls `mpv_init` / `mpv_set_layout` once
   to register the initial sidebar width.
 - `src/components/PlayerView.tsx` owns mpv playback UI/state. libmpv is
-  initialized lazily on the first episode selection via
-  `mpv_init`. After init, switching files is `mpv_load`, which runs
-  `loadfile` then **`set pause no`** so each new file autoplays instead
-  of inheriting the previous pause state.
-- A custom HTML controls bar (transport + scrubber + time + fullscreen)
-  drives mpv via `mpv_cycle_pause`, `mpv_seek`, `mpv_seek_relative`, and
-  reads state from `mpv://time-pos`, `mpv://duration`, `mpv://pause`,
-  `mpv://eof-reached`, and `mpv://playback-restart` events. The video pane uses Tauri
-  `startDragging` (single left-click) and `setFullscreen` (double
-  left-click or **F**); right-click toggles pause; Space and ArrowLeft/ArrowRight
-  seek ±5s are handled in the frontend (capture-phase `keydown`) so they
-  work while the WebView has focus without typing in sidebar fields.
-  A **Close video** control (and `mpv_stop`) returns to the no-selection
-  empty player pane.
+  initialized lazily on the first episode selection via `mpv_init` and
+  then remains alive for the app session. Opening or switching files is
+  `mpv_load`, which runs `loadfile` then **`set pause no`** so each new
+  file autoplays instead of inheriting the previous pause state. The
+  player view is mounted as the loaded playback session even when hidden
+  behind the episode list.
+- The video player is full-window while visible: `.app--player-open`
+  hides the sidebar/content and passes `sidebar_px = 0` to mpv so
+  `video-margin-ratio-left` is cleared. When **Q** or the back arrow
+  returns to the episode list, playback is paused via `mpv_set_pause`
+  and the stored sidebar margin is restored without unloading mpv.
+- A custom HTML controls bar (transport + scrubber + time + track menus
+  + aspect fit + fullscreen) drives mpv via `mpv_cycle_pause`,
+  `mpv_set_pause`, `mpv_seek`, `mpv_seek_relative`, track selection
+  commands, and reads state from `mpv://time-pos`, `mpv://duration`,
+  `mpv://pause`, `mpv://eof-reached`, `mpv://file-loaded`, and
+  `mpv://playback-restart` events. Controls fade out after pointer idle
+  and are revealed only by mouse movement or active menu/seek
+  interaction, not by hotkeys.
+- The video pane uses Tauri `startDragging` (single left-click) and
+  `setFullscreen` (double left-click or **F**); right-click toggles
+  pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** toggles between
+  the player and episode list. At EOF the frontend saves progress,
+  loads the next episode if one exists, or stops mpv and returns to the
+  episode list. A **Close video** control still stops mpv and clears the
+  loaded playback session.
 
 ### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/db.rs`,
 `src-tauri/src/library.rs`, `src-tauri/src/scanner.rs`, `src-tauri/src/mpv/`
@@ -93,12 +106,14 @@ runtime prerequisites. See `README.md` for the full setup steps.
   `create_regex_rule`, `update_regex_rule`, `delete_regex_rule`,
   `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
   and `rescan_library`.
-- `mpv/mod.rs` re-exports `MpvHandle` from the in-process libmpv module.
-  All Win32 and FFI code is gated behind `#[cfg(windows)]`.
+- `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
+  in-process libmpv module. All Win32 and FFI code is gated behind
+  `#[cfg(windows)]`.
   - `mpv/ffi.rs` — minimal `extern "C"` declarations for the libmpv
     symbols we use (`mpv_create`, `mpv_initialize`, `mpv_command`,
     `mpv_set_option_string`, `mpv_observe_property`, `mpv_wait_event`,
-    `mpv_wakeup`, `mpv_terminate_destroy`, etc.).
+    `mpv_get_property`, `mpv_free_node_contents`, `mpv_wakeup`,
+    `mpv_terminate_destroy`, etc.).
   - `mpv/handle.rs` — `MpvHandle` owns the libmpv context plus the
     background event-loop thread. `MpvHandle::new(hwnd, app_handle)`
     sets the `wid` option to the Tauri main HWND **before**
@@ -109,9 +124,12 @@ runtime prerequisites. See `README.md` for the full setup steps.
     `eof-reached` and republishes each property change as a Tauri
     event named `mpv://<property>`.
 - Exposed mpv Tauri commands: `mpv_init(window_width, sidebar_px)`,
-  `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_seek(seconds)`,
-  `mpv_seek_relative(delta)`, `mpv_set_layout(window_width, sidebar_px)`,
-  `mpv_stop()`.
+  `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_set_pause(paused)`,
+  `mpv_seek(seconds)`, `mpv_seek_relative(delta)`,
+  `mpv_set_layout(window_width, sidebar_px)`, `mpv_get_tracks()`,
+  `mpv_select_audio_track(track_id)`,
+  `mpv_select_subtitle_track(track_id)`, `mpv_get_video_geometry()`,
+  and `mpv_stop()`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.

@@ -6,6 +6,7 @@ import {
   createRegexRule,
   deleteCategory,
   deleteRegexRule,
+  getFileThumbnail,
   getLibraryState,
   listEpisodes,
   moveAnimeToCategory,
@@ -341,72 +342,79 @@ function App() {
         </div>
       </aside>
 
-      {showPlayer ? (
+      {selectedEpisode ? (
         <PlayerView
           episode={selectedEpisode}
           playlist={episodes}
+          visible={Boolean(showPlayer)}
+          canRestoreFromKeyboard={view === "episodes"}
           onSelectEpisode={setSelectedEpisode}
           onBack={() => setView("episodes")}
+          onRestore={() => setView("player")}
+          onClose={() => {
+            setSelectedEpisode(null);
+            setView("episodes");
+          }}
           onProgressSaved={handleProgressSaved}
           onError={(message) => showToast("error", message)}
         />
-      ) : (
-        <section className="content">
-          <div className="content-inner">
-            {view === "categories" ? (
-              <CategoryScreen
-                library={library}
-                onOpenCategory={navigateToCategory}
-                onOpenAnime={openAnime}
-                onOpenSettings={() => setView("settings")}
-              />
-            ) : null}
+      ) : null}
 
-            {view === "anime" ? (
-              <AnimeGrid
-                category={selectedCategory}
-                anime={animeInCategory}
-                onBack={() => setView("categories")}
-                onOpenAnime={openAnime}
-                onOpenSettings={() => setView("settings")}
-              />
-            ) : null}
+      <section className="content">
+        <div className="content-inner">
+          {view === "categories" ? (
+            <CategoryScreen
+              library={library}
+              onOpenCategory={navigateToCategory}
+              onOpenAnime={openAnime}
+              onOpenSettings={() => setView("settings")}
+            />
+          ) : null}
 
-            {view === "episodes" && selectedAnime ? (
-              <EpisodeScreen
-                anime={selectedAnime}
-                episodes={episodes}
-                categories={library.categories}
-                onBack={() => setView("anime")}
-                onPlay={openEpisode}
-                onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
-              />
-            ) : null}
+          {view === "anime" ? (
+            <AnimeGrid
+              category={selectedCategory}
+              anime={animeInCategory}
+              onBack={() => setView("categories")}
+              onOpenAnime={openAnime}
+              onOpenSettings={() => setView("settings")}
+            />
+          ) : null}
 
-            {view === "settings" ? (
-              <SettingsScreen
-                library={library}
-                busy={busy}
-                rootInput={rootInput}
-                newCategoryName={newCategoryName}
-                onBack={() => setView("categories")}
-                onRootInput={setRootInput}
-                onPickFolder={() => void handlePickFolder()}
-                onAddRoot={() => void handleAddRoot(rootInput)}
-                onRemoveRoot={(root) => void handleRemoveRoot(root)}
-                onRescan={() => void handleRescan()}
-                onNewCategoryName={setNewCategoryName}
-                onCreateCategory={() => void handleCreateCategory()}
-                onDeleteCategory={(category) => void handleDeleteCategory(category)}
-                onSetDefaultCategory={(category) => void handleSetDefaultCategory(category)}
-                onCreateRule={(input) => void handleCreateRule(input)}
-                onUpdateRule={(id, input) => void handleUpdateRule(id, input)}
-                onDeleteRule={(rule) => void handleDeleteRule(rule)}
-              />
-            ) : null}
-          </div>
-        </section>
-      )}
+          {view === "episodes" && selectedAnime ? (
+            <EpisodeScreen
+              anime={selectedAnime}
+              episodes={episodes}
+              categories={library.categories}
+              onBack={() => setView("anime")}
+              onPlay={openEpisode}
+              onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
+            />
+          ) : null}
+
+          {view === "settings" ? (
+            <SettingsScreen
+              library={library}
+              busy={busy}
+              rootInput={rootInput}
+              newCategoryName={newCategoryName}
+              onBack={() => setView("categories")}
+              onRootInput={setRootInput}
+              onPickFolder={() => void handlePickFolder()}
+              onAddRoot={() => void handleAddRoot(rootInput)}
+              onRemoveRoot={(root) => void handleRemoveRoot(root)}
+              onRescan={() => void handleRescan()}
+              onNewCategoryName={setNewCategoryName}
+              onCreateCategory={() => void handleCreateCategory()}
+              onDeleteCategory={(category) => void handleDeleteCategory(category)}
+              onSetDefaultCategory={(category) => void handleSetDefaultCategory(category)}
+              onCreateRule={(input) => void handleCreateRule(input)}
+              onUpdateRule={(id, input) => void handleUpdateRule(id, input)}
+              onDeleteRule={(rule) => void handleDeleteRule(rule)}
+            />
+          ) : null}
+        </div>
+      </section>
 
       {videoOpening ? <div className="video-open-overlay" /> : null}
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
@@ -547,8 +555,35 @@ function EpisodeScreen(props: {
       .filter((episode) => episode.last_watched_at)
       .sort((a, b) => String(b.last_watched_at).localeCompare(String(a.last_watched_at)))[0]?.id;
   }, [episodes]);
+  const [episodeThumbnails, setEpisodeThumbnails] = useState<Record<number, string>>({});
   const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEpisodeThumbnails({});
+
+    void Promise.all(
+      episodes.map(async (episode) => {
+        try {
+          const thumbnail = await getFileThumbnail(episode.path, 184);
+          return thumbnail ? ([episode.id, thumbnail] as const) : null;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+
+      setEpisodeThumbnails(
+        Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [episodes]);
 
   return (
     <>
@@ -574,6 +609,7 @@ function EpisodeScreen(props: {
       <section className="episode-list">
         {episodes.map((episode) => {
           const percent = progressPercent(episode.position_seconds, episode.duration_seconds);
+          const thumbnail = episodeThumbnails[episode.id];
           return (
             <button
               type="button"
@@ -582,7 +618,9 @@ function EpisodeScreen(props: {
               onClick={() => onPlay(episode)}
               title={episode.path}
             >
-              <div className="episode-thumb">{episode.file_type.toUpperCase()}</div>
+              <div className={`episode-thumb${thumbnail ? " episode-thumb--image" : ""}`}>
+                {thumbnail ? <img src={thumbnail} alt="" loading="lazy" /> : episode.file_type.toUpperCase()}
+              </div>
               <div className="episode-main">
                 <div className="episode-title">
                   <span>{formatEpisodeNumber(episode.episode_number)}</span>
