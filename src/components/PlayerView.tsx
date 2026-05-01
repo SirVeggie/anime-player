@@ -452,6 +452,13 @@ export function PlayerView(props: {
         onMouseDown={onCanvasMouseDown}
         onContextMenu={onCanvasContextMenu}
       />
+      <div
+        className={
+          videoCompositorRevealed
+            ? "player-load-fade player-load-fade--hidden"
+            : "player-load-fade"
+        }
+      />
       <button type="button" className="player-back back-button" onClick={() => void closeVideo()} aria-label="Back">
         <ArrowLeftIcon />
       </button>

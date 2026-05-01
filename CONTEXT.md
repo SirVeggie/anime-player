@@ -40,15 +40,18 @@ runtime prerequisites. See `README.md` for the full setup steps.
   `*_regex_rule` commands, and `save_episode_progress`. The legacy
   `scan_videos` command still exists for compatibility.
 - Page-level status/error banners have been replaced with transient
-  toast notifications rendered by `src/App.tsx`.
+  toast notifications rendered by `src/App.tsx`; toasts slide in from
+  above and dismiss automatically.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
   **`mpv://playback-restart`** (decoder/first-frame restart) does
   **`.player--playback`** make that column transparent so the DComp
   swap-chain shows through—avoiding a desktop flash before the first
-  frame. mpv’s video region is still driven by `video-margin-ratio-left`,
-  not child-window geometry.
+  frame. Opening an episode briefly fades the selection UI into black,
+  then `PlayerView` fades that black cover out after playback restart so
+  the video appears smoothly. mpv’s video region is still driven by
+  `video-margin-ratio-left`, not child-window geometry.
 - Window-resize layout tracking happens **natively** in Rust: the
   Tauri `WindowEvent::Resized` / `ScaleFactorChanged` handler re-issues
   `video-margin-ratio-left` directly on the UI thread on every WM_SIZE.

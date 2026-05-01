@@ -38,6 +38,8 @@ const EMPTY_RULE: RegexRuleInput = {
   priority: 0,
 };
 
+const VIDEO_OPEN_FADE_MS = 180;
+
 function App() {
   const [library, setLibrary] = useState<LibraryState | null>(null);
   const [view, setView] = useState<View>("categories");
@@ -51,6 +53,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [videoOpening, setVideoOpening] = useState(false);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     const id = Date.now() + Math.random();
@@ -268,6 +271,15 @@ function App() {
     setView("anime");
   }, []);
 
+  const openEpisode = useCallback((episode: Episode) => {
+    setVideoOpening(true);
+    window.setTimeout(() => {
+      setSelectedEpisode(episode);
+      setView("player");
+      setVideoOpening(false);
+    }, VIDEO_OPEN_FADE_MS);
+  }, []);
+
   if (loading) {
     return (
       <main className="app app--loading">
@@ -292,7 +304,9 @@ function App() {
   const showPlayer = view === "player" && selectedEpisode;
 
   return (
-    <main className={`app${showPlayer ? " app--player-open" : ""}`}>
+    <main
+      className={`app${showPlayer ? " app--player-open" : ""}${videoOpening ? " app--video-opening" : ""}`}
+    >
       <aside className="sidebar">
         <header className="sidebar-header">
           <h1>Anime Player</h1>
@@ -364,10 +378,7 @@ function App() {
                 episodes={episodes}
                 categories={library.categories}
                 onBack={() => setView("anime")}
-                onPlay={(episode) => {
-                  setSelectedEpisode(episode);
-                  setView("player");
-                }}
+                onPlay={openEpisode}
                 onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
               />
             ) : null}
@@ -397,6 +408,7 @@ function App() {
         </section>
       )}
 
+      {videoOpening ? <div className="video-open-overlay" /> : null}
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </main>
   );

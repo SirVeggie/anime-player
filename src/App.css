@@ -148,6 +148,10 @@ p {
   overflow: auto;
 }
 
+.app--video-opening .content {
+  animation: contentFadeOutForVideo 180ms ease forwards;
+}
+
 .content-inner {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
@@ -701,6 +705,7 @@ button:disabled {
   border-radius: 12px;
   padding: 10px 12px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  animation: toastSlideIn 180ms ease-out both;
 }
 
 .toast--success {
@@ -713,6 +718,15 @@ button:disabled {
   background: rgba(78, 28, 28, 0.96);
   border-color: rgba(255, 107, 107, 0.45);
   color: #ffd4d4;
+}
+
+.video-open-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--app-bg);
+  pointer-events: none;
+  z-index: 90;
+  animation: videoOpenFadeIn 180ms ease forwards;
 }
 
 /* Player compositing: the app grid stays transparent so libmpv's DComp layer can show through. */
@@ -737,6 +751,20 @@ button:disabled {
   cursor: default;
 }
 
+.player-load-fade {
+  position: absolute;
+  inset: 0;
+  background: var(--app-bg);
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+  z-index: 8;
+}
+
+.player-load-fade--hidden {
+  opacity: 0;
+}
+
 .player-back {
   position: absolute;
   top: 12px;
@@ -758,6 +786,7 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+  z-index: 11;
 }
 
 .player-controls {
@@ -945,4 +974,35 @@ button:disabled {
 
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes videoOpenFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes contentFadeOutForVideo {
+  from {
+    opacity: 1;
+    filter: none;
+  }
+  to {
+    opacity: 0;
+    filter: brightness(0.72);
+  }
 }
