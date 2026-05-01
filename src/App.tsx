@@ -48,63 +48,160 @@ function isTextInputTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
-function IconSkipBack() {
+/** Seek bar matching reference `SeekBar.vue` (custom track + thumb, pointer capture). */
+function SeekBar(props: {
+  duration: number;
+  position: number;
+  formatTime: (seconds: number) => string;
+  onSeek: (seconds: number) => void;
+}) {
+  const { duration, position, formatTime, onSeek } = props;
+  const areaRef = useRef<HTMLDivElement>(null);
+  const durationRef = useRef(duration);
+  const onSeekRef = useRef(onSeek);
+  durationRef.current = duration;
+  onSeekRef.current = onSeek;
+
+  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
+  const activePointerId = useRef<number | null>(null);
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
+  const [showHoverTime, setShowHoverTime] = useState(false);
+  const [hoverRatio, setHoverRatio] = useState(0);
+  const [hoverTime, setHoverTime] = useState(0);
+  const dragListenersCleanup = useRef<(() => void) | null>(null);
+
+  const clampRatio = (v: number) => Math.min(1, Math.max(0, v));
+
+  const getRatioFromClientX = (clientX: number) => {
+    const container = areaRef.current;
+    if (!container) return 0;
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return clampRatio((clientX - rect.left) / rect.width);
+  };
+
+  const detachDragListeners = () => {
+    dragListenersCleanup.current?.();
+    dragListenersCleanup.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      detachDragListeners();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = () => {
+      if (!isDraggingRef.current) setShowHoverTime(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const stopDragging = (event?: PointerEvent) => {
+    if (event && areaRef.current?.hasPointerCapture(event.pointerId)) {
+      areaRef.current.releasePointerCapture(event.pointerId);
+    }
+    activePointerId.current = null;
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    setDragRatio(null);
+    detachDragListeners();
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || duration <= 0) return;
+    e.preventDefault();
+    detachDragListeners();
+    activePointerId.current = e.pointerId;
+    isDraggingRef.current = true;
+    setIsDragging(true);
+    areaRef.current?.setPointerCapture(e.pointerId);
+    const ratio = getRatioFromClientX(e.clientX);
+    setDragRatio(ratio);
+    setHoverRatio(ratio);
+    setHoverTime(ratio * durationRef.current);
+    setShowHoverTime(true);
+
+    const onMove = (ev: PointerEvent) => {
+      if (!isDraggingRef.current || ev.pointerId !== activePointerId.current) return;
+      const r = getRatioFromClientX(ev.clientX);
+      setDragRatio(r);
+      setHoverRatio(r);
+      setHoverTime(r * durationRef.current);
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (!isDraggingRef.current || ev.pointerId !== activePointerId.current) return;
+      const r = getRatioFromClientX(ev.clientX);
+      onSeekRef.current(r * durationRef.current);
+      stopDragging(ev);
+      setShowHoverTime(false);
+    };
+    const onCancel = (ev: PointerEvent) => {
+      if (ev.pointerId !== activePointerId.current) return;
+      stopDragging(ev);
+      setShowHoverTime(false);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    dragListenersCleanup.current = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+    };
+  };
+
+  const updateHoverTime = (e: React.MouseEvent) => {
+    if (isDraggingRef.current) return;
+    if (duration <= 0) {
+      setShowHoverTime(false);
+      return;
+    }
+    const ratio = getRatioFromClientX(e.clientX);
+    setHoverRatio(ratio);
+    setHoverTime(ratio * duration);
+    setShowHoverTime(true);
+  };
+
+  const hideHoverTime = () => {
+    if (isDraggingRef.current) return;
+    setShowHoverTime(false);
+  };
+
+  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
+  const displayProgressPercent =
+    isDragging && dragRatio !== null ? dragRatio * 100 : progressPercent;
+
   return (
-    <svg className="control-glyph" viewBox="0 0 24 24" width="22" height="22" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"
+    <div
+      ref={areaRef}
+      className={`progress-area${isDragging ? " is-dragging" : ""}`}
+      role="slider"
+      aria-label="Seek"
+      aria-valuemin={0}
+      aria-valuemax={Math.max(duration, 0)}
+      aria-valuenow={Math.min(position, duration)}
+      onPointerDown={onPointerDown}
+      onMouseMove={updateHoverTime}
+      onMouseLeave={hideHoverTime}
+    >
+      {showHoverTime ? (
+        <div className="time-tooltip" style={{ left: `${hoverRatio * 100}%` }}>
+          {formatTime(hoverTime)}
+        </div>
+      ) : null}
+      <div className="progress-bg">
+        <div className="progress-current" style={{ width: `${displayProgressPercent}%` }} />
+      </div>
+      <div
+        className="scrubber-head"
+        style={{ left: `${displayProgressPercent}%` }}
       />
-    </svg>
-  );
-}
-
-function IconSkipForward() {
-  return (
-    <svg className="control-glyph" viewBox="0 0 24 24" width="22" height="22" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M16 18h2V6h-2v12zM6 18l8.5-6L6 6v12z"
-      />
-    </svg>
-  );
-}
-
-function IconPlay() {
-  return (
-    <svg className="control-glyph" viewBox="0 0 24 24" width="26" height="26" aria-hidden>
-      <path fill="currentColor" d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
-function IconPause() {
-  return (
-    <svg className="control-glyph" viewBox="0 0 24 24" width="26" height="26" aria-hidden>
-      <path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-    </svg>
-  );
-}
-
-function IconFullscreen() {
-  return (
-    <svg className="control-glyph" viewBox="0 0 24 24" width="20" height="20" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"
-      />
-    </svg>
-  );
-}
-
-function IconFullscreenExit() {
-  return (
-    <svg className="control-glyph" viewBox="0 0 24 24" width="20" height="20" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
-      />
-    </svg>
+    </div>
   );
 }
 
@@ -119,7 +216,6 @@ function App() {
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [scrubbing, setScrubbing] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
 
   const mpvReadyRef = useRef(false);
@@ -255,14 +351,9 @@ function App() {
     );
   }, []);
 
-  const onScrubChange = useCallback((value: number) => {
-    setScrubbing(value);
-  }, []);
-
-  const onScrubCommit = useCallback((value: number) => {
-    setScrubbing(null);
-    setPosition(value);
-    void invoke("mpv_seek", { seconds: value }).catch((e) =>
+  const onSeekCommit = useCallback((seconds: number) => {
+    setPosition(seconds);
+    void invoke("mpv_seek", { seconds }).catch((e) =>
       setError(typeof e === "string" ? e : String(e))
     );
   }, []);
@@ -352,7 +443,6 @@ function App() {
     [files, selectedIndex]
   );
 
-  const displayedPosition = scrubbing ?? position;
   const safeDuration = duration > 0 ? duration : 0;
   const canPrev = selectedIndex > 0;
   const canNext = selectedIndex >= 0 && selectedIndex < files.length - 1;
@@ -425,62 +515,82 @@ function App() {
             <div className="now-playing" title={selected.path}>
               {selected.relative_path}
             </div>
-            <div className="controls">
-              <div className="controls-cluster controls-cluster--transport">
-                <button
-                  type="button"
-                  className="control-icon-btn"
-                  disabled={!canPrev}
-                  onClick={() => loadSibling(-1)}
-                  title="Previous"
-                >
-                  <IconSkipBack />
-                </button>
-                <button
-                  type="button"
-                  className="control-icon-btn control-icon-btn--primary"
-                  onClick={onTogglePause}
-                  title={paused ? "Play" : "Pause"}
-                >
-                  {paused ? <IconPlay /> : <IconPause />}
-                </button>
-                <button
-                  type="button"
-                  className="control-icon-btn"
-                  disabled={!canNext}
-                  onClick={() => loadSibling(1)}
-                  title="Next"
-                >
-                  <IconSkipForward />
-                </button>
-              </div>
-              <div className="controls-scrub-wrap">
-                <input
-                  className="scrubber"
-                  type="range"
-                  min={0}
-                  max={Math.max(safeDuration, 0.001)}
-                  step={0.05}
-                  value={Math.min(displayedPosition, safeDuration || displayedPosition)}
-                  aria-label="Seek"
-                  onInput={(e) => onScrubChange(Number(e.currentTarget.value))}
-                  onChange={(e) => onScrubChange(Number(e.currentTarget.value))}
-                  onPointerUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
-                  onPointerCancel={(e) => onScrubCommit(Number(e.currentTarget.value))}
-                  onKeyUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
+            <div className="player-controls ui-surface">
+              <div className="player-controls-content">
+                <SeekBar
+                  duration={safeDuration}
+                  position={Math.min(position, safeDuration || position)}
+                  formatTime={formatTime}
+                  onSeek={onSeekCommit}
                 />
+                <div className="controls-main-viewport">
+                  <div className="controls-main">
+                    <div className="controls-left">
+                      <button
+                        type="button"
+                        className={`icon-button icon-button--player icon-button--lg${canPrev ? "" : " icon-button--disabled"}`}
+                        disabled={!canPrev}
+                        onClick={() => loadSibling(-1)}
+                        title="Previous"
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                          <path d="M6 18V6h2v12H6zm3.5-6 8.5 6V6l-8.5 6z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button icon-button--player icon-button--lg"
+                        onClick={onTogglePause}
+                        title={paused ? "Play" : "Pause"}
+                      >
+                        {paused ? (
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <path d="M14,19H18V5H14M6,19H10V5H6V19Z" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className={`icon-button icon-button--player icon-button--lg${canNext ? "" : " icon-button--disabled"}`}
+                        disabled={!canNext}
+                        onClick={() => loadSibling(1)}
+                        title="Next"
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                          <path d="M16 6v12h2V6h-2zm-1.5 6L6 18V6l8.5 6z" />
+                        </svg>
+                      </button>
+                      <div className="time-display">
+                        <span>{formatTime(Math.min(position, safeDuration || position))}</span>
+                        <span className="separator">/</span>
+                        <span>{formatTime(safeDuration)}</span>
+                      </div>
+                    </div>
+                    <div className="controls-right">
+                      <button
+                        type="button"
+                        className="icon-button icon-button--player icon-button--lg"
+                        onClick={() => void toggleFullscreen()}
+                        title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                      >
+                        {fullscreen ? (
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <span className="time">
-                {formatTime(displayedPosition)} / {formatTime(safeDuration)}
-              </span>
-              <button
-                type="button"
-                className="control-icon-btn"
-                onClick={() => void toggleFullscreen()}
-                title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-              >
-                {fullscreen ? <IconFullscreenExit /> : <IconFullscreen />}
-              </button>
             </div>
           </>
         ) : (

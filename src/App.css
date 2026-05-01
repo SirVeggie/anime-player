@@ -1,18 +1,20 @@
-:root {
-  --bg: #0e0f13;
-  --bg-elev: #161821;
-  --bg-elev-2: #1d2030;
-  --border: #262a3a;
-  --text: #e7e9f3;
-  --muted: #8a8fa3;
-  --accent: #7c5cff;
-  --accent-soft: #2a2348;
+/* Theme tokens aligned with reference (Soia): dark shell, blue progress accent. */
+:root,
+:root[data-theme="dark"] {
+  --app-bg: #0f0f0f;
+  --ui-bg: rgba(15, 15, 15, 0.96);
+  --ui-elev: rgba(255, 255, 255, 0.04);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-input: rgba(255, 255, 255, 0.18);
+  --text-color: #f6f6f6;
+  --text-muted: rgba(255, 255, 255, 0.55);
+  --focus-color: #8ab7ff;
+  --progress-color: #58a6ff;
   --danger: #ff6b6b;
-  --controls-bg-top: rgba(14, 15, 19, 0);
-  --controls-bg-bottom: rgba(14, 15, 19, 0.92);
-  --control-btn-bg: rgba(30, 33, 48, 0.85);
-  --control-btn-border: rgba(255, 255, 255, 0.08);
-  --control-btn-hover: rgba(124, 92, 255, 0.25);
+  --controls-row-height: 35px;
+  --seekbar-height: 16px;
+  --player-controls-pad-x: 12px;
+  --player-controls-pad-bottom: 8px;
 }
 
 * {
@@ -25,14 +27,9 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  /* The Tauri window is set to transparent: true so libmpv's DirectComposition
-     swap-chain (under the same HWND) composes through to the user. Anywhere
-     you see the bg color below, paint *only* in the sidebar / chrome — leave
-     the player pane CSS-transparent so the video shows through. */
   background: transparent;
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  color: var(--text-color);
+  font-family: Roboto, Arial, sans-serif;
   font-size: 14px;
 }
 
@@ -42,40 +39,47 @@ body,
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background: transparent;
+  background: var(--app-bg);
 }
 
+/* ——— Sidebar (reference panel-like dark UI) ——— */
 .sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--bg);
-  border-right: 1px solid var(--border);
+  background: var(--ui-bg);
+  border-right: 1px solid var(--border-subtle);
   min-width: 0;
+  box-shadow: 12px 0 28px rgba(0, 0, 0, 0.35);
 }
 
 .sidebar-header {
-  padding: 16px 16px 8px;
-  background: var(--bg-elev);
+  padding: 16px 16px 10px;
+  background: var(--ui-elev);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .sidebar-header h1 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-color);
 }
 
 .muted {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
-  margin: 4px 0 0;
+  margin: 6px 0 0;
+  line-height: 1.35;
 }
 
 .folder-row {
   display: flex;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--bg-elev);
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--ui-elev);
+  border-bottom: 1px solid var(--border-subtle);
+  align-items: stretch;
 }
 
 .folder-row input {
@@ -84,60 +88,87 @@ body,
 }
 
 .filter {
-  margin: 4px 16px 8px;
+  margin: 10px 16px 8px;
 }
 
 input[type="text"] {
-  background: var(--bg-elev-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  border: 1px solid var(--border-input);
+  border-radius: 10px;
   padding: 8px 10px;
+  font-size: 13px;
   outline: none;
   transition: border-color 0.15s ease;
 }
 
 input[type="text"]:focus {
-  border-color: var(--accent);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
+input[type="text"]::placeholder {
+  color: var(--text-muted);
+}
+
+/* Primary = reference progress blue; secondary = panel action */
 button {
-  background: var(--accent);
-  color: white;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 8px 12px;
-  cursor: pointer;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 500;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
 }
 
-button:hover:not(:disabled) {
-  background: #6c4dff;
+button[type="submit"] {
+  background: var(--progress-color);
+  color: #fff;
+  border: 1px solid transparent;
 }
 
-button:disabled {
-  opacity: 0.6;
+button[type="submit"]:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button[type="submit"]:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 button[type="button"] {
-  background: var(--bg-elev-2);
-  color: var(--text);
-  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-color);
+  border: 1px solid var(--border-input);
 }
 
 button[type="button"]:hover {
-  background: #252a3d;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.player-controls button.icon-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.player-controls button.icon-button:hover:not(:disabled) {
+  background: transparent;
+  border: none;
 }
 
 .error {
   margin: 0 16px 8px;
   padding: 8px 10px;
-  background: rgba(255, 107, 107, 0.1);
-  border: 1px solid rgba(255, 107, 107, 0.4);
-  color: var(--danger);
-  border-radius: 6px;
+  background: rgba(255, 107, 107, 0.12);
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  color: #ffb4b4;
+  border-radius: 10px;
   font-size: 12px;
   word-break: break-word;
 }
@@ -145,7 +176,7 @@ button[type="button"]:hover {
 .file-list {
   list-style: none;
   margin: 0;
-  padding: 0 8px 16px;
+  padding: 8px 10px 16px;
   overflow-y: auto;
   flex: 1;
 }
@@ -155,20 +186,23 @@ button[type="button"]:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 9px 12px;
+  border-radius: 10px;
   cursor: pointer;
   user-select: none;
-  color: var(--text);
+  color: var(--text-color);
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease;
 }
 
 .file-list li:hover {
-  background: var(--bg-elev-2);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .file-list li.active {
-  background: var(--accent-soft);
-  color: white;
+  background: rgba(88, 166, 255, 0.16);
+  border-color: rgba(88, 166, 255, 0.45);
+  color: #fff;
 }
 
 .file-name {
@@ -182,21 +216,19 @@ button[type="button"]:hover {
 
 .file-size {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .file-list li.active .file-size {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.72);
 }
 
+/* ——— Player ——— */
 .player {
   position: relative;
   display: flex;
   flex-direction: column;
-  /* Critical: leave this pane fully transparent so the libmpv DComp swap-chain
-     under the Tauri HWND shows through. Any non-transparent paint here would
-     occlude the video. */
   background: transparent;
   min-width: 0;
 }
@@ -214,179 +246,222 @@ button[type="button"]:hover {
   top: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(to bottom, rgba(14, 15, 19, 0.75), var(--controls-bg-top));
-  padding: 10px 14px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.65), transparent);
+  padding: 10px var(--player-controls-pad-x);
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
 }
 
-.controls {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 16px 14px;
-  background: linear-gradient(to top, var(--controls-bg-bottom), var(--controls-bg-top));
-  color: var(--text);
+/* ——— Player controls (reference PlayerControls.vue) ——— */
+.player-controls {
+  position: relative;
   flex-shrink: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  padding: 0 var(--player-controls-pad-x) var(--player-controls-pad-bottom);
+  z-index: 10;
 }
 
-.controls-cluster {
+.player-controls-content {
+  color: #fff;
+}
+
+.progress-area {
+  height: var(--seekbar-height);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  touch-action: none;
+}
+
+.progress-bg {
+  height: 3px;
+  width: 100%;
+  background: rgba(58, 58, 58, 0.92);
+  position: relative;
+  overflow: hidden;
+  transition: height 0.1s;
+}
+
+.progress-area:hover .progress-bg,
+.progress-area.is-dragging .progress-bg {
+  height: 5px;
+}
+
+.progress-current {
+  height: 100%;
+  background: var(--progress-color);
+  position: relative;
+  z-index: 2;
+}
+
+.scrubber-head {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  width: 8px;
+  height: 8px;
+  background: var(--progress-color);
+  border: 1px solid rgba(236, 243, 255, 0.95);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(10, 22, 40, 0.2);
+  opacity: 0;
+  transition:
+    transform 0.1s,
+    opacity 0.1s;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.progress-area:hover .scrubber-head,
+.progress-area.is-dragging .scrubber-head {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.progress-area.is-dragging .scrubber-head {
+  transform: translate(-50%, -50%) scale(1.35);
+}
+
+.time-tooltip {
+  position: absolute;
+  bottom: 12px;
+  transform: translateX(-50%);
+  background: rgba(28, 28, 28, 0.85);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls-main-viewport {
+  width: 100%;
+}
+
+.controls-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: var(--controls-row-height);
+  min-width: 0;
+}
+
+.controls-left,
+.controls-right {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.controls-cluster--transport {
   flex-shrink: 0;
 }
 
-.controls button.control-icon-btn {
-  display: inline-flex;
+/* Reference icon-button / icon-button--player / icon-button--lg */
+.icon-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  min-width: 42px;
+  color: inherit;
   padding: 0;
-  border-radius: 10px;
-  background: var(--control-btn-bg);
-  border: 1px solid var(--control-btn-border);
-  color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  font-family: inherit;
 }
 
-.controls button.control-icon-btn:hover:not(:disabled) {
-  background: var(--control-btn-hover);
-  border-color: rgba(124, 92, 255, 0.45);
-  color: white;
+.icon-button svg {
+  width: 20px;
+  height: 20px;
 }
 
-.controls button.control-icon-btn:disabled {
-  opacity: 0.35;
+.icon-button--player {
+  width: 32px;
+  height: 32px;
+  padding: 1px;
+  border-radius: 6px;
+  color: #fff;
+}
+
+.icon-button--player:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+.icon-button--lg,
+.icon-button--lg svg {
+  width: 32px;
+  height: 32px;
+}
+
+.icon-button--disabled {
+  color: rgba(255, 255, 255, 0.55);
   cursor: not-allowed;
 }
 
-.controls button.control-icon-btn--primary {
-  width: 48px;
-  height: 48px;
-  min-width: 48px;
-  border-radius: 50%;
-  background: rgba(124, 92, 255, 0.35);
-  border-color: rgba(124, 92, 255, 0.55);
+.icon-button--disabled svg {
+  opacity: 0.7;
 }
 
-.controls button.control-icon-btn--primary:hover:not(:disabled) {
-  background: rgba(124, 92, 255, 0.5);
-  border-color: var(--accent);
-}
-
-.control-glyph {
-  display: block;
-  flex-shrink: 0;
-}
-
-.controls-scrub-wrap {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  padding: 0 4px;
-}
-
-.scrubber {
-  width: 100%;
-  height: 6px;
-  cursor: pointer;
-  accent-color: var(--accent);
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-}
-
-.scrubber:focus {
-  outline: none;
-}
-
-.scrubber:focus-visible {
-  outline: 2px solid rgba(124, 92, 255, 0.55);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
-.scrubber::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.scrubber::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-}
-
-.scrubber::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.scrubber::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-}
-
-.time {
+.time-display {
+  color: #fff;
+  font-size: 13px;
+  margin-left: 8px;
+  user-select: none;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.88);
-  min-width: 100px;
-  text-align: right;
-  flex-shrink: 0;
+  font-feature-settings: "tnum";
+}
+
+.time-display .separator {
+  margin: 0 4px;
 }
 
 .empty {
   margin: auto;
   text-align: center;
-  padding: 24px;
-  background: var(--bg);
+  padding: 28px 24px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  max-width: 360px;
 }
 
 .empty h2 {
-  margin: 0 0 6px;
-  font-weight: 600;
-  font-size: 18px;
+  margin: 0 0 8px;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.02em;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
+.empty .muted {
+  margin: 0;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--border);
+/* Scrollbars (reference player.css) */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
   border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.24);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #303550;
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.4);
 }
 
-::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
 }

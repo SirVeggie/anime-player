@@ -19,6 +19,11 @@ runtime prerequisites. See `README.md` for the full setup steps.
 
 ### Frontend — `src/App.tsx`, `src/App.css`
 
+- Visual design follows the local reference project
+  (`reference/working-tauri-mpv-example-project` → Soia): `data-theme="dark"`,
+  Roboto, near-black shell (`#0f0f0f`), blue seek accent (`#58a6ff`), and a
+  bottom player chrome that matches Soia’s gradient + custom seek bar +
+  transparent icon transport buttons.
 - Two-pane layout: 360px sidebar (folder input, file list, filter) +
   main player pane.
 - Sidebar talks to Rust via `invoke("scan_videos", { folder })`.
