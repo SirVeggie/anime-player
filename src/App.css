@@ -20,10 +20,7 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  /* Transparent so DWM/DComp can alpha-blend the WebView2 surface against
-     the mpv WS_CHILD sibling beneath it. The visible chrome (sidebar,
-     now-playing strip, empty state) supplies its own opaque background. */
-  background: transparent;
+  background: var(--bg);
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -184,9 +181,7 @@ button[type="button"]:hover {
 .player {
   display: flex;
   flex-direction: column;
-  /* Transparent so the mpv WS_CHILD sibling shows through DComp. Empty
-     state and now-playing strip below carry their own backgrounds. */
-  background: transparent;
+  background: black;
   min-width: 0;
 }
 
@@ -194,9 +189,9 @@ button[type="button"]:hover {
   flex: 1;
   width: 100%;
   height: 100%;
-  /* MUST stay transparent: any opaque pixel here makes WebView2's DComp
-     surface paint over mpv. */
-  background: transparent;
+  background: black;
+  /* mpv renders into a native child HWND positioned over this div.
+     Keep it empty so layout reflects the desired player rect. */
 }
 
 .now-playing {
@@ -211,17 +206,9 @@ button[type="button"]:hover {
 }
 
 .empty {
-  /* Fills the player pane and supplies its own opaque background so we
-     don't see through the transparent main window when no file is
-     selected. */
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  margin: auto;
   text-align: center;
   padding: 24px;
-  background: var(--bg);
 }
 
 .empty h2 {
