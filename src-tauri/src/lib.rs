@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{Manager, State, Window};
+use tauri::{State, Window};
 use walkdir::WalkDir;
 
 #[cfg(windows)]
@@ -189,27 +189,8 @@ pub fn run() {
     #[cfg(windows)]
     let builder = builder
         .setup(|app| {
+            use tauri::Manager;
             app.manage(AppState::default());
-
-            // Re-position the mpv popup whenever the main window is moved
-            // or resized. The CSS rect from the WebView is cached in Rust;
-            // we just re-project it into screen coordinates.
-            if let Some(window) = app.get_webview_window("main") {
-                let app_handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    use tauri::WindowEvent;
-                    if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_)) {
-                        let state = app_handle.state::<AppState>();
-                        let guard = state.mpv.lock();
-                        if let Ok(guard) = guard {
-                            if let Some(m) = guard.as_ref() {
-                                m.refresh_position();
-                            }
-                        }
-                    }
-                });
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

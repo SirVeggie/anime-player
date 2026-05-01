@@ -1,49 +1,40 @@
 //! Embedded mpv backend.
 //!
-//! mpv is hosted inside an **owned top-level popup window** that sits above
-//! the Tauri main window in the desktop z-order. We use a popup (rather than
-//! a `WS_CHILD` window inside the Tauri HWND) because WebView2 renders via
-//! DirectComposition: a composited surface always paints on top of regular
-//! GDI child windows in the same parent regardless of Win32 z-order. The
-//! popup is "owned" by the main window so it follows minimize/restore and
-//! gets destroyed when the owner closes.
+//! mpv is hosted in a `WS_CHILD` window of the Tauri main HWND, z-ordered
+//! beneath the WebView2 child HWND. The Tauri window is configured with
+//! `transparent: true`, which puts the whole top-level into DWM/DComp
+//! compositing mode. WebView2's DComp surface then alpha-blends against
+//! its sibling children, so a transparent CSS region in the player pane
+//! reveals the mpv child window underneath.
 //!
-//! mpv runs as a child process (`mpv.exe --wid=<popup_hwnd>`) and we drive
-//! it over its JSON IPC named pipe.
+//! An earlier attempt used `WS_CHILD` against an opaque top-level window;
+//! that produced a black video pane because, in non-compositing mode,
+//! WebView2's DComp surface always paints over GDI siblings regardless of
+//! z-order. Transparency is the missing ingredient.
+//!
+//! mpv runs as a child process (`mpv.exe --wid=<hwnd>`) and we drive it
+//! over its JSON IPC named pipe.
 
 use std::ffi::OsStr;
 use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::process::{Child, Command};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use windows_sys::Win32::Foundation::{HWND, POINT};
-use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, SetWindowPos, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOZORDER,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, SetWindowPos, HWND_BOTTOM, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 
 const PIPE_NAME: &str = r"\\.\pipe\anime-player-mpv";
 
 pub const MPV_NOT_FOUND_MSG: &str = "mpv was not found on your PATH. Install mpv from https://mpv.io (or via 'scoop install mpv' / 'choco install mpv') and restart the app.";
 
-/// A rect in physical pixels relative to the parent window's client area.
-#[derive(Clone, Copy, Debug)]
-struct ClientRect {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-
 pub struct Mpv {
-    parent_hwnd: HWND,
-    popup_hwnd: HWND,
+    hwnd: HWND,
     process: Child,
-    last_rect: Mutex<Option<ClientRect>>,
 }
 
 // HWND is a raw pointer; the Win32 handle is safe to send/share between
@@ -55,14 +46,6 @@ fn to_wstr(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
 }
 
-fn client_to_screen(parent: HWND, x: i32, y: i32) -> (i32, i32) {
-    let mut pt = POINT { x, y };
-    unsafe {
-        ClientToScreen(parent, &mut pt);
-    }
-    (pt.x, pt.y)
-}
-
 impl Mpv {
     pub fn new(parent: HWND, x: i32, y: i32, w: i32, h: i32) -> Result<Self, String> {
         let mpv_path = which::which("mpv").map_err(|_| MPV_NOT_FOUND_MSG.to_string())?;
@@ -70,21 +53,17 @@ impl Mpv {
         let class = to_wstr("STATIC");
         let title = to_wstr("");
 
-        let (sx, sy) = client_to_screen(parent, x, y);
-
-        // Owned top-level popup. `parent` here is treated as the OWNER (not a
-        // parent in the WS_CHILD sense) because `WS_CHILD` is not in the style.
-        // `WS_EX_TOOLWINDOW` keeps it out of the Alt+Tab / taskbar lists,
-        // `WS_EX_NOACTIVATE` prevents stealing focus on click (mpv still
-        // receives mouse/keyboard events fine).
-        let popup_hwnd = unsafe {
+        // WS_CHILD with the Tauri main HWND as the actual parent. Coordinates
+        // are in the parent's client area. WS_CLIPSIBLINGS so the mpv window
+        // does not paint over the WebView2 sibling above it in z-order.
+        let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                0,
                 class.as_ptr(),
                 title.as_ptr(),
-                WS_POPUP | WS_VISIBLE,
-                sx,
-                sy,
+                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+                x,
+                y,
                 w.max(1),
                 h.max(1),
                 parent,
@@ -94,12 +73,25 @@ impl Mpv {
             )
         };
 
-        if popup_hwnd.is_null() {
+        if hwnd.is_null() {
             return Err("Failed to create mpv host window".to_string());
         }
 
+        // Push behind WebView2 so its DComp surface composites on top of us.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+
         let process = Command::new(&mpv_path)
-            .arg(format!("--wid={}", popup_hwnd as isize))
+            .arg(format!("--wid={}", hwnd as isize))
             .arg("--idle=yes")
             .arg("--force-window=yes")
             .arg("--no-terminal")
@@ -125,12 +117,7 @@ impl Mpv {
             std::thread::sleep(Duration::from_millis(50));
         }
 
-        Ok(Self {
-            parent_hwnd: parent,
-            popup_hwnd,
-            process,
-            last_rect: Mutex::new(Some(ClientRect { x, y, w, h })),
-        })
+        Ok(Self { hwnd, process })
     }
 
     fn send(&self, value: serde_json::Value) -> Result<(), String> {
@@ -158,33 +145,17 @@ impl Mpv {
     }
 
     pub fn set_rect(&self, x: i32, y: i32, w: i32, h: i32) {
-        if let Ok(mut guard) = self.last_rect.lock() {
-            *guard = Some(ClientRect { x, y, w, h });
-        }
-        self.update_screen_position();
-    }
-
-    /// Re-apply the cached rect after the parent window has been moved or
-    /// resized. The CSS rect inside the WebView didn't change, but its
-    /// projection into screen coordinates did.
-    pub fn refresh_position(&self) {
-        self.update_screen_position();
-    }
-
-    fn update_screen_position(&self) {
-        let rect = match self.last_rect.lock().ok().and_then(|g| *g) {
-            Some(r) => r,
-            None => return,
-        };
-        let (sx, sy) = client_to_screen(self.parent_hwnd, rect.x, rect.y);
+        // Coordinates are in the parent's client area (physical pixels).
+        // Children follow the parent on move/resize automatically, so we
+        // only need to react to layout changes inside the page.
         unsafe {
             SetWindowPos(
-                self.popup_hwnd,
+                self.hwnd,
                 std::ptr::null_mut(),
-                sx,
-                sy,
-                rect.w.max(1),
-                rect.h.max(1),
+                x,
+                y,
+                w.max(1),
+                h.max(1),
                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
             );
         }
