@@ -23,7 +23,10 @@ runtime prerequisites. See `README.md` for the full setup steps.
   (`reference/working-tauri-mpv-example-project` → Soia): `data-theme="dark"`,
   Roboto, near-black shell (`#0f0f0f`), blue seek accent (`#58a6ff`), and a
   bottom player chrome that matches Soia’s gradient + custom seek bar +
-  transparent icon transport buttons.
+  transparent icon transport buttons. The sidebar and **idle / pending**
+  player pane share **`--ui-bg`** with **`backdrop-filter` blur** so the
+  desktop shows through slightly frosted; during **`.player--playback`** blur
+  is disabled so mpv stays sharp.
 - Two-pane layout: 360px sidebar (folder input, file list, filter) +
   main player pane.
 - Sidebar talks to Rust via `invoke("scan_videos", { folder })`.

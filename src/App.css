@@ -15,6 +15,8 @@
   --seekbar-height: 16px;
   --player-controls-pad-x: 12px;
   --player-controls-pad-bottom: 8px;
+  /* Frosted glass behind semi-transparent shell (sidebar + idle player). */
+  --shell-backdrop-blur: 14px;
 }
 
 * {
@@ -49,6 +51,8 @@ body,
   display: flex;
   flex-direction: column;
   background: var(--ui-bg);
+  -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
+  backdrop-filter: blur(var(--shell-backdrop-blur));
   border-right: 1px solid var(--border-subtle);
   min-width: 0;
   box-shadow: 12px 0 28px rgba(0, 0, 0, 0.35);
@@ -231,20 +235,26 @@ button[type="button"]:hover {
   position: relative;
   display: flex;
   flex-direction: column;
-  /* Opaque when idle so the transparent Tauri window does not reveal the
-     desktop in the player column (no video loaded). */
-  background: var(--app-bg);
+  /* Match sidebar: same translucent tint + blur so the desktop shows through
+     softly when no video (or while a file is opening). */
+  background: var(--ui-bg);
+  -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
+  backdrop-filter: blur(var(--shell-backdrop-blur));
   min-width: 0;
 }
 
-/* File selected but mpv has not reached PLAYBACK_RESTART yet — keep opaque
-   so the HWND does not flash the desktop before the first frame. */
+/* Reinforce glass while waiting for first frame (same shell as idle). */
 .player--playback-pending {
-  background: var(--app-bg);
+  background: var(--ui-bg);
+  -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
+  backdrop-filter: blur(var(--shell-backdrop-blur));
 }
 
+/* Video compositing: no tint or blur — mpv pixels must stay sharp. */
 .player--playback {
   background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .player-canvas {
