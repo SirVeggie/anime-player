@@ -504,7 +504,7 @@ function App() {
         </ul>
       </aside>
 
-      <section className="player">
+      <section className={selected ? "player player--playback" : "player"}>
         {selected ? (
           <>
             <div

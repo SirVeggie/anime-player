@@ -39,7 +39,9 @@ body,
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background: var(--app-bg);
+  /* Must stay transparent so libmpv’s DComp layer in the right pane can show
+     through the WebView when `.player--playback` is active. */
+  background: transparent;
 }
 
 /* ——— Sidebar (reference panel-like dark UI) ——— */
@@ -229,8 +231,14 @@ button[type="button"]:hover {
   position: relative;
   display: flex;
   flex-direction: column;
-  background: transparent;
+  /* Opaque when idle so the transparent Tauri window does not reveal the
+     desktop in the player column (no video loaded). */
+  background: var(--app-bg);
   min-width: 0;
+}
+
+.player--playback {
+  background: transparent;
 }
 
 .player-canvas {

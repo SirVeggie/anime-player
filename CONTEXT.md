@@ -27,11 +27,13 @@ runtime prerequisites. See `README.md` for the full setup steps.
 - Two-pane layout: 360px sidebar (folder input, file list, filter) +
   main player pane.
 - Sidebar talks to Rust via `invoke("scan_videos", { folder })`.
-- The player pane is fully **CSS-transparent** so the libmpv
-  DirectComposition swap-chain (rendered under the same Tauri HWND)
-  composes through. There is no host `<div>` rect tracking anymore —
-  mpv's video region is controlled via the `video-margin-ratio-left`
-  option, not by positioning a child window.
+- The main grid (`.app`) stays **CSS-transparent** for compositing. The
+  player column uses **`var(--app-bg)`** when no file is selected so the
+  transparent Tauri window does not show the desktop behind an empty
+  player; once a file is selected, **`.player--playback`** switches that
+  column to transparent so the libmpv DirectComposition swap-chain
+  (same Tauri HWND) shows through. mpv’s video region is still driven by
+  `video-margin-ratio-left`, not child-window geometry.
 - Window-resize layout tracking happens **natively** in Rust: the
   Tauri `WindowEvent::Resized` / `ScaleFactorChanged` handler re-issues
   `video-margin-ratio-left` directly on the UI thread on every WM_SIZE.
