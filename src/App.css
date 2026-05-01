@@ -51,11 +51,16 @@ body,
 }
 
 .sidebar,
-.content,
-.player--playback-pending {
+.content {
   background: var(--ui-bg);
   -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
   backdrop-filter: blur(var(--shell-backdrop-blur));
+}
+
+.player--playback-pending {
+  background: var(--app-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .sidebar {

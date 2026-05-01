@@ -245,13 +245,6 @@ export function PlayerView(props: {
   }, [episode.path, episode.position_seconds, episode.watched, onError]);
 
   useEffect(() => {
-    if (videoCompositorRevealed) return;
-    if (duration > 0 && !paused && position > 0.015) {
-      setVideoCompositorRevealed(true);
-    }
-  }, [duration, paused, position, videoCompositorRevealed]);
-
-  useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
 

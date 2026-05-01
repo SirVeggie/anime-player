@@ -47,9 +47,8 @@ runtime prerequisites. See `README.md` for the full setup steps.
   **`mpv://playback-restart`** (decoder/first-frame restart) does
   **`.player--playback`** make that column transparent so the DComp
   swap-chain shows through—avoiding a desktop flash before the first
-  frame. A property fallback also reveals if playback is unpaused with
-  `time-pos` advancing. mpv’s video region is still driven by
-  `video-margin-ratio-left`, not child-window geometry.
+  frame. mpv’s video region is still driven by `video-margin-ratio-left`,
+  not child-window geometry.
 - Window-resize layout tracking happens **natively** in Rust: the
   Tauri `WindowEvent::Resized` / `ScaleFactorChanged` handler re-issues
   `video-margin-ratio-left` directly on the UI thread on every WM_SIZE.
