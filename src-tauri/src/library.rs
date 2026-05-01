@@ -1,7 +1,8 @@
 use std::path::Path;
 
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::db::AppDatabase;
@@ -81,6 +82,15 @@ pub struct ScanSummary {
     roots_scanned: i64,
     episodes_imported: i64,
     unmatched_files: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegexRuleInput {
+    name: String,
+    detection_regex: String,
+    title_regex: String,
+    enabled: bool,
+    priority: i64,
 }
 
 #[tauri::command]
@@ -213,6 +223,100 @@ pub fn delete_category(db: State<'_, AppDatabase>, id: i64) -> Result<(), String
         )
         .map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM categories WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn set_default_category(db: State<'_, AppDatabase>, id: i64) -> Result<Category, String> {
+    db.with_conn(|conn| {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let exists: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM categories WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if exists.is_none() {
+            return Err(format!("Category does not exist: {id}"));
+        }
+        tx.execute("UPDATE categories SET is_default = 0", [])
+            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE categories SET is_default = 1 WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        get_category(conn, id)
+    })
+}
+
+#[tauri::command]
+pub fn create_regex_rule(
+    db: State<'_, AppDatabase>,
+    input: RegexRuleInput,
+) -> Result<RegexRule, String> {
+    validate_regex_rule_input(&input)?;
+    db.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO regex_rules
+                (name, detection_regex, title_regex, enabled, priority)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                input.name.trim(),
+                input.detection_regex.trim(),
+                input.title_regex.trim(),
+                if input.enabled { 1 } else { 0 },
+                input.priority
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        get_regex_rule(conn, conn.last_insert_rowid())
+    })
+}
+
+#[tauri::command]
+pub fn update_regex_rule(
+    db: State<'_, AppDatabase>,
+    id: i64,
+    input: RegexRuleInput,
+) -> Result<RegexRule, String> {
+    validate_regex_rule_input(&input)?;
+    db.with_conn(|conn| {
+        let changed = conn
+            .execute(
+                "UPDATE regex_rules
+                 SET name = ?1,
+                     detection_regex = ?2,
+                     title_regex = ?3,
+                     enabled = ?4,
+                     priority = ?5
+                 WHERE id = ?6",
+                params![
+                    input.name.trim(),
+                    input.detection_regex.trim(),
+                    input.title_regex.trim(),
+                    if input.enabled { 1 } else { 0 },
+                    input.priority,
+                    id
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err(format!("Detection rule does not exist: {id}"));
+        }
+        get_regex_rule(conn, id)
+    })
+}
+
+#[tauri::command]
+pub fn delete_regex_rule(db: State<'_, AppDatabase>, id: i64) -> Result<(), String> {
+    db.with_conn(|conn| {
+        conn.execute("DELETE FROM regex_rules WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
     })
@@ -396,6 +500,43 @@ fn list_regex_rules(conn: &Connection) -> Result<Vec<RegexRule>, String> {
         })
         .map_err(|e| e.to_string())?;
     collect_rows(rows)
+}
+
+fn get_regex_rule(conn: &Connection, id: i64) -> Result<RegexRule, String> {
+    conn.query_row(
+        "SELECT id, name, detection_regex, title_regex, enabled, priority
+         FROM regex_rules
+         WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(RegexRule {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                detection_regex: row.get(2)?,
+                title_regex: row.get(3)?,
+                enabled: row.get::<_, i64>(4)? != 0,
+                priority: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn validate_regex_rule_input(input: &RegexRuleInput) -> Result<(), String> {
+    if input.name.trim().is_empty() {
+        return Err("Detection rule name cannot be empty.".to_string());
+    }
+    let detection_regex = input.detection_regex.trim();
+    let title_regex = input.title_regex.trim();
+    if detection_regex.is_empty() || title_regex.is_empty() {
+        return Err("Detection and title regexes are required.".to_string());
+    }
+    Regex::new(detection_regex).map_err(|e| format!("Invalid detection regex: {e}"))?;
+    let title = Regex::new(title_regex).map_err(|e| format!("Invalid title regex: {e}"))?;
+    if title.capture_names().flatten().all(|name| name != "title") {
+        return Err("Title regex must include a named capture group called `title`.".to_string());
+    }
+    Ok(())
 }
 
 fn list_enabled_detection_rules(conn: &Connection) -> Result<Vec<DetectionRule>, String> {
