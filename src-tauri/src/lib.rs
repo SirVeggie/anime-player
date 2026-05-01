@@ -1,95 +1,16 @@
-use std::path::Path;
 use std::sync::Mutex;
 
-use serde::Serialize;
 use tauri::{Manager, State};
-use walkdir::WalkDir;
+
+mod db;
+mod library;
+mod scanner;
 
 #[cfg(windows)]
 mod mpv;
 
 #[cfg(windows)]
 use mpv::MpvHandle;
-
-const VIDEO_EXTENSIONS: &[&str] = &[
-    "mkv", "mp4", "m4v", "mov", "avi", "wmv", "flv", "webm", "ts", "m2ts", "mts", "ogv", "ogm",
-    "vob", "3gp", "rm", "rmvb", "mpg", "mpeg",
-];
-
-#[derive(Debug, Serialize)]
-struct VideoFile {
-    path: String,
-    name: String,
-    /// Path relative to the scanned root, using forward slashes.
-    relative_path: String,
-    size: u64,
-}
-
-fn is_video_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            let lower = ext.to_ascii_lowercase();
-            VIDEO_EXTENSIONS.iter().any(|allowed| *allowed == lower)
-        })
-        .unwrap_or(false)
-}
-
-#[tauri::command]
-fn scan_videos(folder: String) -> Result<Vec<VideoFile>, String> {
-    let root = Path::new(&folder);
-    if !root.exists() {
-        return Err(format!("Folder does not exist: {}", folder));
-    }
-    if !root.is_dir() {
-        return Err(format!("Path is not a directory: {}", folder));
-    }
-
-    let mut results: Vec<VideoFile> = Vec::new();
-
-    for entry in WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
-        let path = entry.path();
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if !is_video_file(path) {
-            continue;
-        }
-
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_string();
-
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-
-        results.push(VideoFile {
-            path: path.to_string_lossy().to_string(),
-            name,
-            relative_path: relative,
-            size,
-        });
-    }
-
-    results.sort_by(|a, b| {
-        a.relative_path
-            .to_lowercase()
-            .cmp(&b.relative_path.to_lowercase())
-    });
-
-    Ok(results)
-}
 
 /// Default sidebar width in CSS pixels. Mirrors `SIDEBAR_PX` in
 /// `src/App.tsx`. Used by the native resize handler before the frontend
@@ -221,11 +142,7 @@ fn mpv_set_layout(
 /// adds an IPC round-trip per frame and noticeably degrades resize
 /// smoothness while a video is playing.
 #[cfg(windows)]
-fn handle_native_resize(
-    app_handle: &tauri::AppHandle,
-    physical_width: u32,
-    scale_factor: f64,
-) {
+fn handle_native_resize(app_handle: &tauri::AppHandle, physical_width: u32, scale_factor: f64) {
     let Some(state) = app_handle.try_state::<AppState>() else {
         return;
     };
@@ -258,58 +175,84 @@ fn mpv_stop(state: State<'_, AppState>) -> Result<(), String> {
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
-
-    #[cfg(windows)]
-    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            app.manage(AppState::default());
+            let db = db::AppDatabase::open_portable()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            app.manage(db);
 
-            // Tear libmpv down before the main window's HWND becomes
-            // invalid, and re-issue the video margin natively on every
-            // resize so the modal resize loop doesn't have to wait on
-            // a JS -> invoke() round-trip per frame.
-            if let Some(window) = app.get_webview_window("main") {
-                let app_handle = app.handle().clone();
-                let window_for_handler = window.clone();
-                window.on_window_event(move |event| match event {
-                    tauri::WindowEvent::CloseRequested { .. } => {
-                        if let Some(state) = app_handle.try_state::<AppState>() {
-                            if let Ok(mut guard) = state.mpv.lock() {
-                                guard.take();
+            #[cfg(windows)]
+            {
+                app.manage(AppState::default());
+
+                // Tear libmpv down before the main window's HWND becomes
+                // invalid, and re-issue the video margin natively on every
+                // resize so the modal resize loop doesn't have to wait on
+                // a JS -> invoke() round-trip per frame.
+                if let Some(window) = app.get_webview_window("main") {
+                    let app_handle = app.handle().clone();
+                    let window_for_handler = window.clone();
+                    window.on_window_event(move |event| match event {
+                        tauri::WindowEvent::CloseRequested { .. } => {
+                            if let Some(state) = app_handle.try_state::<AppState>() {
+                                if let Ok(mut guard) = state.mpv.lock() {
+                                    guard.take();
+                                }
                             }
                         }
-                    }
-                    tauri::WindowEvent::Resized(size) => {
-                        let scale = window_for_handler.scale_factor().unwrap_or(1.0);
-                        handle_native_resize(&app_handle, size.width, scale);
-                    }
-                    tauri::WindowEvent::ScaleFactorChanged {
-                        scale_factor,
-                        new_inner_size,
-                        ..
-                    } => {
-                        handle_native_resize(&app_handle, new_inner_size.width, *scale_factor);
-                    }
-                    _ => {}
-                });
+                        tauri::WindowEvent::Resized(size) => {
+                            let scale = window_for_handler.scale_factor().unwrap_or(1.0);
+                            handle_native_resize(&app_handle, size.width, scale);
+                        }
+                        tauri::WindowEvent::ScaleFactorChanged {
+                            scale_factor,
+                            new_inner_size,
+                            ..
+                        } => {
+                            handle_native_resize(&app_handle, new_inner_size.width, *scale_factor);
+                        }
+                        _ => {}
+                    });
+                }
             }
 
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            scan_videos,
-            mpv_init,
-            mpv_load,
-            mpv_cycle_pause,
-            mpv_seek,
-            mpv_seek_relative,
-            mpv_set_layout,
-            mpv_stop,
-        ]);
+        });
+
+    #[cfg(windows)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        library::scan_videos,
+        library::get_library_state,
+        library::add_root_folder,
+        library::remove_root_folder,
+        library::create_category,
+        library::delete_category,
+        library::move_anime_to_category,
+        library::list_episodes,
+        library::save_episode_progress,
+        library::rescan_library,
+        mpv_init,
+        mpv_load,
+        mpv_cycle_pause,
+        mpv_seek,
+        mpv_seek_relative,
+        mpv_set_layout,
+        mpv_stop,
+    ]);
 
     #[cfg(not(windows))]
-    let builder = builder.invoke_handler(tauri::generate_handler![scan_videos]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        library::scan_videos,
+        library::get_library_state,
+        library::add_root_folder,
+        library::remove_root_folder,
+        library::create_category,
+        library::delete_category,
+        library::move_anime_to_category,
+        library::list_episodes,
+        library::save_episode_progress,
+        library::rescan_library,
+    ]);
 
     builder
         .run(tauri::generate_context!())

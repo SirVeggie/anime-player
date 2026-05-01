@@ -152,7 +152,9 @@ unsafe fn set_option(ctx: *mut c_void, name: &str, value: &str) -> Result<(), St
     let c_value = cstring(value)?;
     let rc = unsafe { mpv_set_option_string(ctx, c_name.as_ptr(), c_value.as_ptr()) };
     if rc < 0 {
-        Err(format!("mpv_set_option_string({name}={value}) failed: {rc}"))
+        Err(format!(
+            "mpv_set_option_string({name}={value}) failed: {rc}"
+        ))
     } else {
         Ok(())
     }
