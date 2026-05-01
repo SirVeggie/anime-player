@@ -13,9 +13,12 @@ import {
 import type { Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime } from "../utils";
 
-const APP_SIDEBAR_PX = 280;
 const PLAYER_SIDEBAR_PX = 0;
 const appWindow = getCurrentWindow();
+
+function sidebarPxForVisibility(visible: boolean) {
+  return visible ? PLAYER_SIDEBAR_PX : window.innerWidth;
+}
 
 function isTextInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -213,6 +216,7 @@ export function PlayerView(props: {
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
   const mpvReadyRef = useRef(false);
+  const loadedPathRef = useRef<string | null>(null);
   const playbackRef = useRef({ episode, position, duration });
   const pendingResumeSecondsRef = useRef<number | null>(null);
   const controlsHideTimerRef = useRef<number | null>(null);
@@ -321,6 +325,7 @@ export function PlayerView(props: {
         void invoke("mpv_stop")
           .catch((err) => onError(errorMessage(err)))
           .finally(() => {
+            loadedPathRef.current = null;
             setPosition(0);
             setDuration(0);
             setPaused(true);
@@ -343,23 +348,26 @@ export function PlayerView(props: {
     let cancelled = false;
     (async () => {
       try {
+        const sidebarPx = sidebarPxForVisibility(visible);
         if (!mpvReadyRef.current) {
           await invoke("mpv_init", {
             windowWidth: window.innerWidth,
-            sidebarPx: visible ? PLAYER_SIDEBAR_PX : APP_SIDEBAR_PX,
+            sidebarPx,
           });
           mpvReadyRef.current = true;
         } else {
           await invoke("mpv_set_layout", {
             windowWidth: window.innerWidth,
-            sidebarPx: visible ? PLAYER_SIDEBAR_PX : APP_SIDEBAR_PX,
+            sidebarPx,
           });
         }
         if (cancelled) return;
+        if (loadedPathRef.current === episode.path) return;
         pendingResumeSecondsRef.current =
           episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
         setPaused(false);
         await invoke("mpv_load", { path: episode.path });
+        loadedPathRef.current = episode.path;
       } catch (e) {
         if (!cancelled) onError(errorMessage(e));
       }
@@ -367,13 +375,13 @@ export function PlayerView(props: {
     return () => {
       cancelled = true;
     };
-  }, [episode.path, episode.position_seconds, episode.watched, onError]);
+  }, [episode.path, onError, visible]);
 
   useEffect(() => {
     if (!mpvReadyRef.current) return;
     void invoke("mpv_set_layout", {
       windowWidth: window.innerWidth,
-      sidebarPx: visible ? PLAYER_SIDEBAR_PX : APP_SIDEBAR_PX,
+      sidebarPx: sidebarPxForVisibility(visible),
     }).catch((err) => onError(errorMessage(err)));
   }, [onError, visible]);
 
@@ -543,6 +551,7 @@ export function PlayerView(props: {
     try {
       await persistProgress();
       await invoke("mpv_stop");
+      loadedPathRef.current = null;
     } catch (e) {
       onError(errorMessage(e));
     } finally {
@@ -555,9 +564,9 @@ export function PlayerView(props: {
 
   const hidePlayer = useCallback(async () => {
     try {
-      await persistProgress();
       await invoke("mpv_set_pause", { paused: true });
       setPaused(true);
+      await persistProgress();
       onBack();
     } catch (e) {
       onError(errorMessage(e));

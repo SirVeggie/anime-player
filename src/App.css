@@ -57,6 +57,14 @@ body,
   display: none;
 }
 
+.app--player-background .sidebar,
+.app--player-background .content,
+.app--player-background .window-titlebar {
+  background: var(--app-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .app--loading {
   display: flex;
   background: var(--ui-bg);

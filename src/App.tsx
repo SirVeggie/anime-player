@@ -307,10 +307,13 @@ function App() {
   }
 
   const showPlayer = view === "player" && selectedEpisode;
+  const playerLoadedInBackground = selectedEpisode && !showPlayer;
 
   return (
     <main
-      className={`app${showPlayer ? " app--player-open" : ""}${videoOpening ? " app--video-opening" : ""}`}
+      className={`app${showPlayer ? " app--player-open" : ""}${
+        playerLoadedInBackground ? " app--player-background" : ""
+      }${videoOpening ? " app--video-opening" : ""}`}
     >
       <WindowTitleBar playerOpen={Boolean(showPlayer)} />
       <aside className="sidebar">
