@@ -27,16 +27,20 @@ runtime prerequisites. See `README.md` for the full setup steps.
   player pane share **`--ui-bg`** with **`backdrop-filter` blur** so the
   desktop shows through slightly frosted; during **`.player--playback`** blur
   is disabled so mpv stays sharp.
-- Two-pane layout: 280px sidebar (library navigation + settings/rescan) +
-  main content pane.
+- Two-pane layout: 280px sidebar (Library, Settings, rescan, stats) +
+  main content pane. Category navigation lives on the library page rather
+  than in the sidebar.
 - The MVP file list has been replaced by a SQLite-backed local library UI:
   category screen, anime grid, episode list, settings, and player view.
   `src/api.ts` contains the Tauri command bindings and `src/types.ts`
   mirrors the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,
   `add_root_folder`, `rescan_library`, `list_episodes`,
-  `move_anime_to_category`, and `save_episode_progress`. The legacy
+  `move_anime_to_category`, `set_default_category`, editable
+  `*_regex_rule` commands, and `save_episode_progress`. The legacy
   `scan_videos` command still exists for compatibility.
+- Page-level status/error banners have been replaced with transient
+  toast notifications rendered by `src/App.tsx`.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
@@ -83,8 +87,10 @@ runtime prerequisites. See `README.md` for the full setup steps.
 - `library.rs` exposes the local-library Tauri commands and keeps the
   legacy `scan_videos(folder)` command. Current commands include:
   `get_library_state`, `add_root_folder`, `remove_root_folder`,
-  `create_category`, `delete_category`, `move_anime_to_category`,
-  `list_episodes`, `save_episode_progress`, and `rescan_library`.
+  `create_category`, `delete_category`, `set_default_category`,
+  `create_regex_rule`, `update_regex_rule`, `delete_regex_rule`,
+  `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
+  and `rescan_library`.
 - `mpv/mod.rs` re-exports `MpvHandle` from the in-process libmpv module.
   All Win32 and FFI code is gated behind `#[cfg(windows)]`.
   - `mpv/ffi.rs` — minimal `extern "C"` declarations for the libmpv

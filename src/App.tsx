@@ -1,21 +1,42 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addRootFolder,
   createCategory,
+  createRegexRule,
   deleteCategory,
+  deleteRegexRule,
   getLibraryState,
   listEpisodes,
   moveAnimeToCategory,
   removeRootFolder,
   rescanLibrary,
+  setDefaultCategory,
+  updateRegexRule,
 } from "./api";
 import { PlayerView } from "./components/PlayerView";
-import type { AnimeSummary, Category, Episode, LibraryState, RootFolder } from "./types";
+import type {
+  AnimeSummary,
+  Category,
+  Episode,
+  LibraryState,
+  RegexRule,
+  RegexRuleInput,
+  RootFolder,
+} from "./types";
 import { errorMessage, formatEpisodeNumber, formatSize, formatTime, progressPercent } from "./utils";
 import "./App.css";
 
 type View = "categories" | "anime" | "episodes" | "settings" | "player";
+type Toast = { id: number; kind: "success" | "error"; message: string };
+
+const EMPTY_RULE: RegexRuleInput = {
+  name: "",
+  detection_regex: "",
+  title_regex: "",
+  enabled: true,
+  priority: 0,
+};
 
 function App() {
   const [library, setLibrary] = useState<LibraryState | null>(null);
@@ -28,24 +49,30 @@ function App() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = useCallback((kind: Toast["kind"], message: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((current) => [...current, { id, kind, message }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, 4200);
+  }, []);
 
   const reloadLibrary = useCallback(async () => {
     const state = await getLibraryState();
     setLibrary(state);
-    if (selectedCategoryId === null && state.categories.length > 0) {
-      setSelectedCategoryId(state.categories[0].id);
-    }
+    setSelectedCategoryId((current) => current ?? state.categories[0]?.id ?? null);
     return state;
-  }, [selectedCategoryId]);
+  }, []);
 
   useEffect(() => {
     void (async () => {
       try {
         await reloadLibrary();
       } catch (e) {
-        setError(errorMessage(e));
+        setFatalError(errorMessage(e));
       } finally {
         setLoading(false);
       }
@@ -63,51 +90,49 @@ function App() {
   }, [library, selectedCategoryId]);
 
   const runAction = useCallback(
-    async (action: () => Promise<void>) => {
+    async (action: () => Promise<string | void>) => {
       setBusy(true);
-      setError(null);
-      setStatus(null);
       try {
-        await action();
+        const message = await action();
+        if (message) showToast("success", message);
       } catch (e) {
-        setError(errorMessage(e));
+        showToast("error", errorMessage(e));
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [showToast],
   );
 
   const openAnime = useCallback(
     async (anime: AnimeSummary) => {
       setSelectedAnime(anime);
-      setError(null);
       try {
         const nextEpisodes = await listEpisodes(anime.id);
         setEpisodes(nextEpisodes);
         setView("episodes");
       } catch (e) {
-        setError(errorMessage(e));
+        showToast("error", errorMessage(e));
       }
     },
-    [],
+    [showToast],
   );
 
   const handleAddRoot = useCallback(
     async (path: string) => {
       const trimmed = path.trim();
       if (!trimmed) {
-        setError("Choose or paste a folder path first.");
+        showToast("error", "Choose or paste a folder path first.");
         return;
       }
       await runAction(async () => {
         await addRootFolder(trimmed);
         setRootInput("");
         await reloadLibrary();
-        setStatus("Root folder added.");
+        return "Root folder added.";
       });
     },
-    [reloadLibrary, runAction],
+    [reloadLibrary, runAction, showToast],
   );
 
   const handlePickFolder = useCallback(async () => {
@@ -123,7 +148,7 @@ function App() {
       await runAction(async () => {
         await removeRootFolder(root.id);
         await reloadLibrary();
-        setStatus("Root folder removed. Existing library entries are preserved until rescanned.");
+        return "Root folder removed. Existing library entries are preserved until rescanned.";
       });
     },
     [reloadLibrary, runAction],
@@ -133,9 +158,7 @@ function App() {
     await runAction(async () => {
       const summary = await rescanLibrary();
       await reloadLibrary();
-      setStatus(
-        `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} imported, ${summary.unmatched_files} unmatched.`,
-      );
+      return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} imported, ${summary.unmatched_files} unmatched.`;
     });
   }, [reloadLibrary, runAction]);
 
@@ -147,7 +170,7 @@ function App() {
       setNewCategoryName("");
       setSelectedCategoryId(category.id);
       await reloadLibrary();
-      setStatus("Category created.");
+      return "Category created.";
     });
   }, [newCategoryName, reloadLibrary, runAction]);
 
@@ -157,7 +180,51 @@ function App() {
         await deleteCategory(category.id);
         const state = await reloadLibrary();
         setSelectedCategoryId(state.categories[0]?.id ?? null);
-        setStatus("Category deleted. Anime were moved to the default category.");
+        return "Category deleted. Anime were moved to the default category.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleSetDefaultCategory = useCallback(
+    async (category: Category) => {
+      await runAction(async () => {
+        await setDefaultCategory(category.id);
+        await reloadLibrary();
+        return `"${category.name}" is now the default category.`;
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleCreateRule = useCallback(
+    async (input: RegexRuleInput) => {
+      await runAction(async () => {
+        await createRegexRule(input);
+        await reloadLibrary();
+        return "Detection rule added.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleUpdateRule = useCallback(
+    async (id: number, input: RegexRuleInput) => {
+      await runAction(async () => {
+        await updateRegexRule(id, input);
+        await reloadLibrary();
+        return "Detection rule updated.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleDeleteRule = useCallback(
+    async (rule: RegexRule) => {
+      await runAction(async () => {
+        await deleteRegexRule(rule.id);
+        await reloadLibrary();
+        return "Detection rule deleted.";
       });
     },
     [reloadLibrary, runAction],
@@ -171,7 +238,7 @@ function App() {
         const state = await reloadLibrary();
         const updated = state.anime.find((anime) => anime.id === selectedAnime.id);
         if (updated) setSelectedAnime(updated);
-        setStatus("Anime moved.");
+        return "Anime moved.";
       });
     },
     [reloadLibrary, runAction, selectedAnime],
@@ -179,10 +246,18 @@ function App() {
 
   const handleProgressSaved = useCallback(
     (saved: Episode) => {
-      setEpisodes((current) => current.map((episode) => (episode.id === saved.id ? saved : episode)));
-      void reloadLibrary().catch((e) => setError(errorMessage(e)));
+      setEpisodes((current) => {
+        const next = current.map((episode) => (episode.id === saved.id ? saved : episode));
+        setSelectedAnime((anime) =>
+          anime && anime.id === saved.anime_id
+            ? { ...anime, unwatched_count: next.filter((episode) => !episode.watched).length }
+            : anime,
+        );
+        return next;
+      });
+      void reloadLibrary().catch((e) => showToast("error", errorMessage(e)));
     },
-    [reloadLibrary],
+    [reloadLibrary, showToast],
   );
 
   const navigateToCategory = useCallback((categoryId: number) => {
@@ -208,7 +283,7 @@ function App() {
       <main className="app app--loading">
         <div className="empty">
           <h2>Library failed to load</h2>
-          {error ? <p className="muted">{error}</p> : null}
+          {fatalError ? <p className="muted">{fatalError}</p> : null}
         </div>
       </main>
     );
@@ -232,19 +307,6 @@ function App() {
           >
             Library
           </button>
-          {library.categories.map((category) => (
-            <button
-              type="button"
-              key={category.id}
-              className={
-                view === "anime" && selectedCategoryId === category.id ? "nav-item active" : "nav-item"
-              }
-              onClick={() => navigateToCategory(category.id)}
-            >
-              <span>{category.name}</span>
-              {category.is_default ? <span className="pill">Default</span> : null}
-            </button>
-          ))}
           <button
             type="button"
             className={view === "settings" ? "nav-item active" : "nav-item"}
@@ -272,14 +334,11 @@ function App() {
           onSelectEpisode={setSelectedEpisode}
           onBack={() => setView("episodes")}
           onProgressSaved={handleProgressSaved}
-          onError={setError}
+          onError={(message) => showToast("error", message)}
         />
       ) : (
         <section className="content">
           <div className="content-inner">
-            {error ? <div className="error">{error}</div> : null}
-            {status ? <div className="status">{status}</div> : null}
-
             {view === "categories" ? (
               <CategoryScreen
                 library={library}
@@ -293,6 +352,7 @@ function App() {
               <AnimeGrid
                 category={selectedCategory}
                 anime={animeInCategory}
+                onBack={() => setView("categories")}
                 onOpenAnime={openAnime}
                 onOpenSettings={() => setView("settings")}
               />
@@ -318,6 +378,7 @@ function App() {
                 busy={busy}
                 rootInput={rootInput}
                 newCategoryName={newCategoryName}
+                onBack={() => setView("categories")}
                 onRootInput={setRootInput}
                 onPickFolder={() => void handlePickFolder()}
                 onAddRoot={() => void handleAddRoot(rootInput)}
@@ -326,11 +387,17 @@ function App() {
                 onNewCategoryName={setNewCategoryName}
                 onCreateCategory={() => void handleCreateCategory()}
                 onDeleteCategory={(category) => void handleDeleteCategory(category)}
+                onSetDefaultCategory={(category) => void handleSetDefaultCategory(category)}
+                onCreateRule={(input) => void handleCreateRule(input)}
+                onUpdateRule={(id, input) => void handleUpdateRule(id, input)}
+                onDeleteRule={(rule) => void handleDeleteRule(rule)}
               />
             ) : null}
           </div>
         </section>
       )}
+
+      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </main>
   );
 }
@@ -409,16 +476,18 @@ function CategoryScreen(props: {
 function AnimeGrid(props: {
   category: Category | null;
   anime: AnimeSummary[];
+  onBack: () => void;
   onOpenAnime: (anime: AnimeSummary) => void;
   onOpenSettings: () => void;
 }) {
-  const { category, anime, onOpenAnime, onOpenSettings } = props;
+  const { category, anime, onBack, onOpenAnime, onOpenSettings } = props;
 
   return (
     <>
       <ViewHeader
         title={category?.name ?? "Anime"}
         subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
+        onBack={onBack}
       />
       {anime.length === 0 ? (
         <div className="empty empty--wide">
@@ -437,7 +506,7 @@ function AnimeGrid(props: {
                 {item.title}
               </div>
               <div className="anime-card-meta">
-                {item.episode_count} eps · {item.unwatched_count} unwatched
+                {item.episode_count} eps - {item.unwatched_count} unwatched
               </div>
               <div className="anime-tooltip">
                 <strong>{item.title}</strong>
@@ -466,33 +535,28 @@ function EpisodeScreen(props: {
       .filter((episode) => episode.last_watched_at)
       .sort((a, b) => String(b.last_watched_at).localeCompare(String(a.last_watched_at)))[0]?.id;
   }, [episodes]);
+  const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
+  const selectedCategory = categories.find((category) => category.id === anime.category_id);
 
   return (
     <>
       <ViewHeader
         title={anime.title}
-        subtitle={`${episodes.length} episode${episodes.length === 1 ? "" : "s"} · ${anime.unwatched_count} unwatched`}
-        action={
-          <button type="button" onClick={onBack}>
-            Back to grid
-          </button>
-        }
+        subtitle={`${episodes.length} episode${episodes.length === 1 ? "" : "s"} - ${unwatchedCount} unwatched`}
+        onBack={onBack}
       />
 
       <section className="panel episode-toolbar">
-        <div>
+        <div className="toolbar-field">
           <span className="muted">Category</span>
-          <select value={anime.category_id} onChange={(e) => onMoveAnime(Number(e.currentTarget.value))}>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
+          <CustomDropdown
+            label={selectedCategory?.name ?? "Select category"}
+            options={categories.map((category) => ({ value: category.id, label: category.name }))}
+            value={anime.category_id}
+            onChange={onMoveAnime}
+          />
         </div>
-        <div className="muted">
-          Current progress is saved when you leave or switch episodes.
-        </div>
+        <div className="muted">Current progress is saved when you leave or switch episodes.</div>
       </section>
 
       <section className="episode-list">
@@ -534,6 +598,7 @@ function SettingsScreen(props: {
   busy: boolean;
   rootInput: string;
   newCategoryName: string;
+  onBack: () => void;
   onRootInput: (value: string) => void;
   onPickFolder: () => void;
   onAddRoot: () => void;
@@ -542,12 +607,17 @@ function SettingsScreen(props: {
   onNewCategoryName: (value: string) => void;
   onCreateCategory: () => void;
   onDeleteCategory: (category: Category) => void;
+  onSetDefaultCategory: (category: Category) => void;
+  onCreateRule: (input: RegexRuleInput) => void;
+  onUpdateRule: (id: number, input: RegexRuleInput) => void;
+  onDeleteRule: (rule: RegexRule) => void;
 }) {
   const {
     library,
     busy,
     rootInput,
     newCategoryName,
+    onBack,
     onRootInput,
     onPickFolder,
     onAddRoot,
@@ -556,11 +626,15 @@ function SettingsScreen(props: {
     onNewCategoryName,
     onCreateCategory,
     onDeleteCategory,
+    onSetDefaultCategory,
+    onCreateRule,
+    onUpdateRule,
+    onDeleteRule,
   } = props;
 
   return (
     <>
-      <ViewHeader title="Settings" subtitle={`Portable database: ${library.db_path}`} />
+      <ViewHeader title="Settings" subtitle={`Portable database: ${library.db_path}`} onBack={onBack} />
 
       <section className="panel">
         <div className="panel-heading">
@@ -630,13 +704,22 @@ function SettingsScreen(props: {
               <span>
                 {category.name} {category.is_default ? <span className="pill">Default</span> : null}
               </span>
-              <button
-                type="button"
-                onClick={() => onDeleteCategory(category)}
-                disabled={busy || category.is_default}
-              >
-                Delete
-              </button>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  onClick={() => onSetDefaultCategory(category)}
+                  disabled={busy || category.is_default}
+                >
+                  Make default
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteCategory(category)}
+                  disabled={busy || category.is_default}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -647,13 +730,24 @@ function SettingsScreen(props: {
           <h2>Detection Rules</h2>
           <span className="muted">{library.regex_rules.length} configured</span>
         </div>
+        <RuleEditor
+          title="Add rule"
+          busy={busy}
+          initial={EMPTY_RULE}
+          submitLabel="Add rule"
+          onSubmit={onCreateRule}
+        />
         <div className="settings-list">
           {library.regex_rules.map((rule) => (
-            <div className="settings-item settings-item--stacked" key={rule.id}>
-              <strong>{rule.name}</strong>
-              <code>{rule.detection_regex}</code>
-              <code>{rule.title_regex}</code>
-            </div>
+            <RuleEditor
+              key={rule.id}
+              title={rule.name}
+              busy={busy}
+              initial={ruleToInput(rule)}
+              submitLabel="Save"
+              onSubmit={(input) => onUpdateRule(rule.id, input)}
+              onDelete={() => onDeleteRule(rule)}
+            />
           ))}
         </div>
       </section>
@@ -661,17 +755,185 @@ function SettingsScreen(props: {
   );
 }
 
-function ViewHeader(props: { title: string; subtitle: string; action?: React.ReactNode }) {
-  const { title, subtitle, action } = props;
+function RuleEditor(props: {
+  title: string;
+  busy: boolean;
+  initial: RegexRuleInput;
+  submitLabel: string;
+  onSubmit: (input: RegexRuleInput) => void;
+  onDelete?: () => void;
+}) {
+  const { title, busy, initial, submitLabel, onSubmit, onDelete } = props;
+  const [draft, setDraft] = useState(initial);
+
+  useEffect(() => {
+    setDraft(initial);
+  }, [initial]);
+
+  return (
+    <form
+      className="rule-editor"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(draft);
+      }}
+    >
+      <div className="rule-editor-heading">
+        <strong>{title}</strong>
+        <label>
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(e) => setDraft((current) => ({ ...current, enabled: e.currentTarget.checked }))}
+          />
+          Enabled
+        </label>
+      </div>
+      <div className="form-grid">
+        <label>
+          <span>Name</span>
+          <input
+            type="text"
+            value={draft.name}
+            onChange={(e) => setDraft((current) => ({ ...current, name: e.currentTarget.value }))}
+          />
+        </label>
+        <label>
+          <span>Priority</span>
+          <input
+            type="number"
+            value={draft.priority}
+            onChange={(e) =>
+              setDraft((current) => ({ ...current, priority: Number(e.currentTarget.value) || 0 }))
+            }
+          />
+        </label>
+      </div>
+      <label className="stacked-field">
+        <span>Detection regex</span>
+        <textarea
+          value={draft.detection_regex}
+          onChange={(e) => setDraft((current) => ({ ...current, detection_regex: e.currentTarget.value }))}
+          rows={2}
+        />
+      </label>
+      <label className="stacked-field">
+        <span>Title regex</span>
+        <textarea
+          value={draft.title_regex}
+          onChange={(e) => setDraft((current) => ({ ...current, title_regex: e.currentTarget.value }))}
+          rows={2}
+        />
+      </label>
+      <div className="settings-actions">
+        <button type="submit" disabled={busy}>
+          {submitLabel}
+        </button>
+        {onDelete ? (
+          <button type="button" onClick={onDelete} disabled={busy}>
+            Delete
+          </button>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+function CustomDropdown(props: {
+  label: string;
+  value: number;
+  options: Array<{ value: number; label: string }>;
+  onChange: (value: number) => void;
+}) {
+  const { label, value, options, onChange } = props;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="custom-select">
+      <button type="button" className="custom-select-trigger" onClick={() => setOpen((current) => !current)}>
+        <span>{label}</span>
+        <span aria-hidden>v</span>
+      </button>
+      {open ? (
+        <div className="custom-select-menu">
+          {options.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              className={option.value === value ? "custom-select-option active" : "custom-select-option"}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ViewHeader(props: {
+  title: string;
+  subtitle: string;
+  action?: ReactNode;
+  onBack?: () => void;
+}) {
+  const { title, subtitle, action, onBack } = props;
   return (
     <header className="view-header">
-      <div>
-        <h1>{title}</h1>
-        <p className="muted">{subtitle}</p>
+      <div className="view-title-row">
+        {onBack ? (
+          <button type="button" className="back-button" onClick={onBack} aria-label="Back">
+            <ArrowLeftIcon />
+          </button>
+        ) : null}
+        <div>
+          <h1>{title}</h1>
+          <p className="muted">{subtitle}</p>
+        </div>
       </div>
       {action ? <div className="view-actions">{action}</div> : null}
     </header>
   );
+}
+
+function ToastStack(props: { toasts: Toast[]; onDismiss: (id: number) => void }) {
+  const { toasts, onDismiss } = props;
+  return (
+    <div className="toast-stack" aria-live="polite" aria-atomic="true">
+      {toasts.map((toast) => (
+        <button
+          type="button"
+          key={toast.id}
+          className={`toast toast--${toast.kind}`}
+          onClick={() => onDismiss(toast.id)}
+        >
+          {toast.message}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.42-1.41L7.83 13H20v-2z" />
+    </svg>
+  );
+}
+
+function ruleToInput(rule: RegexRule): RegexRuleInput {
+  return {
+    name: rule.name,
+    detection_regex: rule.detection_regex,
+    title_regex: rule.title_regex,
+    enabled: rule.enabled,
+    priority: rule.priority,
+  };
 }
 
 export default App;

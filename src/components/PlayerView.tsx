@@ -180,6 +180,7 @@ export function PlayerView(props: {
   const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
   const mpvReadyRef = useRef(false);
   const playbackRef = useRef({ episode, position, duration });
+  const pendingResumeSecondsRef = useRef<number | null>(null);
 
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
   const canPrev = selectedIndex > 0;
@@ -230,10 +231,10 @@ export function PlayerView(props: {
           });
         }
         if (cancelled) return;
+        pendingResumeSecondsRef.current =
+          episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
+        setPaused(false);
         await invoke("mpv_load", { path: episode.path });
-        if (episode.position_seconds > 1 && !episode.watched) {
-          await invoke("mpv_seek", { seconds: episode.position_seconds });
-        }
       } catch (e) {
         if (!cancelled) onError(errorMessage(e));
       }
@@ -283,7 +284,24 @@ export function PlayerView(props: {
             }
           },
         ],
-        ["mpv://playback-restart", () => setVideoCompositorRevealed(true)],
+        [
+          "mpv://file-loaded",
+          () => {
+            const seconds = pendingResumeSecondsRef.current;
+            pendingResumeSecondsRef.current = null;
+            if (seconds === null) return;
+            window.setTimeout(() => {
+              void invoke("mpv_seek", { seconds }).catch((err) => onError(errorMessage(err)));
+            }, 0);
+          },
+        ],
+        [
+          "mpv://playback-restart",
+          () => {
+            setPaused(false);
+            setVideoCompositorRevealed(true);
+          },
+        ],
       ];
 
       for (const [name, handler] of subs) {
@@ -441,8 +459,8 @@ export function PlayerView(props: {
         onMouseDown={onCanvasMouseDown}
         onContextMenu={onCanvasContextMenu}
       />
-      <button type="button" className="player-back" onClick={() => void closeVideo()}>
-        Back
+      <button type="button" className="player-back back-button" onClick={() => void closeVideo()} aria-label="Back">
+        <ArrowLeftIcon />
       </button>
       <div className="now-playing" title={episode.path}>
         {episode.file_name}
@@ -535,5 +553,13 @@ export function PlayerView(props: {
         </div>
       </div>
     </section>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.42-1.41L7.83 13H20v-2z" />
+    </svg>
   );
 }

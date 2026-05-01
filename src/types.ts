@@ -12,6 +12,14 @@ export type RegexRule = {
   priority: number;
 };
 
+export type RegexRuleInput = {
+  name: string;
+  detection_regex: string;
+  title_regex: string;
+  enabled: boolean;
+  priority: number;
+};
+
 export type Category = {
   id: number;
   name: string;

@@ -26,7 +26,7 @@ Example anime filename: [SubsPlease] Sousou no Frieren S2 - 09 (1080p) [A3A99C65
 - [ ] Custom window border (clean look without the classic 1px border seen in windows 11, not a priority)
 - [x] ~~Settings view~~
     - [x] ~~Ability to add multiple root folders for anime~~
-    - [ ] Add anime detection pairs with regex. One regex checks if a filename is an anime file, the other regex extracts the anime title from the filename.
+    - [x] ~~Add anime detection pairs with regex. One regex checks if a filename is an anime file, the other regex extracts the anime title from the filename.~~
 - [x] ~~Save data, settings, categories, etc. in SQLite database in the same folder as the executable.~~
 - [x] ~~Below categories on the main screen, you can quickly continue where you left off for the last 5 animes watched~~
     - [ ] Select how many are displayed in settings
@@ -45,7 +45,7 @@ Episode selection page features
 - [ ] Video player view takes full size of the window
 - [ ] Video controls fade in and out. Video controls only visible if mouse is moved, but not when hotkeys pressed
 - [x] ~~Filename is displayed in the center of the top part instead of the left~~
-- [ ] Exit video is moved to the top left with a back arrow symbol
+- [x] ~~Exit video is moved to the top left with a back arrow symbol~~
 - [ ] Audio track selection
 - [ ] Subtitle track selection
 - [x] ~~Video player remembers the progress of the last played episode for each anime~~
