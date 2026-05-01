@@ -28,11 +28,13 @@ runtime prerequisites. See `README.md` for the full setup steps.
   main player pane.
 - Sidebar talks to Rust via `invoke("scan_videos", { folder })`.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
-  player column uses **`var(--app-bg)`** when no file is selected so the
-  transparent Tauri window does not show the desktop behind an empty
-  player; once a file is selected, **`.player--playback`** switches that
-  column to transparent so the libmpv DirectComposition swap-chain
-  (same Tauri HWND) shows through. mpv’s video region is still driven by
+  player column is **`var(--app-bg)`** when idle or while a new file is
+  opening (**`.player--playback-pending`**); only after mpv emits
+  **`mpv://playback-restart`** (decoder/first-frame restart) does
+  **`.player--playback`** make that column transparent so the DComp
+  swap-chain shows through—avoiding a desktop flash before the first
+  frame. A property fallback also reveals if playback is unpaused with
+  `time-pos` advancing. mpv’s video region is still driven by
   `video-margin-ratio-left`, not child-window geometry.
 - Window-resize layout tracking happens **natively** in Rust: the
   Tauri `WindowEvent::Resized` / `ScaleFactorChanged` handler re-issues
@@ -43,11 +45,13 @@ runtime prerequisites. See `README.md` for the full setup steps.
   frame). The frontend still calls `mpv_init` / `mpv_set_layout` once
   to register the initial sidebar width.
 - libmpv is initialized lazily on the first file selection via
-  `mpv_init`. After init, switching files is just `mpv_load`.
+  `mpv_init`. After init, switching files is `mpv_load`, which runs
+  `loadfile` then **`set pause no`** so each new file autoplays instead
+  of inheriting the previous pause state.
 - A custom HTML controls bar (transport + scrubber + time + fullscreen)
   drives mpv via `mpv_cycle_pause`, `mpv_seek`, `mpv_seek_relative`, and
   reads state from `mpv://time-pos`, `mpv://duration`, `mpv://pause`,
-  `mpv://eof-reached` events. The video pane uses Tauri
+  `mpv://eof-reached`, and `mpv://playback-restart` events. The video pane uses Tauri
   `startDragging` (single left-click) and `setFullscreen` (double
   left-click or **F**); right-click toggles pause; Space and ArrowLeft/ArrowRight
   seek ±5s are handled in the frontend (capture-phase `keydown`) so they

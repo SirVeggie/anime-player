@@ -9,6 +9,11 @@
 //! - `pause`        — current pause flag.
 //! - `eof-reached`  — true when playback has finished.
 //!
+//! Additionally `MPV_EVENT_PLAYBACK_RESTART` is emitted as
+//! `mpv://playback-restart` so the UI can reveal the transparent compositor
+//! only after the first frame / decoder restart (avoids a desktop flash while
+//! the file is still opening).
+//!
 //! Each property change is fanned out as `mpv://<name>` so the frontend
 //! can `listen("mpv://time-pos", ...)`.
 
@@ -79,6 +84,9 @@ pub fn run_event_loop(ctx: *mut c_void, app_handle: AppHandle, stop: Arc<AtomicB
             }
             mpv_event_id::MPV_EVENT_FILE_LOADED => {
                 let _ = app_handle.emit("mpv://file-loaded", ());
+            }
+            mpv_event_id::MPV_EVENT_PLAYBACK_RESTART => {
+                let _ = app_handle.emit("mpv://playback-restart", ());
             }
             _ => {}
         }

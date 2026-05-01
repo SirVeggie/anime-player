@@ -217,6 +217,8 @@ function App() {
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
+  /** True only after mpv signals playback has restarted (first frame path). */
+  const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
 
   const mpvReadyRef = useRef(false);
 
@@ -274,6 +276,17 @@ function App() {
   }, [selected]);
 
   useEffect(() => {
+    setVideoCompositorRevealed(false);
+  }, [selected?.path]);
+
+  useEffect(() => {
+    if (!selected || videoCompositorRevealed) return;
+    if (duration > 0 && !paused && position > 0.015) {
+      setVideoCompositorRevealed(true);
+    }
+  }, [selected, duration, paused, position, videoCompositorRevealed]);
+
+  useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
 
@@ -301,6 +314,12 @@ function App() {
           "mpv://eof-reached",
           (e) => {
             if (e.payload === true) setPaused(true);
+          },
+        ],
+        [
+          "mpv://playback-restart",
+          () => {
+            setVideoCompositorRevealed(true);
           },
         ],
       ];
@@ -525,7 +544,15 @@ function App() {
         </ul>
       </aside>
 
-      <section className={selected ? "player player--playback" : "player"}>
+      <section
+        className={
+          !selected
+            ? "player"
+            : videoCompositorRevealed
+              ? "player player--playback"
+              : "player player--playback-pending"
+        }
+      >
         {selected ? (
           <>
             <div

@@ -116,11 +116,18 @@ impl MpvHandle {
     }
 
     pub fn load(&self, path: &str) -> Result<(), String> {
-        self.command(&["loadfile", path])
+        self.command(&["loadfile", path])?;
+        self.set_pause(false)?;
+        Ok(())
     }
 
     pub fn cycle_pause(&self) -> Result<(), String> {
         self.command(&["cycle", "pause"])
+    }
+
+    pub fn set_pause(&self, paused: bool) -> Result<(), String> {
+        let flag = if paused { "yes" } else { "no" };
+        self.command(&["set", "pause", flag])
     }
 
     /// Absolute seek in seconds.

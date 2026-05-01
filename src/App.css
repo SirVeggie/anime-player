@@ -237,6 +237,12 @@ button[type="button"]:hover {
   min-width: 0;
 }
 
+/* File selected but mpv has not reached PLAYBACK_RESTART yet — keep opaque
+   so the HWND does not flash the desktop before the first frame. */
+.player--playback-pending {
+  background: var(--app-bg);
+}
+
 .player--playback {
   background: transparent;
 }
