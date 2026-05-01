@@ -179,19 +179,32 @@ export function PlayerView(props: {
   const [fullscreen, setFullscreen] = useState(false);
   const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
   const mpvReadyRef = useRef(false);
+  const playbackRef = useRef({ episode, position, duration });
 
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
   const canPrev = selectedIndex > 0;
   const canNext = selectedIndex >= 0 && selectedIndex < playlist.length - 1;
 
+  useEffect(() => {
+    playbackRef.current = { episode, position, duration };
+  }, [duration, episode, position]);
+
   const persistProgress = useCallback(
     async (forceWatched = false) => {
-      const watched = forceWatched || (duration > 0 && position / duration >= 0.9);
-      const saved = await saveEpisodeProgress(episode.id, position, duration, watched);
+      const current = playbackRef.current;
+      const watched =
+        forceWatched ||
+        (current.duration > 0 && current.position / current.duration >= 0.9);
+      const saved = await saveEpisodeProgress(
+        current.episode.id,
+        current.position,
+        current.duration,
+        watched,
+      );
       onProgressSaved(saved);
       return saved;
     },
-    [duration, episode.id, onProgressSaved, position],
+    [onProgressSaved],
   );
 
   useEffect(() => {
