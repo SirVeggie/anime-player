@@ -20,7 +20,7 @@ You need the following installed:
 3. **Microsoft Visual Studio C++ Build Tools** (Desktop development with C++ workload) – required by Tauri on Windows.
 4. **WebView2 Runtime** – preinstalled on Windows 11 / recent Windows 10 builds.
 
-You do **not** need a separate `mpv.exe` install. `libmpv-2.dll` is committed under `src-tauri/libs/mpv/` and bundled with the installer.
+You do **not** need a separate `mpv.exe` install. `libmpv-2.dll` is downloaded into `src-tauri/libs/mpv/` and bundled with the installer.
 
 See the official Tauri prerequisites: <https://tauri.app/start/prerequisites/>.
 
@@ -28,6 +28,7 @@ See the official Tauri prerequisites: <https://tauri.app/start/prerequisites/>.
 
 ```powershell
 npm install
+npm run setup:mpv
 ```
 
 ## Run (development)
@@ -46,12 +47,12 @@ npm run tauri build
 
 Outputs an installer/executable in `src-tauri/target/release/bundle/`. `libmpv-2.dll` is shipped alongside via `tauri.conf.json`'s `bundle.resources`.
 
-## Updating the bundled libmpv
+## Downloading / updating libmpv
 
-The committed `libmpv-2.dll` and `mpv.lib` come from `shinchiro/mpv-winbuild-cmake` releases. To refresh them:
+The generated `libmpv-2.dll` and `mpv.lib` come from `shinchiro/mpv-winbuild-cmake` releases. They are intentionally ignored by git, so run this after cloning or whenever you want to refresh them:
 
 ```powershell
-node scripts/update-mpv-libs.mjs
+npm run setup:mpv
 ```
 
 This downloads the latest dev bundle, extracts `libmpv-2.dll` and `libmpv.dll.a` (renamed to `mpv.lib` for MSVC), and writes a `VERSION.txt` recording which release was installed. Requires `7z` on PATH (e.g. `scoop install 7zip`).
@@ -63,10 +64,11 @@ This downloads the latest dev bundle, extracts `libmpv-2.dll` and `libmpv.dll.a`
 - `src-tauri/` – Rust backend.
   - `src/lib.rs` – exposes `scan_videos` plus `mpv_*` commands.
   - `src/mpv/` – in-process libmpv module: `ffi.rs` (FFI declarations), `handle.rs` (`MpvHandle` and lifecycle), `event_loop.rs` (property observers → `mpv://*` Tauri events).
-  - `libs/mpv/` – bundled `libmpv-2.dll` + `mpv.lib`.
+  - `libs/mpv/` – local generated `libmpv-2.dll` + `mpv.lib`.
   - `build.rs` – tells Cargo to link against `mpv` and copies the DLL beside the dev binary.
   - `tauri.conf.json` – sets `transparent: true` on the main window and ships `libmpv-2.dll` as a bundle resource.
-- `scripts/update-mpv-libs.mjs` – refresher for the bundled libmpv.
+- `scripts/download-mpv-libs.mjs` – setup entry point for local libmpv artifacts.
+- `scripts/update-mpv-libs.mjs` – compatibility updater for the same artifacts.
 
 ## How playback works
 

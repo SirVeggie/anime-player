@@ -25,3 +25,8 @@ dist-ssr
 
 # Local reference material (not part of the project)
 reference/
+
+# Downloaded libmpv artifacts
+src-tauri/libs/mpv/libmpv-2.dll
+src-tauri/libs/mpv/mpv.lib
+src-tauri/libs/mpv/VERSION.txt

@@ -12,8 +12,9 @@ recursively lists all video files inside; clicking a file plays it via an
 embedded **libmpv** loaded in-process from `libmpv-2.dll`.
 
 The user is on Windows (PowerShell). Rust 1.95 (stable, MSVC toolchain),
-Node 22, and the bundled `src-tauri/libs/mpv/libmpv-2.dll` are the
-runtime prerequisites. See `README.md` for the full setup steps.
+Node 22, 7-Zip on PATH, and the local generated
+`src-tauri/libs/mpv/libmpv-2.dll` are the runtime prerequisites. See
+`README.md` for the full setup steps.
 
 ## Architecture
 
@@ -143,11 +144,11 @@ runtime prerequisites. See `README.md` for the full setup steps.
 
 ### Build / linkage — `src-tauri/build.rs`, `src-tauri/libs/mpv/`
 
-- `libs/mpv/libmpv-2.dll` and `libs/mpv/mpv.lib` are committed to the
-  repo (refresh with `node scripts/update-mpv-libs.mjs`, which
-  downloads the latest dev bundle from
+- `libs/mpv/libmpv-2.dll`, `libs/mpv/mpv.lib`, and `libs/mpv/VERSION.txt`
+  are generated local artifacts ignored by git. Install or refresh them
+  with `npm run setup:mpv`, which downloads the latest dev bundle from
   `shinchiro/mpv-winbuild-cmake` and renames `libmpv.dll.a` → `mpv.lib`
-  for MSVC).
+  for MSVC.
 - `build.rs` adds `cargo:rustc-link-search=native=libs/mpv` and
   `cargo:rustc-link-lib=dylib=mpv`, then copies `libmpv-2.dll` next to
   the dev binary so `cargo run` / `tauri dev` can load it.
@@ -251,8 +252,10 @@ push, no rebase without an explicit request) lives in
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.
-- `scripts/update-mpv-libs.mjs` — refreshes `src-tauri/libs/mpv/`
-  from the latest `shinchiro/mpv-winbuild-cmake` release.
+- `scripts/download-mpv-libs.mjs` — setup entry point that downloads
+  ignored local libmpv artifacts into `src-tauri/libs/mpv/`.
+- `scripts/update-mpv-libs.mjs` — compatibility updater for the same
+  artifacts from the latest `shinchiro/mpv-winbuild-cmake` release.
 - `.cursor/rules/` — agent rules. `read-context.mdc` points new agents
   here; `commit-checkpoints.mdc` defines the per-change commit
   workflow.
@@ -279,8 +282,8 @@ npx tsc --noEmit
 # Rust type-check (fast, doesn't link)
 cargo check --manifest-path src-tauri/Cargo.toml
 
-# Refresh bundled libmpv
-node scripts/update-mpv-libs.mjs
+# Download / refresh local libmpv
+npm run setup:mpv
 
 # Run the app (compiles Rust, launches Vite, opens the window)
 npm run tauri dev

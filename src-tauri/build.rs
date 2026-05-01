@@ -2,11 +2,10 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // libmpv linkage on Windows. The bundled libmpv-2.dll + mpv.lib live in
-    // src-tauri/libs/mpv/ (committed to the repo; refresh with
-    // `node scripts/update-mpv-libs.mjs`). MSVC link.exe consumes the
-    // MinGW-built .dll.a archive when renamed to mpv.lib, which is what the
-    // updater script does.
+    // libmpv linkage on Windows. The generated libmpv-2.dll + mpv.lib live in
+    // src-tauri/libs/mpv/ (install with `npm run setup:mpv`). MSVC link.exe
+    // consumes the MinGW-built .dll.a archive when renamed to mpv.lib, which
+    // is what the downloader script does.
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
         let mpv_dir = PathBuf::from(&manifest_dir).join("libs").join("mpv");
@@ -14,7 +13,7 @@ fn main() {
         let dll = mpv_dir.join("libmpv-2.dll");
         if !lib.exists() || !dll.exists() {
             panic!(
-                "\n[!] Cannot find libmpv runtime under {}.\n    Run: node scripts/update-mpv-libs.mjs\n",
+                "\n[!] Cannot find libmpv runtime under {}.\n    Run: npm run setup:mpv\n",
                 mpv_dir.display()
             );
         }

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "setup:mpv": "node scripts/download-mpv-libs.mjs",
+    "update:mpv": "node scripts/update-mpv-libs.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",
