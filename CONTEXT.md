@@ -84,6 +84,25 @@ suspects are: popup z-order vs another window, stale cached rect after
 a DPI change, or mpv failing to launch (check the dev terminal for
 stderr).
 
+### Rejected alternative: transparent main window + `WS_CHILD` mpv
+
+Tested in commit 8b16dfe (reverted in fe8991a). The theory was that
+setting `transparent: true` on the Tauri window would put the whole
+top-level into DWM/DComp compositing mode, so a `WS_CHILD` mpv beneath
+WebView2 would show through transparent CSS regions. Reality: the
+transparent flag puts the top-level window onto the layered/DComp-only
+presentation path with no redirection bitmap. Plain GDI child HWNDs
+(like our `STATIC` mpv host) have nowhere to paint in that path —
+their pixels never reach the final composition. The window correctly
+goes transparent and the chrome (sidebar etc.) still shows because
+WebView2 has its own DComp visual, but the mpv child is invisible (the
+desktop shows through where the video should be).
+
+The only known single-window fix is **WebView2 Visual Hosting** via
+`CreateCoreWebView2CompositionController` plus `libmpv` rendered to a
+D3D11/DComp visual we composite into the same tree — neither of which
+Tauri/wry exposes today. Not worth it. Stay with the popup.
+
 ## Version control
 
 The repo is a git repository on branch `main` with no remote. Every
