@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
@@ -12,6 +13,7 @@ type VideoFile = {
 };
 
 const SIDEBAR_PX = 360;
+const appWindow = getCurrentWindow();
 
 function formatSize(bytes: number): string {
   if (bytes <= 0) return "";
@@ -39,6 +41,73 @@ function formatTime(seconds: number): string {
   return `${m}:${ss}`;
 }
 
+function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return target.isContentEditable;
+}
+
+function IconSkipBack() {
+  return (
+    <svg className="control-glyph" viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"
+      />
+    </svg>
+  );
+}
+
+function IconSkipForward() {
+  return (
+    <svg className="control-glyph" viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M16 18h2V6h-2v12zM6 18l8.5-6L6 6v12z"
+      />
+    </svg>
+  );
+}
+
+function IconPlay() {
+  return (
+    <svg className="control-glyph" viewBox="0 0 24 24" width="26" height="26" aria-hidden>
+      <path fill="currentColor" d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function IconPause() {
+  return (
+    <svg className="control-glyph" viewBox="0 0 24 24" width="26" height="26" aria-hidden>
+      <path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  );
+}
+
+function IconFullscreen() {
+  return (
+    <svg className="control-glyph" viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"
+      />
+    </svg>
+  );
+}
+
+function IconFullscreenExit() {
+  return (
+    <svg className="control-glyph" viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
+      />
+    </svg>
+  );
+}
+
 function App() {
   const [folder, setFolder] = useState<string>("");
   const [files, setFiles] = useState<VideoFile[]>([]);
@@ -47,14 +116,11 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
-  // Playback state observed from libmpv via mpv:// events.
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
-  // While the user drags the scrubber we want the thumb to follow the
-  // pointer rather than mpv's reported time-pos (which lags by a frame
-  // and would otherwise fight the drag).
   const [scrubbing, setScrubbing] = useState<number | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const mpvReadyRef = useRef(false);
 
@@ -88,8 +154,6 @@ function App() {
     }
   }
 
-  // Boot libmpv on first selection. Subsequent selections just send
-  // another loadfile.
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
@@ -113,14 +177,6 @@ function App() {
     };
   }, [selected]);
 
-  // Note: window-resize tracking lives in Rust now. The native
-  // `WindowEvent::Resized` handler in `src-tauri/src/lib.rs` re-applies
-  // `video-margin-ratio-left` directly on the UI thread on every WM_SIZE,
-  // which is much smoother than bouncing through a JS resize listener +
-  // `invoke()` per animation frame (the latter visibly stutters while a
-  // video is playing during a window-edge drag).
-
-  // Wire libmpv property-change events into local React state.
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
@@ -148,7 +204,6 @@ function App() {
         [
           "mpv://eof-reached",
           (e) => {
-            // EOF is reported as boolean; on false we leave state alone.
             if (e.payload === true) setPaused(true);
           },
         ],
@@ -170,6 +225,30 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        setFullscreen(await appWindow.isFullscreen());
+      } catch {
+        /* ignore */
+      }
+      if (cancelled) return;
+      unlisten = await appWindow.onResized(async () => {
+        try {
+          setFullscreen(await appWindow.isFullscreen());
+        } catch {
+          /* ignore */
+        }
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const onTogglePause = useCallback(() => {
     void invoke("mpv_cycle_pause").catch((e) =>
       setError(typeof e === "string" ? e : String(e))
@@ -188,14 +267,92 @@ function App() {
     );
   }, []);
 
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      const next = !(await appWindow.isFullscreen());
+      await appWindow.setFullscreen(next);
+      setFullscreen(next);
+    } catch (e) {
+      setError(typeof e === "string" ? e : String(e));
+    }
+  }, []);
+
+  const onCanvasMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      if (e.detail === 2) {
+        void toggleFullscreen();
+        return;
+      }
+      void appWindow.startDragging();
+    },
+    [toggleFullscreen]
+  );
+
+  const onCanvasContextMenu = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      onTogglePause();
+    },
+    [onTogglePause]
+  );
+
+  useEffect(() => {
+    if (!selected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (isTextInputTarget(e.target)) return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        void invoke("mpv_cycle_pause").catch((err) =>
+          setError(typeof err === "string" ? err : String(err))
+        );
+        return;
+      }
+      if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        void invoke("mpv_seek_relative", { delta: -5 }).catch((err) =>
+          setError(typeof err === "string" ? err : String(err))
+        );
+        return;
+      }
+      if (e.code === "ArrowRight") {
+        e.preventDefault();
+        void invoke("mpv_seek_relative", { delta: 5 }).catch((err) =>
+          setError(typeof err === "string" ? err : String(err))
+        );
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [selected]);
+
   const filtered = useMemo(() => {
     if (!filter.trim()) return files;
     const needle = filter.toLowerCase();
     return files.filter((f) => f.relative_path.toLowerCase().includes(needle));
   }, [files, filter]);
 
+  const selectedIndex = useMemo(
+    () => (selected ? files.findIndex((f) => f.path === selected.path) : -1),
+    [files, selected]
+  );
+
+  const loadSibling = useCallback(
+    (delta: number) => {
+      if (selectedIndex < 0 || files.length === 0) return;
+      const j = selectedIndex + delta;
+      if (j < 0 || j >= files.length) return;
+      setSelected(files[j]);
+    },
+    [files, selectedIndex]
+  );
+
   const displayedPosition = scrubbing ?? position;
   const safeDuration = duration > 0 ? duration : 0;
+  const canPrev = selectedIndex > 0;
+  const canNext = selectedIndex >= 0 && selectedIndex < files.length - 1;
 
   return (
     <main className="app">
@@ -257,37 +414,70 @@ function App() {
       <section className="player">
         {selected ? (
           <>
-            {/* The video shows through this transparent region: libmpv
-                renders a DComp swap-chain under the Tauri main HWND
-                and we leave the right pane's CSS fully transparent so
-                that swap-chain composes through to the user. */}
-            <div className="player-canvas" />
+            <div
+              className="player-canvas"
+              onMouseDown={onCanvasMouseDown}
+              onContextMenu={onCanvasContextMenu}
+            />
             <div className="now-playing" title={selected.path}>
               {selected.relative_path}
             </div>
             <div className="controls">
-              <button
-                type="button"
-                className="play-toggle"
-                onClick={onTogglePause}
-                title={paused ? "Play" : "Pause"}
-              >
-                {paused ? "Play" : "Pause"}
-              </button>
-              <input
-                className="scrubber"
-                type="range"
-                min={0}
-                max={Math.max(safeDuration, 0.001)}
-                step={0.05}
-                value={Math.min(displayedPosition, safeDuration || displayedPosition)}
-                onChange={(e) => onScrubChange(Number(e.currentTarget.value))}
-                onMouseUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
-                onKeyUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
-              />
+              <div className="controls-cluster controls-cluster--transport">
+                <button
+                  type="button"
+                  className="control-icon-btn"
+                  disabled={!canPrev}
+                  onClick={() => loadSibling(-1)}
+                  title="Previous"
+                >
+                  <IconSkipBack />
+                </button>
+                <button
+                  type="button"
+                  className="control-icon-btn control-icon-btn--primary"
+                  onClick={onTogglePause}
+                  title={paused ? "Play" : "Pause"}
+                >
+                  {paused ? <IconPlay /> : <IconPause />}
+                </button>
+                <button
+                  type="button"
+                  className="control-icon-btn"
+                  disabled={!canNext}
+                  onClick={() => loadSibling(1)}
+                  title="Next"
+                >
+                  <IconSkipForward />
+                </button>
+              </div>
+              <div className="controls-scrub-wrap">
+                <input
+                  className="scrubber"
+                  type="range"
+                  min={0}
+                  max={Math.max(safeDuration, 0.001)}
+                  step={0.05}
+                  value={Math.min(displayedPosition, safeDuration || displayedPosition)}
+                  aria-label="Seek"
+                  onInput={(e) => onScrubChange(Number(e.currentTarget.value))}
+                  onChange={(e) => onScrubChange(Number(e.currentTarget.value))}
+                  onPointerUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
+                  onPointerCancel={(e) => onScrubCommit(Number(e.currentTarget.value))}
+                  onKeyUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
+                />
+              </div>
               <span className="time">
                 {formatTime(displayedPosition)} / {formatTime(safeDuration)}
               </span>
+              <button
+                type="button"
+                className="control-icon-btn"
+                onClick={() => void toggleFullscreen()}
+                title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {fullscreen ? <IconFullscreenExit /> : <IconFullscreen />}
+              </button>
             </div>
           </>
         ) : (

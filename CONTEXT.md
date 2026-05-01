@@ -37,10 +37,14 @@ runtime prerequisites. See `README.md` for the full setup steps.
   to register the initial sidebar width.
 - libmpv is initialized lazily on the first file selection via
   `mpv_init`. After init, switching files is just `mpv_load`.
-- A small custom HTML controls bar (play/pause, scrubber, time)
-  drives mpv via `mpv_cycle_pause` / `mpv_seek` and reads state from
-  `mpv://time-pos`, `mpv://duration`, `mpv://pause`, `mpv://eof-reached`
-  events.
+- A custom HTML controls bar (transport + scrubber + time + fullscreen)
+  drives mpv via `mpv_cycle_pause`, `mpv_seek`, `mpv_seek_relative`, and
+  reads state from `mpv://time-pos`, `mpv://duration`, `mpv://pause`,
+  `mpv://eof-reached` events. The video pane uses Tauri
+  `startDragging` (single left-click) and `setFullscreen` (double
+  left-click); right-click toggles pause; Space and ArrowLeft/ArrowRight
+  seek ±5s are handled in the frontend (capture-phase `keydown`) so they
+  work while the WebView has focus without typing in sidebar fields.
 
 ### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/mpv/`
 
@@ -65,7 +69,8 @@ runtime prerequisites. See `README.md` for the full setup steps.
     event named `mpv://<property>`.
 - Exposed Tauri commands: `scan_videos`, `mpv_init(window_width,
   sidebar_px)`, `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_seek(seconds)`,
-  `mpv_set_layout(window_width, sidebar_px)`, `mpv_stop()`.
+  `mpv_seek_relative(delta)`, `mpv_set_layout(window_width, sidebar_px)`,
+  `mpv_stop()`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.

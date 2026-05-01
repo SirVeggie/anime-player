@@ -129,6 +129,12 @@ impl MpvHandle {
         self.command(&["seek", &s, "absolute"])
     }
 
+    /// Relative seek in seconds (may be negative).
+    pub fn seek_relative(&self, seconds: f64) -> Result<(), String> {
+        let s = format!("{seconds}");
+        self.command(&["seek", &s, "relative"])
+    }
+
     pub fn stop(&self) -> Result<(), String> {
         self.command(&["stop"])
     }

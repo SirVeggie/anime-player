@@ -189,6 +189,16 @@ fn mpv_seek(state: State<'_, AppState>, seconds: f64) -> Result<(), String> {
 
 #[cfg(windows)]
 #[tauri::command]
+fn mpv_seek_relative(state: State<'_, AppState>, delta: f64) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        m.seek_relative(delta)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn mpv_set_layout(
     state: State<'_, AppState>,
     window_width: f64,
@@ -293,6 +303,7 @@ pub fn run() {
             mpv_load,
             mpv_cycle_pause,
             mpv_seek,
+            mpv_seek_relative,
             mpv_set_layout,
             mpv_stop,
         ]);
