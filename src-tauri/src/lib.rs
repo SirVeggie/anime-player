@@ -2,14 +2,14 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{Manager, State, Window};
+use tauri::{Manager, State};
 use walkdir::WalkDir;
 
 #[cfg(windows)]
 mod mpv;
 
 #[cfg(windows)]
-use mpv::Mpv;
+use mpv::MpvHandle;
 
 const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "m4v", "mov", "avi", "wmv", "flv", "webm", "ts", "m2ts", "mts", "ogv", "ogm",
@@ -18,13 +18,10 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 
 #[derive(Debug, Serialize)]
 struct VideoFile {
-    /// Absolute path on disk (used by the asset protocol to load the file).
     path: String,
-    /// File name with extension.
     name: String,
     /// Path relative to the scanned root, using forward slashes.
     relative_path: String,
-    /// File size in bytes.
     size: u64,
 }
 
@@ -97,58 +94,44 @@ fn scan_videos(folder: String) -> Result<Vec<VideoFile>, String> {
 #[cfg(windows)]
 #[derive(Default)]
 struct AppState {
-    mpv: Mutex<Option<Mpv>>,
+    mpv: Mutex<Option<MpvHandle>>,
 }
 
+/// Re-compute the `video-margin-ratio-left` for the current sidebar
+/// width. The Tauri main HWND covers the whole client area; libmpv
+/// renders into the same canvas. To keep the video confined to the
+/// right pane (the sidebar is ~360px on the left) we tell mpv to leave
+/// that fraction of its canvas empty on the left. The opaque sidebar
+/// then visually covers the empty strip.
 #[cfg(windows)]
-fn css_rect_to_physical(window: &Window, x: f64, y: f64, w: f64, h: f64) -> (i32, i32, i32, i32) {
-    let scale = window.scale_factor().unwrap_or(1.0);
-    (
-        (x * scale).round() as i32,
-        (y * scale).round() as i32,
-        (w * scale).round() as i32,
-        (h * scale).round() as i32,
-    )
+fn apply_layout_to_mpv(mpv: &MpvHandle, window_width: f64, sidebar_px: f64) -> Result<(), String> {
+    let ratio = if window_width > 0.0 {
+        (sidebar_px / window_width).clamp(0.0, 0.95)
+    } else {
+        0.0
+    };
+    mpv.set_option_string("video-margin-ratio-left", &format!("{ratio:.6}"))
 }
 
 #[cfg(windows)]
 #[tauri::command]
 fn mpv_init(
     state: State<'_, AppState>,
-    window: Window,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    window_width: f64,
+    sidebar_px: f64,
 ) -> Result<(), String> {
-    let (px, py, pw, ph) = css_rect_to_physical(&window, x, y, width, height);
-    let parent_hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as windows_sys::Win32::Foundation::HWND;
-
     let mut guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(existing) = guard.as_ref() {
-        existing.set_rect(px, py, pw, ph);
+        apply_layout_to_mpv(existing, window_width, sidebar_px)?;
         return Ok(());
     }
-    let m = Mpv::new(parent_hwnd, px, py, pw, ph)?;
-    *guard = Some(m);
-    Ok(())
-}
 
-#[cfg(windows)]
-#[tauri::command]
-fn mpv_set_rect(
-    state: State<'_, AppState>,
-    window: Window,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    let (px, py, pw, ph) = css_rect_to_physical(&window, x, y, width, height);
-    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
-    if let Some(m) = guard.as_ref() {
-        m.set_rect(px, py, pw, ph);
-    }
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as usize;
+    let handle = MpvHandle::new(hwnd, app)?;
+    apply_layout_to_mpv(&handle, window_width, sidebar_px)?;
+    *guard = Some(handle);
     Ok(())
 }
 
@@ -157,15 +140,39 @@ fn mpv_set_rect(
 fn mpv_load(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
-    m.load_file(&path)
+    m.load(&path)
 }
 
 #[cfg(windows)]
 #[tauri::command]
-fn mpv_play_pause(state: State<'_, AppState>) -> Result<(), String> {
+fn mpv_cycle_pause(state: State<'_, AppState>) -> Result<(), String> {
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
-        m.play_pause()?;
+        m.cycle_pause()?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_seek(state: State<'_, AppState>, seconds: f64) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        m.seek_absolute(seconds)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_set_layout(
+    state: State<'_, AppState>,
+    window_width: f64,
+    sidebar_px: f64,
+) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        apply_layout_to_mpv(m, window_width, sidebar_px)?;
     }
     Ok(())
 }
@@ -191,19 +198,17 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState::default());
 
-            // Re-position the mpv popup whenever the main window is moved
-            // or resized. The CSS rect from the WebView is cached in Rust;
-            // we just re-project it into screen coordinates.
+            // Tear libmpv down before the main window's HWND becomes
+            // invalid. Without this, the event-loop thread can outlive
+            // the HWND it was rendering into and we get spurious GPU
+            // errors on close.
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
-                    use tauri::WindowEvent;
-                    if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_)) {
-                        let state = app_handle.state::<AppState>();
-                        let guard = state.mpv.lock();
-                        if let Ok(guard) = guard {
-                            if let Some(m) = guard.as_ref() {
-                                m.refresh_position();
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            if let Ok(mut guard) = state.mpv.lock() {
+                                guard.take();
                             }
                         }
                     }
@@ -215,9 +220,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_videos,
             mpv_init,
-            mpv_set_rect,
             mpv_load,
-            mpv_play_pause,
+            mpv_cycle_pause,
+            mpv_seek,
+            mpv_set_layout,
             mpv_stop,
         ]);
 

@@ -16,20 +16,18 @@
         "width": 1280,
         "height": 800,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "transparent": true
       }
     ],
     "security": {
-      "csp": null,
-      "assetProtocol": {
-        "enable": true,
-        "scope": ["**"]
-      }
+      "csp": null
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": ["libs/mpv/libmpv-2.dll"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

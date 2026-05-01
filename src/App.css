@@ -20,7 +20,11 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--bg);
+  /* The Tauri window is set to transparent: true so libmpv's DirectComposition
+     swap-chain (under the same HWND) composes through to the user. Anywhere
+     you see the bg color below, paint *only* in the sidebar / chrome — leave
+     the player pane CSS-transparent so the video shows through. */
+  background: transparent;
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -33,18 +37,20 @@ body,
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  background: transparent;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: var(--bg);
   border-right: 1px solid var(--border);
   min-width: 0;
 }
 
 .sidebar-header {
   padding: 16px 16px 8px;
+  background: var(--bg-elev);
 }
 
 .sidebar-header h1 {
@@ -64,6 +70,7 @@ body,
   display: flex;
   gap: 6px;
   padding: 8px 16px;
+  background: var(--bg-elev);
 }
 
 .folder-row input {
@@ -179,36 +186,73 @@ button[type="button"]:hover {
 }
 
 .player {
+  position: relative;
   display: flex;
   flex-direction: column;
-  background: black;
+  /* Critical: leave this pane fully transparent so the libmpv DComp swap-chain
+     under the Tauri HWND shows through. Any non-transparent paint here would
+     occlude the video. */
+  background: transparent;
   min-width: 0;
 }
 
-.mpv-host {
+.player-canvas {
+  /* Spacer that takes up all the vertical room above the controls. mpv
+     renders the actual pixels; this div is just a sizing helper. */
   flex: 1;
   width: 100%;
-  height: 100%;
-  background: black;
-  /* mpv renders into a native child HWND positioned over this div.
-     Keep it empty so layout reflects the desired player rect. */
+  background: transparent;
 }
 
 .now-playing {
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Subtle gradient header that floats over the video. */
+  background: linear-gradient(to bottom, rgba(14, 15, 19, 0.7), rgba(14, 15, 19, 0));
   padding: 10px 14px;
   font-size: 12px;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.85);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(to top, rgba(14, 15, 19, 0.85), rgba(14, 15, 19, 0));
+  color: var(--text);
+}
+
+.play-toggle {
+  min-width: 64px;
+}
+
+.scrubber {
+  flex: 1;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 92px;
+  text-align: right;
 }
 
 .empty {
   margin: auto;
   text-align: center;
   padding: 24px;
+  background: var(--bg);
+  border-radius: 12px;
 }
 
 .empty h2 {

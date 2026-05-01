@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
@@ -9,6 +10,8 @@ type VideoFile = {
   relative_path: string;
   size: number;
 };
+
+const SIDEBAR_PX = 360;
 
 function formatSize(bytes: number): string {
   if (bytes <= 0) return "";
@@ -22,6 +25,20 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const ss = s.toString().padStart(2, "0");
+  if (h > 0) {
+    const mm = m.toString().padStart(2, "0");
+    return `${h}:${mm}:${ss}`;
+  }
+  return `${m}:${ss}`;
+}
+
 function App() {
   const [folder, setFolder] = useState<string>("");
   const [files, setFiles] = useState<VideoFile[]>([]);
@@ -30,7 +47,15 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
-  const playerHostRef = useRef<HTMLDivElement | null>(null);
+  // Playback state observed from libmpv via mpv:// events.
+  const [paused, setPaused] = useState(true);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+  // While the user drags the scrubber we want the thumb to follow the
+  // pointer rather than mpv's reported time-pos (which lags by a frame
+  // and would otherwise fight the drag).
+  const [scrubbing, setScrubbing] = useState<number | null>(null);
+
   const mpvReadyRef = useRef(false);
 
   async function handleScan(target?: string) {
@@ -63,24 +88,17 @@ function App() {
     }
   }
 
-  // Spin up mpv (and load the chosen file) when a file is selected. This
-  // runs again whenever the selection changes; mpv stays alive across
-  // selections and we just send another `loadfile`.
+  // Boot libmpv on first selection. Subsequent selections just send
+  // another loadfile.
   useEffect(() => {
     if (!selected) return;
-    const host = playerHostRef.current;
-    if (!host) return;
     let cancelled = false;
-
     (async () => {
       try {
-        const r = host.getBoundingClientRect();
         if (!mpvReadyRef.current) {
           await invoke("mpv_init", {
-            x: r.x,
-            y: r.y,
-            width: r.width,
-            height: r.height,
+            windowWidth: window.innerWidth,
+            sidebarPx: SIDEBAR_PX,
           });
           mpvReadyRef.current = true;
         }
@@ -90,49 +108,109 @@ function App() {
         if (!cancelled) setError(typeof e === "string" ? e : String(e));
       }
     })();
-
     return () => {
       cancelled = true;
     };
   }, [selected]);
 
-  // Keep the embedded mpv HWND glued to the host div when the layout
-  // changes (window resize, sidebar reflow, etc.).
+  // Keep mpv's video-margin-ratio-left in sync with the actual sidebar
+  // fraction whenever the window resizes. The sidebar width itself is
+  // fixed by CSS, but the *ratio* changes with window width.
   useEffect(() => {
-    const host = playerHostRef.current;
-    if (!host) return;
-
     let frame = 0;
-    const updateRect = () => {
+    const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (!mpvReadyRef.current) return;
-        const r = host.getBoundingClientRect();
-        void invoke("mpv_set_rect", {
-          x: r.x,
-          y: r.y,
-          width: r.width,
-          height: r.height,
+        void invoke("mpv_set_layout", {
+          windowWidth: window.innerWidth,
+          sidebarPx: SIDEBAR_PX,
         });
       });
     };
-
-    const ro = new ResizeObserver(updateRect);
-    ro.observe(host);
-    window.addEventListener("resize", updateRect);
-
+    window.addEventListener("resize", update);
     return () => {
       cancelAnimationFrame(frame);
-      ro.disconnect();
-      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("resize", update);
     };
-  }, [selected]);
+  }, []);
+
+  // Wire libmpv property-change events into local React state.
+  useEffect(() => {
+    const unlisteners: UnlistenFn[] = [];
+    let cancelled = false;
+
+    (async () => {
+      const subs: Array<[string, (e: { payload: unknown }) => void]> = [
+        [
+          "mpv://time-pos",
+          (e) => {
+            if (typeof e.payload === "number") setPosition(e.payload);
+          },
+        ],
+        [
+          "mpv://duration",
+          (e) => {
+            if (typeof e.payload === "number") setDuration(e.payload);
+          },
+        ],
+        [
+          "mpv://pause",
+          (e) => {
+            if (typeof e.payload === "boolean") setPaused(e.payload);
+          },
+        ],
+        [
+          "mpv://eof-reached",
+          (e) => {
+            // EOF is reported as boolean; on false we leave state alone.
+            if (e.payload === true) setPaused(true);
+          },
+        ],
+      ];
+
+      for (const [name, handler] of subs) {
+        const fn = await listen(name, handler);
+        if (cancelled) {
+          fn();
+          continue;
+        }
+        unlisteners.push(fn);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, []);
+
+  const onTogglePause = useCallback(() => {
+    void invoke("mpv_cycle_pause").catch((e) =>
+      setError(typeof e === "string" ? e : String(e))
+    );
+  }, []);
+
+  const onScrubChange = useCallback((value: number) => {
+    setScrubbing(value);
+  }, []);
+
+  const onScrubCommit = useCallback((value: number) => {
+    setScrubbing(null);
+    setPosition(value);
+    void invoke("mpv_seek", { seconds: value }).catch((e) =>
+      setError(typeof e === "string" ? e : String(e))
+    );
+  }, []);
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return files;
     const needle = filter.toLowerCase();
     return files.filter((f) => f.relative_path.toLowerCase().includes(needle));
   }, [files, filter]);
+
+  const displayedPosition = scrubbing ?? position;
+  const safeDuration = duration > 0 ? duration : 0;
 
   return (
     <main className="app">
@@ -194,11 +272,37 @@ function App() {
       <section className="player">
         {selected ? (
           <>
-            {/* The mpv child HWND will be positioned over this div.
-                We keep it empty; mpv draws everything itself. */}
-            <div ref={playerHostRef} className="mpv-host" />
+            {/* The video shows through this transparent region: libmpv
+                renders a DComp swap-chain under the Tauri main HWND
+                and we leave the right pane's CSS fully transparent so
+                that swap-chain composes through to the user. */}
+            <div className="player-canvas" />
             <div className="now-playing" title={selected.path}>
               {selected.relative_path}
+            </div>
+            <div className="controls">
+              <button
+                type="button"
+                className="play-toggle"
+                onClick={onTogglePause}
+                title={paused ? "Play" : "Pause"}
+              >
+                {paused ? "Play" : "Pause"}
+              </button>
+              <input
+                className="scrubber"
+                type="range"
+                min={0}
+                max={Math.max(safeDuration, 0.001)}
+                step={0.05}
+                value={Math.min(displayedPosition, safeDuration || displayedPosition)}
+                onChange={(e) => onScrubChange(Number(e.currentTarget.value))}
+                onMouseUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
+                onKeyUp={(e) => onScrubCommit(Number(e.currentTarget.value))}
+              />
+              <span className="time">
+                {formatTime(displayedPosition)} / {formatTime(safeDuration)}
+              </span>
             </div>
           </>
         ) : (
