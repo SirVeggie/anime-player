@@ -302,6 +302,9 @@ function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (isTextInputTarget(e.target)) return;
+      if (e.target instanceof HTMLElement && e.target.closest("aside.sidebar")) {
+        return;
+      }
 
       if (e.code === "Space") {
         e.preventDefault();
