@@ -1,12 +1,13 @@
 # Anime Player
 
-A minimal local video player built with Tauri v2 + React + TypeScript. Point it at a folder, browse all video files inside it (recursively), and click any file to play it.
+A minimal local video player built with Tauri v2 + React + TypeScript. Point it at a folder, browse all video files inside it (recursively), and click any file to play it. Playback is provided by **libmpv** loaded in-process from `libmpv-2.dll` — there is no separate `mpv.exe` and no popup window.
 
 ## Features
 
 - Type or browse a folder path; all video files inside (and inside its subfolders) are listed.
-- Click a file to play it instantly via an embedded **mpv** process — true lossless decoding for any container/codec mpv supports (MKV with FLAC/Opus, HEVC, AV1, PGS/ASS subtitles, etc.).
-- Standard mpv keyboard shortcuts work inside the player area (Space pause, ←/→ seek, F fullscreen, M mute, etc.) and the on-screen controller appears on hover.
+- Click a file to play it instantly via in-process libmpv — true lossless decoding for any container/codec mpv supports (MKV with FLAC/Opus, HEVC, AV1, PGS/ASS subtitles, etc.).
+- The video composites with the rest of the UI inside a single window: window-mover scripts and per-window audio mixers see the player as one app.
+- Custom HTML controls bar (play/pause, scrubber, time) on top of the video, plus standard mpv keyboard shortcuts (Space pause, ←/→ seek, F fullscreen, M mute, etc.).
 - Quick filter to find a file in a large library.
 - Recognized extensions: `mkv`, `mp4`, `m4v`, `mov`, `avi`, `wmv`, `flv`, `webm`, `ts`, `m2ts`, `mts`, `ogv`, `ogm`, `vob`, `3gp`, `rm`, `rmvb`, `mpg`, `mpeg`.
 
@@ -18,10 +19,8 @@ You need the following installed:
 2. **Rust** (stable toolchain) – install from <https://rustup.rs>.
 3. **Microsoft Visual Studio C++ Build Tools** (Desktop development with C++ workload) – required by Tauri on Windows.
 4. **WebView2 Runtime** – preinstalled on Windows 11 / recent Windows 10 builds.
-5. **mpv** – the player shells out to `mpv.exe` on your `PATH`. Install one of:
-   - `scoop install mpv`
-   - `choco install mpv`
-   - or download from <https://mpv.io> and add the folder to `PATH`.
+
+You do **not** need a separate `mpv.exe` install. `libmpv-2.dll` is committed under `src-tauri/libs/mpv/` and bundled with the installer.
 
 See the official Tauri prerequisites: <https://tauri.app/start/prerequisites/>.
 
@@ -37,7 +36,7 @@ npm install
 npm run tauri dev
 ```
 
-The first run will compile the Rust side, which takes a couple of minutes. Subsequent runs are fast.
+The first run will compile the Rust side, which takes a couple of minutes. Subsequent runs are fast. The build script copies `libmpv-2.dll` next to the dev binary automatically.
 
 ## Build (production)
 
@@ -45,32 +44,41 @@ The first run will compile the Rust side, which takes a couple of minutes. Subse
 npm run tauri build
 ```
 
-Outputs an installer/executable in `src-tauri/target/release/bundle/`.
+Outputs an installer/executable in `src-tauri/target/release/bundle/`. `libmpv-2.dll` is shipped alongside via `tauri.conf.json`'s `bundle.resources`.
+
+## Updating the bundled libmpv
+
+The committed `libmpv-2.dll` and `mpv.lib` come from `shinchiro/mpv-winbuild-cmake` releases. To refresh them:
+
+```powershell
+node scripts/update-mpv-libs.mjs
+```
+
+This downloads the latest dev bundle, extracts `libmpv-2.dll` and `libmpv.dll.a` (renamed to `mpv.lib` for MSVC), and writes a `VERSION.txt` recording which release was installed. Requires `7z` on PATH (e.g. `scoop install 7zip`).
 
 ## Project layout
 
 - `src/` – React + TypeScript frontend (Vite).
-  - `App.tsx` – folder input, file list, and the mpv host pane.
+  - `App.tsx` – folder input, file list, transparent player pane, custom controls.
 - `src-tauri/` – Rust backend.
-  - `src/lib.rs` – exposes the `scan_videos` command plus `mpv_*` commands.
-  - `src/mpv.rs` – spawns `mpv.exe` into a Win32 child window and talks to it via JSON IPC over a named pipe.
-  - `tauri.conf.json` – enables the asset protocol (`assetProtocol.scope = ["**"]`).
-  - `capabilities/default.json` – grants `dialog` permission for the native folder picker.
+  - `src/lib.rs` – exposes `scan_videos` plus `mpv_*` commands.
+  - `src/mpv/` – in-process libmpv module: `ffi.rs` (FFI declarations), `handle.rs` (`MpvHandle` and lifecycle), `event_loop.rs` (property observers → `mpv://*` Tauri events).
+  - `libs/mpv/` – bundled `libmpv-2.dll` + `mpv.lib`.
+  - `build.rs` – tells Cargo to link against `mpv` and copies the DLL beside the dev binary.
+  - `tauri.conf.json` – sets `transparent: true` on the main window and ships `libmpv-2.dll` as a bundle resource.
+- `scripts/update-mpv-libs.mjs` – refresher for the bundled libmpv.
 
 ## How playback works
 
-The frontend renders an empty `<div class="mpv-host" />` where the video pane should be. On the first file selection, Rust creates an **owned top-level popup window** (`WS_POPUP`, owner = the Tauri main HWND) and positions it in screen coordinates over that div, then spawns:
+The Tauri main window has `"transparent": true`. On the first file selection the frontend calls `invoke("mpv_init", ...)`, which:
 
-```text
-mpv.exe --wid=<popup_hwnd>
-        --idle=yes --force-window=yes --no-terminal
-        --keep-open=yes --osc=yes
-        --input-default-bindings=yes
-        --input-ipc-server=\\.\pipe\anime-player-mpv
-```
+1. `mpv_create()`s a libmpv context in the Tauri process.
+2. Sets the `wid` option to the Tauri main `HWND` (so libmpv embeds into our window) plus `vo=gpu-next`, `gpu-context=d3d11`, `hwdec=auto-safe`, `osc=no`.
+3. `mpv_initialize()`s the context. libmpv creates its own DirectComposition swap-chain under our HWND.
+4. Spawns a background thread that observes `time-pos`, `duration`, `pause`, `eof-reached` and republishes each property change as a Tauri event (`mpv://time-pos`, etc.).
 
-Why an owned popup instead of a `WS_CHILD` window inside the Tauri HWND? WebView2 renders its content via DirectComposition, and a composited surface always paints on top of regular GDI child windows in the same parent — regardless of Win32 z-order. Hosting mpv in a top-level popup window sidesteps this: top-level windows compose at the desktop level, so the video sits cleanly above the WebView. The popup is "owned" by the main window, so it minimizes/restores with the owner and is destroyed when the owner closes.
+Because libmpv's swap-chain and WebView2's visual both compose under the same HWND in the same DWM tree, the video shows through anywhere the React UI is CSS-transparent (the `.player` pane). The sidebar paints opaquely on top. We confine the video to the right pane by setting `video-margin-ratio-left = sidebar_px / window_width`, which we re-issue on every window resize.
 
-The frontend reports CSS-pixel rects from a `ResizeObserver`; Rust scales them by the window's DPI factor, projects them into screen coordinates with `ClientToScreen`, and `SetWindowPos`'s the popup. The Tauri `Moved` and `Resized` window events also trigger a re-projection so the popup follows when the user drags or resizes the main window. Loading a new file is just a `{"command":["loadfile", path]}` JSON line written to the IPC pipe.
+Loading another file is just `mpv_load(path)` (which fires `loadfile`). Switching to a custom controls UI was a primary motivator for this approach: drawing HTML over a transparent CSS region is much easier than drawing it over a separate top-level popup HWND.
 
-Subtitles, audio track switching, seeking, fullscreen, etc. all work via mpv's built-in OSC and key bindings. A custom HTML controls bar driven from React is on the TODO list.
+For the historical popup-window architecture and why the in-process libmpv approach replaced it, see `CONTEXT.md`.
