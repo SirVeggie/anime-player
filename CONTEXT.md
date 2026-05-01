@@ -27,10 +27,14 @@ runtime prerequisites. See `README.md` for the full setup steps.
   composes through. There is no host `<div>` rect tracking anymore —
   mpv's video region is controlled via the `video-margin-ratio-left`
   option, not by positioning a child window.
-- A `window.resize` handler (rAF-debounced) calls `mpv_set_layout`
-  with the new window width so the margin ratio stays in sync as the
-  user resizes (sidebar width is fixed at 360px; the *fraction* of the
-  window it covers changes with width).
+- Window-resize layout tracking happens **natively** in Rust: the
+  Tauri `WindowEvent::Resized` / `ScaleFactorChanged` handler re-issues
+  `video-margin-ratio-left` directly on the UI thread on every WM_SIZE.
+  An earlier JS-side `window.resize` + `invoke("mpv_set_layout")` path
+  visibly stuttered the modal resize loop while a video was playing
+  (each WM_SIZE was paying for a full IPC round-trip per animation
+  frame). The frontend still calls `mpv_init` / `mpv_set_layout` once
+  to register the initial sidebar width.
 - libmpv is initialized lazily on the first file selection via
   `mpv_init`. After init, switching files is just `mpv_load`.
 - A small custom HTML controls bar (play/pause, scrubber, time)
@@ -62,9 +66,12 @@ runtime prerequisites. See `README.md` for the full setup steps.
 - Exposed Tauri commands: `scan_videos`, `mpv_init(window_width,
   sidebar_px)`, `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_seek(seconds)`,
   `mpv_set_layout(window_width, sidebar_px)`, `mpv_stop()`.
-- `lib.rs` hooks `WindowEvent::CloseRequested` on the main window to
-  drop `MpvHandle` (which terminates the libmpv context and joins the
-  event-loop thread) before the HWND becomes invalid.
+- `lib.rs` hooks the main window's `WindowEvent`:
+  - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
+    and joins the event-loop thread) before the HWND becomes invalid.
+  - `Resized` and `ScaleFactorChanged` re-issue
+    `video-margin-ratio-left` based on the new logical width and the
+    last sidebar-width the frontend registered (`AppState::sidebar_px`).
 
 ### Build / linkage — `src-tauri/build.rs`, `src-tauri/libs/mpv/`
 

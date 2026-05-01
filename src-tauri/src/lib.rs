@@ -91,10 +91,30 @@ fn scan_videos(folder: String) -> Result<Vec<VideoFile>, String> {
     Ok(results)
 }
 
+/// Default sidebar width in CSS pixels. Mirrors `SIDEBAR_PX` in
+/// `src/App.tsx`. Used by the native resize handler before the frontend
+/// has had a chance to register its own value via `mpv_init`.
 #[cfg(windows)]
-#[derive(Default)]
+const DEFAULT_SIDEBAR_PX: f64 = 360.0;
+
+#[cfg(windows)]
 struct AppState {
     mpv: Mutex<Option<MpvHandle>>,
+    /// Last sidebar width (CSS px) the frontend asked us to apply. Read
+    /// by the native resize handler so it can re-issue
+    /// `video-margin-ratio-left` on every WM_SIZE without needing a JS
+    /// round-trip per frame.
+    sidebar_px: Mutex<f64>,
+}
+
+#[cfg(windows)]
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            mpv: Mutex::new(None),
+            sidebar_px: Mutex::new(DEFAULT_SIDEBAR_PX),
+        }
+    }
 }
 
 /// Re-compute the `video-margin-ratio-left` for the current sidebar
@@ -122,6 +142,10 @@ fn mpv_init(
     window_width: f64,
     sidebar_px: f64,
 ) -> Result<(), String> {
+    if let Ok(mut g) = state.sidebar_px.lock() {
+        *g = sidebar_px;
+    }
+
     let mut guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(existing) = guard.as_ref() {
         apply_layout_to_mpv(existing, window_width, sidebar_px)?;
@@ -170,11 +194,44 @@ fn mpv_set_layout(
     window_width: f64,
     sidebar_px: f64,
 ) -> Result<(), String> {
+    if let Ok(mut g) = state.sidebar_px.lock() {
+        *g = sidebar_px;
+    }
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
         apply_layout_to_mpv(m, window_width, sidebar_px)?;
     }
     Ok(())
+}
+
+/// Native `WindowEvent::Resized` / `ScaleFactorChanged` hook. Called on
+/// the Tauri UI thread on every WM_SIZE. We update mpv's
+/// `video-margin-ratio-left` in-process here instead of from a
+/// JS `resize` listener; the JS path goes through `invoke()` which
+/// adds an IPC round-trip per frame and noticeably degrades resize
+/// smoothness while a video is playing.
+#[cfg(windows)]
+fn handle_native_resize(
+    app_handle: &tauri::AppHandle,
+    physical_width: u32,
+    scale_factor: f64,
+) {
+    let Some(state) = app_handle.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(guard) = state.mpv.lock() else {
+        return;
+    };
+    let Some(m) = guard.as_ref() else {
+        return;
+    };
+    let logical_width = (physical_width as f64 / scale_factor.max(0.01)).max(1.0);
+    let sidebar_px = state
+        .sidebar_px
+        .lock()
+        .map(|g| *g)
+        .unwrap_or(DEFAULT_SIDEBAR_PX);
+    let _ = apply_layout_to_mpv(m, logical_width, sidebar_px);
 }
 
 #[cfg(windows)]
@@ -199,19 +256,32 @@ pub fn run() {
             app.manage(AppState::default());
 
             // Tear libmpv down before the main window's HWND becomes
-            // invalid. Without this, the event-loop thread can outlive
-            // the HWND it was rendering into and we get spurious GPU
-            // errors on close.
+            // invalid, and re-issue the video margin natively on every
+            // resize so the modal resize loop doesn't have to wait on
+            // a JS -> invoke() round-trip per frame.
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let window_for_handler = window.clone();
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { .. } => {
                         if let Some(state) = app_handle.try_state::<AppState>() {
                             if let Ok(mut guard) = state.mpv.lock() {
                                 guard.take();
                             }
                         }
                     }
+                    tauri::WindowEvent::Resized(size) => {
+                        let scale = window_for_handler.scale_factor().unwrap_or(1.0);
+                        handle_native_resize(&app_handle, size.width, scale);
+                    }
+                    tauri::WindowEvent::ScaleFactorChanged {
+                        scale_factor,
+                        new_inner_size,
+                        ..
+                    } => {
+                        handle_native_resize(&app_handle, new_inner_size.width, *scale_factor);
+                    }
+                    _ => {}
                 });
             }
 

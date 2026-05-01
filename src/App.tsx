@@ -113,27 +113,12 @@ function App() {
     };
   }, [selected]);
 
-  // Keep mpv's video-margin-ratio-left in sync with the actual sidebar
-  // fraction whenever the window resizes. The sidebar width itself is
-  // fixed by CSS, but the *ratio* changes with window width.
-  useEffect(() => {
-    let frame = 0;
-    const update = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (!mpvReadyRef.current) return;
-        void invoke("mpv_set_layout", {
-          windowWidth: window.innerWidth,
-          sidebarPx: SIDEBAR_PX,
-        });
-      });
-    };
-    window.addEventListener("resize", update);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", update);
-    };
-  }, []);
+  // Note: window-resize tracking lives in Rust now. The native
+  // `WindowEvent::Resized` handler in `src-tauri/src/lib.rs` re-applies
+  // `video-margin-ratio-left` directly on the UI thread on every WM_SIZE,
+  // which is much smoother than bouncing through a JS resize listener +
+  // `invoke()` per animation frame (the latter visibly stutters while a
+  // video is playing during a window-edge drag).
 
   // Wire libmpv property-change events into local React state.
   useEffect(() => {

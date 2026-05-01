@@ -9,5 +9,5 @@ Running list of things to do / explore for the Anime Player app.
 - [x] ~~Bundle mpv with the app so users don't need to install it separately.~~ `libmpv-2.dll` is committed under `src-tauri/libs/mpv/` and shipped via `tauri.conf.json` `bundle.resources`. Refresh with `node scripts/update-mpv-libs.mjs`.
 - [ ] Expand the custom HTML controls bar: audio/sub track menus, speed control, volume slider. Foundation (play/pause, scrubber, time) is in place.
 - [ ] Persist last-played folder + last position per file (resume playback).
-- [ ] Re-issue `mpv_set_layout` on `ScaleFactorChanged` (window dragged across monitors with different DPI).
+- [x] ~~Re-issue `mpv_set_layout` on `ScaleFactorChanged` (window dragged across monitors with different DPI).~~ Done natively in `lib.rs` via the `WindowEvent::ScaleFactorChanged` arm of the main-window handler.
 - [ ] Confirm the libmpv DComp swap-chain composes correctly across all WebView2 versions / Windows builds the user runs.
