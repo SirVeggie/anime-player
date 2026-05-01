@@ -84,6 +84,15 @@ suspects are: popup z-order vs another window, stale cached rect after
 a DPI change, or mpv failing to launch (check the dev terminal for
 stderr).
 
+## Version control
+
+The repo is a git repository on branch `main` with no remote. Every
+logical agent change is committed as its own checkpoint so the user
+can roll back individual steps. The full convention (when to commit,
+what to stage, message style, what *not* to do — no `--amend`, no
+push, no rebase without an explicit request) lives in
+`.cursor/rules/commit-checkpoints.mdc`.
+
 ## Files to know
 
 - `README.md` — user-facing setup + run + project layout, including a
@@ -92,6 +101,9 @@ stderr).
   event reader, bundling mpv.exe, DPI scale-factor change handling,
   resume playback).
 - `CONTEXT.md` — this file.
+- `.cursor/rules/` — agent rules. `read-context.mdc` points new agents
+  here; `commit-checkpoints.mdc` defines the per-change commit
+  workflow.
 
 ## Conventions
 
@@ -102,7 +114,11 @@ stderr).
   commentary that's expected).
 - The user prefers iterative changes with verification — run
   `cargo check` and `npx tsc --noEmit` after backend/frontend edits.
-- Don't commit changes unless explicitly asked.
+- **Commit after every logical change** so each agent step is a
+  checkpoint the user can roll back to. See
+  `.cursor/rules/commit-checkpoints.mdc` for the full convention
+  (one logical change per commit, imperative subject lines, no
+  `--amend` / push / rebase without an explicit request).
 
 ## Build/test commands
 

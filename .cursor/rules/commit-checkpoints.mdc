@@ -1,0 +1,79 @@
+---
+description: Commit after every logical change so each agent step is a checkpoint
+alwaysApply: true
+---
+
+# Commit after each change
+
+This repo is set up so that **every logical agent change becomes its own
+git commit**. The commits are checkpoints: they let the user roll back,
+diff, or cherry-pick individual modifications without losing later work.
+
+## When to commit
+
+Commit at the end of each *logical* unit of work, before yielding the
+turn back to the user. A logical unit is typically:
+
+- One feature or bug fix the user asked for.
+- One refactor that stands on its own.
+- One configuration / tooling change (e.g. adding a rule, updating
+  `CONTEXT.md`, bumping a dep).
+
+If the user asks for several unrelated things in one message, make
+several commits — one per thing — rather than a single mega-commit.
+
+Do **not** commit:
+
+- Half-finished work that doesn't type-check / build. Run `npx tsc
+  --noEmit` and `cargo check --manifest-path src-tauri/Cargo.toml`
+  first when the change touches the relevant side.
+- Changes that only exist because you were exploring; revert them
+  instead.
+- Files that look like secrets (`.env`, credentials, tokens). Stop and
+  ask the user.
+
+## How to commit
+
+- Stage only the files that belong to the current change (`git add
+  <paths>`), not blanket `git add -A`, so unrelated edits don't sneak in.
+  If you genuinely changed everything in the working tree on purpose,
+  `-A` is fine — but check `git status` first.
+- Use a short, imperative subject line (≤72 chars) describing the *why*
+  or the user-visible effect, e.g.:
+  - `Add custom HTML controls bar driven over mpv IPC`
+  - `Fix mpv popup misalignment after DPI change`
+  - `Refactor scan_videos to stream results`
+- Add a body only if the change has non-obvious motivation or
+  trade-offs. Wrap the body at ~72 chars.
+- Pass multi-line messages via a heredoc so newlines survive PowerShell:
+
+  ```powershell
+  git commit -m "Subject line" -m "Body paragraph one." -m "Body paragraph two."
+  ```
+
+  Or use `git commit` with `-F` and a temp file if it's longer.
+- **Do not** use `git commit --amend` to fold new work into a previous
+  commit unless the user explicitly asks. Each agent step should be its
+  own checkpoint.
+- **Do not** push, force-push, rebase, or reset without an explicit
+  request. Local commits are the checkpoint mechanism; the user
+  controls history rewrites and remotes.
+
+## After committing
+
+Run `git status` to confirm the working tree is clean (or only contains
+intentional leftovers), and mention the new commit's subject in your
+reply so the user knows a checkpoint was created.
+
+## Verifying before commit
+
+When the change touches code (not just docs / config), run the relevant
+type-checks first:
+
+- Frontend (`src/`, `index.html`, `tsconfig*.json`, `vite.config.ts`):
+  `npx tsc --noEmit`.
+- Backend (`src-tauri/src/`, `Cargo.toml`):
+  `cargo check --manifest-path src-tauri/Cargo.toml`.
+
+If either fails, fix it before committing — don't checkpoint a broken
+state.
