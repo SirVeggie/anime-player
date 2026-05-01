@@ -49,9 +49,11 @@ runtime prerequisites. See `README.md` for the full setup steps.
   reads state from `mpv://time-pos`, `mpv://duration`, `mpv://pause`,
   `mpv://eof-reached` events. The video pane uses Tauri
   `startDragging` (single left-click) and `setFullscreen` (double
-  left-click); right-click toggles pause; Space and ArrowLeft/ArrowRight
+  left-click or **F**); right-click toggles pause; Space and ArrowLeft/ArrowRight
   seek ±5s are handled in the frontend (capture-phase `keydown`) so they
   work while the WebView has focus without typing in sidebar fields.
+  A **Close video** control (and `mpv_stop`) returns to the no-selection
+  empty player pane.
 
 ### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/mpv/`
 

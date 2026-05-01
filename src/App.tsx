@@ -368,6 +368,21 @@ function App() {
     }
   }, []);
 
+  const onCloseVideo = useCallback(() => {
+    void (async () => {
+      try {
+        await invoke("mpv_stop");
+      } catch (e) {
+        setError(typeof e === "string" ? e : String(e));
+      } finally {
+        setSelected(null);
+        setPosition(0);
+        setDuration(0);
+        setPaused(true);
+      }
+    })();
+  }, []);
+
   const onCanvasMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
@@ -416,11 +431,17 @@ function App() {
         void invoke("mpv_seek_relative", { delta: 5 }).catch((err) =>
           setError(typeof err === "string" ? err : String(err))
         );
+        return;
+      }
+      if (e.code === "KeyF") {
+        e.preventDefault();
+        void toggleFullscreen();
+        return;
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [selected]);
+  }, [selected, toggleFullscreen]);
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return files;
@@ -575,7 +596,7 @@ function App() {
                         type="button"
                         className="icon-button icon-button--player icon-button--lg"
                         onClick={() => void toggleFullscreen()}
-                        title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                        title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
                       >
                         {fullscreen ? (
                           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -586,6 +607,17 @@ function App() {
                             <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
                           </svg>
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button icon-button--player icon-button--lg"
+                        onClick={onCloseVideo}
+                        title="Close video"
+                        aria-label="Close video"
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                        </svg>
                       </button>
                     </div>
                   </div>
