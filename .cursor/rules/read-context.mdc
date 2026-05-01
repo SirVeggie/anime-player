@@ -1,0 +1,27 @@
+---
+description: Read CONTEXT.md before doing any work in this repo
+alwaysApply: true
+---
+
+# Read project context first
+
+This repository keeps a running summary of decisions, architecture, and
+conventions in `CONTEXT.md` at the workspace root. Before answering any
+non-trivial question or making any changes, read that file using the Read
+tool — it explains:
+
+- What the project is (a Tauri v2 + React anime video player on Windows).
+- The frontend / backend architecture and how they communicate.
+- The critical mpv hosting decision (owned `WS_POPUP` top-level window
+  instead of `WS_CHILD`, because of WebView2 + DirectComposition). Do not
+  re-derive this; the trade-offs are documented.
+- File layout, build commands, and conventions (PowerShell shell, comment
+  style, no unprompted commits, run `cargo check` / `npx tsc --noEmit`
+  after edits).
+
+Also skim `TODO.md` so you know what follow-ups are already tracked
+before proposing new ones.
+
+If you change anything that contradicts or extends what's in `CONTEXT.md`
+(architecture shifts, new conventions, new top-level files), update
+`CONTEXT.md` in the same change so it stays accurate.

@@ -1,0 +1,235 @@
+:root {
+  --bg: #0e0f13;
+  --bg-elev: #161821;
+  --bg-elev-2: #1d2030;
+  --border: #262a3a;
+  --text: #e7e9f3;
+  --muted: #8a8fa3;
+  --accent: #7c5cff;
+  --accent-soft: #2a2348;
+  --danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.sidebar-header {
+  padding: 16px 16px 8px;
+}
+
+.sidebar-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.folder-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+}
+
+.folder-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter {
+  margin: 4px 16px 8px;
+}
+
+input[type="text"] {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+input[type="text"]:focus {
+  border-color: var(--accent);
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background: #6c4dff;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button[type="button"] {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+button[type="button"]:hover {
+  background: #252a3d;
+}
+
+.error {
+  margin: 0 16px 8px;
+  padding: 8px 10px;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.4);
+  color: var(--danger);
+  border-radius: 6px;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+}
+
+.file-list li:hover {
+  background: var(--bg-elev-2);
+}
+
+.file-list li.active {
+  background: var(--accent-soft);
+  color: white;
+}
+
+.file-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-size {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.file-list li.active .file-size {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.player {
+  display: flex;
+  flex-direction: column;
+  background: black;
+  min-width: 0;
+}
+
+.mpv-host {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background: black;
+  /* mpv renders into a native child HWND positioned over this div.
+     Keep it empty so layout reflects the desired player rect. */
+}
+
+.now-playing {
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  padding: 24px;
+}
+
+.empty h2 {
+  margin: 0 0 6px;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #303550;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
