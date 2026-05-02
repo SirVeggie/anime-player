@@ -189,6 +189,7 @@ export function PlayerView(props: {
   onAnilistProgressSynced?: (animeId: number, result: AnilistProgressSyncResult) => void;
   onError: (message: string) => void;
   onControlsVisibilityChange?: (visible: boolean) => void;
+  onPausedStateChange?: (paused: boolean) => void;
 }) {
   const {
     episode,
@@ -201,6 +202,7 @@ export function PlayerView(props: {
     onAnilistProgressSynced,
     onError,
     onControlsVisibilityChange,
+    onPausedStateChange,
   } = props;
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(episode.position_seconds || 0);
@@ -232,6 +234,10 @@ export function PlayerView(props: {
   useEffect(() => {
     playbackRef.current = { episode, position, duration };
   }, [duration, episode, position]);
+
+  useEffect(() => {
+    onPausedStateChange?.(paused);
+  }, [onPausedStateChange, paused]);
 
   useEffect(() => {
     onErrorRef.current = onError;

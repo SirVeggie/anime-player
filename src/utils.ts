@@ -38,6 +38,16 @@ export function errorMessage(error: unknown): string {
   return typeof error === "string" ? error : String(error);
 }
 
+/** Shown in the native window title (taskbar / Alt-Tab); keep OS limits in mind. */
+export function shortenForOsTitle(text: string, maxChars = 42): string {
+  const t = text.trim().replace(/\s+/g, " ");
+  if (!t) return "Anime";
+  if (t.length <= maxChars) return t;
+  return `${t.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+export const APP_WINDOW_TITLE = "Anime Player";
+
 /** True when the event target is typing in a field that should keep window shortcuts from firing. */
 export function isTextInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

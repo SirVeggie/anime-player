@@ -51,7 +51,7 @@ import type {
   RegexRuleInput,
   RootFolder,
 } from "./types";
-import { errorMessage, isTextInputTarget } from "./utils";
+import { APP_WINDOW_TITLE, errorMessage, isTextInputTarget, shortenForOsTitle } from "./utils";
 import "./App.css";
 
 type View = "categories" | "anime" | "search" | "episodes" | "settings" | "player";
@@ -91,6 +91,7 @@ function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [videoOpening, setVideoOpening] = useState(false);
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
+  const [playerPaused, setPlayerPaused] = useState(true);
   const contentRef = useRef<HTMLElement | null>(null);
   const selectedAnimeIdRef = useRef<number | null>(null);
   const currentPageKeyRef = useRef("categories");
@@ -635,6 +636,39 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [episodeReturnView, navigateToView, selectedAnime, view]);
 
+  const showPlayer = view === "player" && Boolean(selectedEpisode);
+
+  const osTitleAnimeLabel = useMemo(() => {
+    if (!selectedEpisode || !library) return null;
+    const anime =
+      selectedAnime?.id === selectedEpisode.anime_id
+        ? selectedAnime
+        : library.anime.find((a) => a.id === selectedEpisode.anime_id);
+    const label = anime?.anilist_title?.trim() || anime?.title?.trim();
+    return label || null;
+  }, [library, selectedAnime, selectedEpisode]);
+
+  useEffect(() => {
+    if (!showPlayer) {
+      setPlayerPaused(true);
+    }
+  }, [showPlayer]);
+
+  useEffect(() => {
+    if (!showPlayer) {
+      void appWindow.setTitle(APP_WINDOW_TITLE).catch(() => {});
+      return;
+    }
+    const raw = osTitleAnimeLabel ?? selectedEpisode?.file_name ?? "Anime";
+    const short = shortenForOsTitle(raw);
+    const prefix = playerPaused ? "Paused" : "Playing";
+    void appWindow.setTitle(`${prefix} - ${short} - ${APP_WINDOW_TITLE}`).catch(() => {});
+  }, [osTitleAnimeLabel, playerPaused, selectedEpisode, showPlayer]);
+
+  const handlePlayerPausedChange = useCallback((paused: boolean) => {
+    setPlayerPaused(paused);
+  }, []);
+
   if (loading) {
     return (
       <main className="app app--loading">
@@ -658,7 +692,6 @@ function App() {
     );
   }
 
-  const showPlayer = view === "player" && selectedEpisode;
   const playerLoadedInBackground = selectedEpisode && !showPlayer;
   const libraryViewActive =
     view === "categories" ||
@@ -737,6 +770,7 @@ function App() {
           onAnilistProgressSynced={handleAnilistProgressSynced}
           onError={(message) => showToast("error", message)}
           onControlsVisibilityChange={setPlayerControlsChromeVisible}
+          onPausedStateChange={handlePlayerPausedChange}
         />
       ) : null}
 

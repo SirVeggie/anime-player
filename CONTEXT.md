@@ -91,6 +91,13 @@ view components. Per-screen UI lives in `src/components/`:
   persist + return to episodes). Those actions
   require explicit `core:window:allow-*` entries in
   `src-tauri/capabilities/default.json` (Tauri v2 ACL).
+  Even though the custom title bar hides the **Anime Player** label in the
+  player, **`App.tsx` updates the native OS window title** via Tauri
+  `set_title` when the player view is visible: `Playing - [shortened anime
+  title] - Anime Player` while playback is unpaused and `Paused - …`
+  while paused (shortening uses `shortenForOsTitle` in `src/utils.ts`);
+  otherwise the title is reset to `Anime Player`. This needs
+  **`core:window:allow-set-title`** in the default capability file.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
