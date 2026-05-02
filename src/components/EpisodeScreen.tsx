@@ -6,6 +6,26 @@ import { formatEpisodeNumber, formatSize, formatTime, progressPercent } from "..
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
+type AnilistProgressUpdate = {
+  animeId: number;
+  progress: number;
+  updatedAt: number;
+};
+
+function mergeWithLatestProgress(
+  status: AnilistMediaStatus | null,
+  current: AnilistMediaStatus | null,
+): AnilistMediaStatus | null {
+  if (!status) return null;
+  const progress =
+    current?.progress == null
+      ? status.progress
+      : status.progress == null
+        ? current.progress
+        : Math.max(status.progress, current.progress);
+  return { ...status, progress };
+}
+
 export function EpisodeScreen(props: {
   anime: AnimeSummary;
   episodes: Episode[];
@@ -16,6 +36,7 @@ export function EpisodeScreen(props: {
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
   onSetAnilistScore: (animeId: number, score: number | null) => Promise<AnilistMediaStatus>;
+  anilistProgressUpdate: AnilistProgressUpdate | null;
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
   onOpenAnilist: (url: string) => void;
@@ -30,6 +51,7 @@ export function EpisodeScreen(props: {
     onSearchAnilist,
     onGetAnilistStatus,
     onSetAnilistScore,
+    anilistProgressUpdate,
     onLinkAnilist,
     onUnlinkAnilist,
     onOpenAnilist,
@@ -86,7 +108,7 @@ export function EpisodeScreen(props: {
     void onGetAnilistStatus(anime.id)
       .then((status) => {
         if (cancelled) return;
-        setAnilistStatus(status);
+        setAnilistStatus((current) => mergeWithLatestProgress(status, current));
         setScoreDraft(status?.score == null ? "" : String(status.score));
       })
       .catch((e) => {
@@ -96,6 +118,18 @@ export function EpisodeScreen(props: {
       cancelled = true;
     };
   }, [anime.anilist_id, anime.id, onGetAnilistStatus]);
+
+  useEffect(() => {
+    if (!anilistProgressUpdate || anilistProgressUpdate.animeId !== anime.id) return;
+    setAnilistStatus((current) => ({
+      progress:
+        current?.progress == null
+          ? anilistProgressUpdate.progress
+          : Math.max(current.progress, anilistProgressUpdate.progress),
+      episodes: current?.episodes ?? null,
+      score: current?.score ?? null,
+    }));
+  }, [anime.id, anilistProgressUpdate]);
 
   useEffect(() => {
     return () => {
@@ -220,6 +254,24 @@ export function EpisodeScreen(props: {
     [saveScore],
   );
 
+  const updateScoreDraft = useCallback(
+    (value: string) => {
+      setScoreDraft(value);
+      scheduleScoreSave(value);
+    },
+    [scheduleScoreSave],
+  );
+
+  const stepScoreDraft = useCallback(
+    (delta: number) => {
+      const parsedDraft = Number(scoreDraft);
+      const baseScore = scoreDraft.trim() && Number.isFinite(parsedDraft) ? parsedDraft : (anilistStatus?.score ?? 0);
+      const nextScore = Math.min(100, Math.max(0, Math.round(baseScore + delta)));
+      updateScoreDraft(String(nextScore));
+    },
+    [anilistStatus?.score, scoreDraft, updateScoreDraft],
+  );
+
   return (
     <>
       <ViewHeader
@@ -273,27 +325,41 @@ export function EpisodeScreen(props: {
           <div className="anilist-score-control">
             <label>
               <span>Score</span>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="0.5"
-                value={scoreDraft}
-                placeholder="No score"
-                disabled={scoreSaving}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setScoreDraft(value);
-                  scheduleScoreSave(value);
-                }}
-                onBlur={(e) => {
-                  if (scoreSaveTimerRef.current !== null) {
-                    window.clearTimeout(scoreSaveTimerRef.current);
-                    scoreSaveTimerRef.current = null;
-                    void saveScore(e.currentTarget.value);
-                  }
-                }}
-              />
+              <div className="score-stepper">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={scoreDraft}
+                  placeholder="No score"
+                  disabled={scoreSaving}
+                  onChange={(e) => updateScoreDraft(e.currentTarget.value)}
+                  onBlur={(e) => {
+                    if (scoreSaveTimerRef.current !== null) {
+                      window.clearTimeout(scoreSaveTimerRef.current);
+                      scoreSaveTimerRef.current = null;
+                      void saveScore(e.currentTarget.value);
+                    }
+                  }}
+                />
+                <div className="score-stepper-buttons">
+                  <button
+                    type="button"
+                    className="score-stepper-button score-stepper-button--up"
+                    aria-label="Increase AniList score"
+                    disabled={scoreSaving}
+                    onClick={() => stepScoreDraft(1)}
+                  />
+                  <button
+                    type="button"
+                    className="score-stepper-button score-stepper-button--down"
+                    aria-label="Decrease AniList score"
+                    disabled={scoreSaving}
+                    onClick={() => stepScoreDraft(-1)}
+                  />
+                </div>
+              </div>
             </label>
             {scoreError ? <span className="anilist-score-error">{scoreError}</span> : null}
           </div>

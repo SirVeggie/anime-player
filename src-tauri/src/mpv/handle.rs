@@ -9,8 +9,8 @@ use tauri::AppHandle;
 
 use super::event_loop::run_event_loop;
 use super::ffi::{
-    mpv_command, mpv_create, mpv_format, mpv_free_node_contents, mpv_get_property,
-    mpv_initialize, mpv_set_option_string, mpv_terminate_destroy, mpv_wakeup, MpvNode,
+    mpv_command, mpv_create, mpv_format, mpv_free_node_contents, mpv_get_property, mpv_initialize,
+    mpv_set_option_string, mpv_terminate_destroy, mpv_wakeup, MpvNode,
 };
 
 /// In-process libmpv handle. Owns the mpv context plus the event-loop
@@ -311,7 +311,10 @@ unsafe fn node_string(node: &MpvNode) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-    unsafe { CStr::from_ptr(ptr) }.to_str().ok().map(str::to_owned)
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(str::to_owned)
 }
 
 unsafe fn node_i64(node: &MpvNode) -> Option<i64> {

@@ -396,8 +396,67 @@
   font-size: 12px;
 }
 
-.anilist-score-control input {
-  width: 110px;
+.score-stepper {
+  position: relative;
+  width: 96px;
+  margin-right: 8px;
+}
+
+.score-stepper input {
+  width: 100%;
+  padding-right: 30px;
+  appearance: textfield;
+}
+
+.score-stepper input::-webkit-outer-spin-button,
+.score-stepper input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.score-stepper-buttons {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: 24px;
+  pointer-events: none;
+}
+
+.score-stepper-button {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  width: 24px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  pointer-events: auto;
+}
+
+.score-stepper-button:hover:not(:disabled),
+.score-stepper-button:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: #cfe2ff;
+}
+
+.score-stepper-button::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+}
+
+.score-stepper-button--up::before {
+  transform: translateY(1px) rotate(-135deg);
+}
+
+.score-stepper-button--down::before {
+  transform: translateY(-1px) rotate(45deg);
 }
 
 .anilist-score-error {
