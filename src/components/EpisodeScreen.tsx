@@ -148,14 +148,9 @@ export function EpisodeScreen(props: {
               onChange={onMoveAnime}
             />
             {anime.anilist_site_url ? (
-              <>
-                <button type="button" onClick={() => onOpenAnilist(anime.anilist_site_url ?? "")}>
-                  Open AniList
-                </button>
-                <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
-                  Unlink
-                </button>
-              </>
+              <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
+                Unlink
+              </button>
             ) : (
               <button type="button" onClick={openLinkSearch}>
                 Link AniList
@@ -166,7 +161,16 @@ export function EpisodeScreen(props: {
       />
 
       {anime.anilist_id ? (
-        <section className="anime-detail-panel">
+        <button
+          type="button"
+          className="anime-detail-panel"
+          onClick={() => {
+            const url = anime.anilist_site_url;
+            if (url) onOpenAnilist(url);
+          }}
+          disabled={!anime.anilist_site_url}
+          aria-label={`Open ${anime.anilist_title ?? anime.title} on AniList`}
+        >
           <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
             {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
           </div>
@@ -174,7 +178,7 @@ export function EpisodeScreen(props: {
             <h2>{anime.anilist_title ?? anime.title}</h2>
             <p className="muted">Linked to AniList #{anime.anilist_id}</p>
           </div>
-        </section>
+        </button>
       ) : null}
 
       {linkSearchOpen && !anime.anilist_id ? (
