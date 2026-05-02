@@ -82,6 +82,10 @@
   justify-content: space-between;
 }
 
+.stacked-field .custom-select {
+  min-width: 0;
+}
+
 .form-grid span,
 .stacked-field span {
   color: var(--text-muted);
@@ -373,7 +377,7 @@ button:disabled {
   min-width: 180px;
 }
 
-.view-actions .custom-select-trigger {
+button.custom-select-trigger {
   width: 100%;
   display: flex;
   align-items: center;

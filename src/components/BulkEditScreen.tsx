@@ -1,17 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AnimeSummary, Category, Episode, LibraryState } from "../types";
 import { AnimeCardGrid } from "./AnimeGrid";
+import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
-const ALL_CATEGORIES = "all";
-
-type CategoryFilterValue = number | typeof ALL_CATEGORIES;
-
-function parseCategoryFilter(value: string): CategoryFilterValue {
-  if (value === ALL_CATEGORIES) return ALL_CATEGORIES;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : ALL_CATEGORIES;
-}
+const ALL_CATEGORIES_ID = 0;
+const REGEX_DEBOUNCE_MS = 2000;
 
 function categoryName(categories: Category[], categoryId: number): string {
   return categories.find((category) => category.id === categoryId)?.name ?? "Unknown";
@@ -25,8 +19,9 @@ export function BulkEditScreen(props: {
   onMoveAnime: (animeIds: number[], categoryId: number) => void;
 }) {
   const { library, busy, onOpenAnime, onListEpisodes, onMoveAnime } = props;
-  const [sourceCategoryId, setSourceCategoryId] = useState<CategoryFilterValue>(ALL_CATEGORIES);
+  const [sourceCategoryId, setSourceCategoryId] = useState(ALL_CATEGORIES_ID);
   const [regexInput, setRegexInput] = useState("");
+  const [debouncedRegexInput, setDebouncedRegexInput] = useState("");
   const [targetCategoryId, setTargetCategoryId] = useState<number>(library.categories[0]?.id ?? 0);
   const [matchingAnimeIds, setMatchingAnimeIds] = useState<Set<number>>(() => new Set(library.anime.map((anime) => anime.id)));
   const [matchingPaths, setMatchingPaths] = useState(false);
@@ -38,13 +33,21 @@ export function BulkEditScreen(props: {
     setTargetCategoryId(library.categories[0]?.id ?? 0);
   }, [library.categories, targetCategoryId]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedRegexInput(regexInput);
+    }, REGEX_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [regexInput]);
+
   const candidateAnime = useMemo(() => {
-    if (sourceCategoryId === ALL_CATEGORIES) return library.anime;
+    if (sourceCategoryId === ALL_CATEGORIES_ID) return library.anime;
     return library.anime.filter((anime) => anime.category_id === sourceCategoryId);
   }, [library.anime, sourceCategoryId]);
 
   useEffect(() => {
-    const trimmedRegex = regexInput.trim();
+    const trimmedRegex = debouncedRegexInput.trim();
     setPathError(null);
 
     if (!trimmedRegex) {
@@ -94,7 +97,7 @@ export function BulkEditScreen(props: {
     return () => {
       cancelled = true;
     };
-  }, [candidateAnime, onListEpisodes, regexInput]);
+  }, [candidateAnime, debouncedRegexInput, onListEpisodes]);
 
   const matchingAnime = useMemo(
     () => candidateAnime.filter((anime) => matchingAnimeIds.has(anime.id)),
@@ -107,8 +110,22 @@ export function BulkEditScreen(props: {
   );
 
   const sourceLabel =
-    sourceCategoryId === ALL_CATEGORIES ? "all categories" : categoryName(library.categories, sourceCategoryId);
+    sourceCategoryId === ALL_CATEGORIES_ID ? "all categories" : categoryName(library.categories, sourceCategoryId);
   const targetLabel = categoryName(library.categories, targetCategoryId);
+  const sourceOptions = useMemo(
+    () => [
+      { value: ALL_CATEGORIES_ID, label: "All categories" },
+      ...library.categories.map((category) => ({ value: category.id, label: category.name })),
+    ],
+    [library.categories],
+  );
+  const targetOptions = useMemo(
+    () => library.categories.map((category) => ({ value: category.id, label: category.name })),
+    [library.categories],
+  );
+  const sourceDropdownLabel =
+    sourceCategoryId === ALL_CATEGORIES_ID ? "All categories" : categoryName(library.categories, sourceCategoryId);
+  const targetDropdownLabel = categoryName(library.categories, targetCategoryId);
 
   const handleApply = () => {
     if (animeToMove.length === 0) return;
@@ -132,17 +149,15 @@ export function BulkEditScreen(props: {
 
       <section className="panel bulk-edit-panel">
         <div className="bulk-edit-grid">
-          <label className="stacked-field">
+          <div className="stacked-field">
             <span>Only affect category</span>
-            <select value={String(sourceCategoryId)} onChange={(event) => setSourceCategoryId(parseCategoryFilter(event.currentTarget.value))}>
-              <option value={ALL_CATEGORIES}>All categories</option>
-              {library.categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            <CustomDropdown
+              label={sourceDropdownLabel}
+              options={sourceOptions}
+              value={sourceCategoryId}
+              onChange={setSourceCategoryId}
+            />
+          </div>
 
           <label className="stacked-field">
             <span>Episode path regex</span>
@@ -150,26 +165,25 @@ export function BulkEditScreen(props: {
               type="text"
               value={regexInput}
               onChange={(event) => setRegexInput(event.currentTarget.value)}
-              placeholder="Anime\\Old or \\[SubsPlease\\]"
+              placeholder="Anime\Old or \[SubsPlease\]"
               spellCheck={false}
             />
           </label>
 
-          <label className="stacked-field">
+          <div className="stacked-field">
             <span>Set category to</span>
-            <select value={targetCategoryId} onChange={(event) => setTargetCategoryId(Number.parseInt(event.currentTarget.value, 10))}>
-              {library.categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            <CustomDropdown
+              label={targetDropdownLabel}
+              options={targetOptions}
+              value={targetCategoryId}
+              onChange={setTargetCategoryId}
+            />
+          </div>
         </div>
 
         <p className="muted">
-          The regex is matched case-insensitively against full episode file paths. If any episode matches, its anime is
-          selected for the bulk edit.
+          The regex is matched case-insensitively against full episode file paths after a short pause in typing. If any
+          episode matches, its anime is included in the preview below.
         </p>
 
         {regexError ? <p className="error">Invalid regex: {regexError}</p> : null}
@@ -177,7 +191,7 @@ export function BulkEditScreen(props: {
 
         <div className="settings-actions">
           <span className="muted">
-            {animeToMove.length} category change{animeToMove.length === 1 ? "" : "s"} ready
+            {animeToMove.length} anime will move to "{targetLabel}"
           </span>
           <button type="button" onClick={handleApply} disabled={busy || matchingPaths || animeToMove.length === 0}>
             Apply category edit
