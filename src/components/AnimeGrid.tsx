@@ -38,10 +38,18 @@ function sortAnimeForGrid(anime: AnimeSummary[], sortValue: number): AnimeSummar
       case 0:
         cmp = byTitle(a, b);
         break;
-      case 1:
-        cmp = b.created_at.localeCompare(a.created_at);
+      case 1: {
+        // Newest first: `created_at` is when the anime row was first inserted into SQLite.
+        const ta = Date.parse(a.created_at.replace(" ", "T"));
+        const tb = Date.parse(b.created_at.replace(" ", "T"));
+        if (Number.isFinite(ta) && Number.isFinite(tb)) {
+          cmp = tb - ta;
+        } else {
+          cmp = b.created_at.localeCompare(a.created_at);
+        }
         if (cmp === 0) cmp = byTitle(a, b);
         break;
+      }
       case 2: {
         const aw = a.last_watched_at;
         const bw = b.last_watched_at;

@@ -42,6 +42,14 @@ view components. Per-screen UI lives in `src/components/`:
   than in the sidebar. The anime grid header includes a sort dropdown
   (alphabetical, date added, last watched, episode/remaining counts);
   the choice is persisted in `localStorage` under `animePlayer.animeGridSort`.
+  **Date added** sorts by `anime.created_at` descending (most recently
+  inserted row first). That timestamp is **stored in SQLite**: it is set
+  once when a new anime row is first created during a library rescan
+  (`INSERT OR IGNORE` into `anime`, default `CURRENT_TIMESTAMP`). It is
+  **not** derived from episode file mtimes or the latest episode; adding
+  more episodes to an existing show does not change `created_at` (only
+  `updated_at` and episode rows update). Episodes have their own
+  `date_added` column, which the grid does not use for this sort.
 - The MVP file list has been replaced by a SQLite-backed local library UI:
   category screen, anime grid, episode list, settings, and player view.
   `src/api.ts` contains the Tauri command bindings and `src/types.ts`
