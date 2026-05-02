@@ -57,7 +57,7 @@ pub struct AnilistMediaStatus {
 
 #[tauri::command]
 pub fn get_anilist_auth_state(db: State<'_, AppDatabase>) -> Result<AnilistAuthState, String> {
-    db.with_conn(auth_state)
+    db.with_conn(|conn| auth_state(conn))
 }
 
 #[tauri::command]

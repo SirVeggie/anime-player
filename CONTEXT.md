@@ -150,7 +150,8 @@ view components. Per-screen UI lives in `src/components/`:
 - `db.rs` opens a portable SQLite database at
   `<current-exe>/data/anime-player.db`, creates the first schema, and
   seeds default categories (`Ongoing`, `Completed`, `Finished`) plus a
-  fansub-style regex rule.
+  fansub-style regex rule. `AppDatabase::with_conn` exposes `&mut Connection`
+  so callers can start transactions (e.g. bulk rescan writes).
 - `scanner.rs` owns recursive video discovery, extension filtering, and
   regex-based anime title / episode extraction. Unmatched video files are
   preserved in SQLite for diagnostics instead of silently disappearing.
@@ -160,7 +161,10 @@ view components. Per-screen UI lives in `src/components/`:
   `create_category`, `delete_category`, `set_default_category`,
   `create_regex_rule`, `update_regex_rule`, `delete_regex_rule`,
   `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
-  and `rescan_library`. `save_episode_progress` stores `position_seconds`
+  and `rescan_library`. `rescan_library` commits one SQLite transaction per
+  root folder and caches `title_key` → `anime_id` while importing so each
+  series is upserted once per scan instead of once per file.
+  `save_episode_progress` stores `position_seconds`
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode
   threshold), it stores `position_seconds` at full duration (100%).

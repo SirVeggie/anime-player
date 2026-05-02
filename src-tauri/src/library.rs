@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use regex::Regex;
@@ -420,20 +421,28 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
             summary.episodes_imported += scan.episodes.len() as i64;
             summary.unmatched_files += scan.unmatched.len() as i64;
 
-            conn.execute(
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            let mut anime_cache: HashMap<String, i64> = HashMap::new();
+
+            tx.execute(
                 "DELETE FROM unmatched_files WHERE root_folder_id = ?1",
                 params![root.id],
             )
             .map_err(|e| e.to_string())?;
 
             for episode in scan.episodes {
-                let anime_id =
-                    upsert_anime(conn, &episode.title, &episode.title_key, default_category)?;
-                upsert_episode(conn, root.id, anime_id, &episode)?;
+                let anime_id = cached_anime_id(
+                    &tx,
+                    &mut anime_cache,
+                    &episode.title,
+                    &episode.title_key,
+                    default_category,
+                )?;
+                upsert_episode(&tx, root.id, anime_id, &episode)?;
             }
 
             for file in scan.unmatched {
-                conn.execute(
+                tx.execute(
                     "INSERT INTO unmatched_files
                         (root_folder_id, path, relative_path, file_name, reason, detected_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
@@ -453,6 +462,8 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
                 )
                 .map_err(|e| e.to_string())?;
             }
+
+            tx.commit().map_err(|e| e.to_string())?;
         }
 
         Ok(summary)
@@ -718,6 +729,21 @@ fn default_category_id(conn: &Connection) -> Result<i64, String> {
         |row| row.get(0),
     )
     .map_err(|e| e.to_string())
+}
+
+fn cached_anime_id(
+    conn: &Connection,
+    cache: &mut HashMap<String, i64>,
+    title: &str,
+    title_key: &str,
+    default_category_id: i64,
+) -> Result<i64, String> {
+    if let Some(&id) = cache.get(title_key) {
+        return Ok(id);
+    }
+    let id = upsert_anime(conn, title, title_key, default_category_id)?;
+    cache.insert(title_key.to_string(), id);
+    Ok(id)
 }
 
 fn upsert_anime(

@@ -31,10 +31,10 @@ impl AppDatabase {
 
     pub fn with_conn<T>(
         &self,
-        f: impl FnOnce(&Connection) -> Result<T, String>,
+        f: impl FnOnce(&mut Connection) -> Result<T, String>,
     ) -> Result<T, String> {
-        let guard = self.conn.lock().map_err(|e| e.to_string())?;
-        f(&guard)
+        let mut guard = self.conn.lock().map_err(|e| e.to_string())?;
+        f(&mut guard)
     }
 
     pub fn path(&self) -> &PathBuf {
@@ -60,24 +60,32 @@ fn portable_data_dir() -> Result<PathBuf, String> {
 }
 
 fn seed_defaults(conn: &Connection) -> Result<(), String> {
-    conn.execute(
-        "INSERT OR IGNORE INTO categories (id, name, is_default, sort_order)
-         VALUES (1, 'Ongoing', 1, 0)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT OR IGNORE INTO categories (id, name, is_default, sort_order)
-         VALUES (2, 'Completed', 0, 1)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT OR IGNORE INTO categories (id, name, is_default, sort_order)
-         VALUES (3, 'Finished', 0, 2)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
+    let category_count = conn
+        .query_row("SELECT COUNT(*) FROM categories", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|e| e.to_string())?;
+
+    if category_count == 0 {
+        conn.execute(
+            "INSERT INTO categories (id, name, is_default, sort_order)
+             VALUES (1, 'Ongoing', 1, 0)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO categories (id, name, is_default, sort_order)
+             VALUES (2, 'Completed', 0, 1)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO categories (id, name, is_default, sort_order)
+             VALUES (3, 'Finished', 0, 2)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     conn.execute(
         "INSERT OR IGNORE INTO regex_rules
