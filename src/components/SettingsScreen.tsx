@@ -199,7 +199,7 @@ export function SettingsScreen(props: {
         <div className="panel-heading">
           <h2>Detection Rules</h2>
           <span className="muted">
-            {library.regex_rules.length} configured; higher priority matches first
+            {library.regex_rules.length} configured · higher priority matches first
           </span>
         </div>
         <div className="settings-list">
