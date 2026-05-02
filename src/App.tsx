@@ -637,17 +637,15 @@ function AnimeGrid(props: {
           {anime.map((item) => (
             <button type="button" className="anime-card" key={item.id} onClick={() => onOpenAnime(item)}>
               <div className="poster-placeholder">{item.title.slice(0, 2).toUpperCase()}</div>
-              <div className="anime-card-title" title={item.title}>
-                {item.title}
+              <div className="anime-card-body">
+                <div className="anime-card-title" title={item.title}>
+                  {item.title}
+                </div>
+                <div className="anime-card-meta">
+                  {item.episode_count} eps - {item.unwatched_count} unwatched
+                </div>
               </div>
-              <div className="anime-card-meta">
-                {item.episode_count} eps - {item.unwatched_count} unwatched
-              </div>
-              <div className="anime-tooltip">
-                <strong>{item.title}</strong>
-                <span>{item.episode_count} available episodes</span>
-                <span>{item.unwatched_count} unwatched</span>
-              </div>
+              <div className="anime-tooltip">{item.title}</div>
             </button>
           ))}
         </div>

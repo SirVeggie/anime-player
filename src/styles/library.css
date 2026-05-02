@@ -125,22 +125,37 @@
 
 .anime-card {
   position: relative;
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
   min-height: 264px;
+  align-items: stretch;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.008));
 }
 
 .poster-placeholder {
   display: grid;
   place-items: center;
-  height: 210px;
-  border-radius: var(--radius-md);
+  flex: 1 1 0;
+  min-height: 160px;
+  width: 100%;
+  border-radius: 0;
   background:
     linear-gradient(145deg, rgba(88, 166, 255, 0.22), rgba(255, 255, 255, 0.02)),
-    #171717;
+    #141414;
   color: rgba(255, 255, 255, 0.65);
   font-size: 28px;
   font-weight: 700;
-  margin-bottom: 10px;
+}
+
+.anime-card-body {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 12px;
+  text-align: left;
 }
 
 .anime-card-title {
@@ -153,31 +168,27 @@
 .anime-card-meta {
   color: var(--text-muted);
   font-size: 12px;
-  margin-top: 4px;
 }
 
 .anime-tooltip {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 56px;
+  left: 12px;
+  right: 12px;
+  bottom: 64px;
   display: none;
-  flex-direction: column;
-  gap: 4px;
   padding: 10px;
   border-radius: var(--radius-md);
   background: rgba(20, 20, 20, 0.97);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
   z-index: 2;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
 }
 
 .anime-card:hover .anime-tooltip {
-  display: flex;
-}
-
-.anime-tooltip span {
-  color: var(--text-muted);
-  font-size: 12px;
+  display: block;
 }
 
 .episode-list {
@@ -276,4 +287,8 @@
 .anime-card:hover,
 .episode-row:hover {
   background: var(--surface-grad-hover);
+}
+
+.anime-card:hover {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
 }
