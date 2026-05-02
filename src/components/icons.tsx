@@ -14,6 +14,14 @@ export function LibraryIcon() {
   );
 }
 
+export function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M9.5 4a5.5 5.5 0 0 1 4.39 8.82l5.15 5.14-1.08 1.08-5.14-5.15A5.5 5.5 0 1 1 9.5 4zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" />
+    </svg>
+  );
+}
+
 export function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>

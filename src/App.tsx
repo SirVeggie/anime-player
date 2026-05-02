@@ -30,8 +30,9 @@ import {
 import { AnimeGrid } from "./components/AnimeGrid";
 import { CategoryScreen } from "./components/CategoryScreen";
 import { EpisodeScreen } from "./components/EpisodeScreen";
-import { LibraryIcon, RescanIcon, SettingsIcon } from "./components/Icons";
+import { LibraryIcon, RescanIcon, SearchIcon, SettingsIcon } from "./components/Icons";
 import { PlayerView } from "./components/PlayerView";
+import { SearchScreen } from "./components/SearchScreen";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { type Toast, ToastStack } from "./components/ToastStack";
 import { WindowTitleBar } from "./components/WindowTitleBar";
@@ -52,7 +53,8 @@ import type {
 import { errorMessage, isTextInputTarget } from "./utils";
 import "./App.css";
 
-type View = "categories" | "anime" | "episodes" | "settings" | "player";
+type View = "categories" | "anime" | "search" | "episodes" | "settings" | "player";
+type EpisodeReturnView = "anime" | "search";
 
 type AnilistProgressUpdate = {
   animeId: number;
@@ -68,9 +70,12 @@ function App() {
   const [view, setView] = useState<View>("categories");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
+  const [episodeReturnView, setEpisodeReturnView] = useState<EpisodeReturnView>("anime");
   const [anilistAuth, setAnilistAuth] = useState<AnilistAuthState | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
   const [anilistProgressUpdate, setAnilistProgressUpdate] = useState<AnilistProgressUpdate | null>(null);
   const [rootInput, setRootInput] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -173,6 +178,22 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
+  const openSearch = useCallback(() => {
+    setView("search");
+    setSearchFocusToken((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (!(e.ctrlKey || e.metaKey) || e.code !== "KeyF") return;
+      e.preventDefault();
+      openSearch();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [openSearch]);
+
   useEffect(() => {
     if (!(view === "player" && selectedEpisode)) {
       setPlayerControlsChromeVisible(true);
@@ -205,8 +226,9 @@ function App() {
   );
 
   const openAnime = useCallback(
-    async (anime: AnimeSummary) => {
+    async (anime: AnimeSummary, returnView: EpisodeReturnView = "anime") => {
       setSelectedAnime(anime);
+      setEpisodeReturnView(returnView);
       try {
         const nextEpisodes = await listEpisodes(anime.id);
         setEpisodes(nextEpisodes);
@@ -484,8 +506,12 @@ function App() {
         setView("categories");
         return;
       }
+      if (view === "search") {
+        setView("categories");
+        return;
+      }
       if (view === "episodes" && selectedAnime) {
-        setView("anime");
+        setView(episodeReturnView);
         return;
       }
       if (view === "settings") {
@@ -494,7 +520,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [selectedAnime, view]);
+  }, [episodeReturnView, selectedAnime, view]);
 
   if (loading) {
     return (
@@ -521,7 +547,9 @@ function App() {
 
   const showPlayer = view === "player" && selectedEpisode;
   const playerLoadedInBackground = selectedEpisode && !showPlayer;
-  const libraryViewActive = view === "categories" || view === "anime" || view === "episodes";
+  const libraryViewActive =
+    view === "categories" || view === "anime" || (view === "episodes" && episodeReturnView === "anime");
+  const searchViewActive = view === "search" || (view === "episodes" && episodeReturnView === "search");
 
   return (
     <main
@@ -544,6 +572,16 @@ function App() {
           >
             <LibraryIcon />
             <span className="nav-label">Library</span>
+          </button>
+          <button
+            type="button"
+            className={searchViewActive ? "nav-item active" : "nav-item"}
+            onClick={openSearch}
+            aria-label="Search"
+            title="Search (Ctrl+F)"
+          >
+            <SearchIcon />
+            <span className="nav-label">Search</span>
           </button>
           <button
             type="button"
@@ -603,8 +641,18 @@ function App() {
               category={selectedCategory}
               anime={animeInCategory}
               onBack={() => setView("categories")}
-              onOpenAnime={openAnime}
+              onOpenAnime={(anime) => void openAnime(anime, "anime")}
               onOpenSettings={() => setView("settings")}
+            />
+          ) : null}
+
+          {view === "search" ? (
+            <SearchScreen
+              anime={library.anime}
+              query={searchQuery}
+              focusToken={searchFocusToken}
+              onQueryChange={setSearchQuery}
+              onOpenAnime={(anime) => void openAnime(anime, "search")}
             />
           ) : null}
 
@@ -613,7 +661,7 @@ function App() {
               anime={selectedAnime}
               episodes={episodes}
               categories={library.categories}
-              onBack={() => setView("anime")}
+              onBack={() => setView(episodeReturnView)}
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
               onSearchAnilist={handleSearchAnilist}

@@ -23,6 +23,17 @@
   gap: 6px;
 }
 
+.search-panel {
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-grad);
+}
+
+.search-panel input {
+  font-size: 15px;
+}
+
 .form-grid span,
 .stacked-field span {
   color: var(--text-muted);

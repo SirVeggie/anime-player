@@ -11,6 +11,34 @@ export function AnimeGrid(props: {
   onOpenSettings: () => void;
 }) {
   const { category, anime, onBack, onOpenAnime, onOpenSettings } = props;
+
+  return (
+    <>
+      <ViewHeader
+        title={category?.name ?? "Anime"}
+        subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
+        onBack={onBack}
+      />
+      {anime.length === 0 ? (
+        <div className="empty empty--wide">
+          <h2>No anime found here yet</h2>
+          <p className="muted">Add root folders and rescan from settings, or move anime into this category later.</p>
+          <button type="button" onClick={onOpenSettings}>
+            Open settings
+          </button>
+        </div>
+      ) : (
+        <AnimeCardGrid anime={anime} onOpenAnime={onOpenAnime} />
+      )}
+    </>
+  );
+}
+
+export function AnimeCardGrid(props: {
+  anime: AnimeSummary[];
+  onOpenAnime: (anime: AnimeSummary) => void;
+}) {
+  const { anime, onOpenAnime } = props;
   const [covers, setCovers] = useState<Record<number, string>>({});
 
   useEffect(() => {
@@ -37,43 +65,26 @@ export function AnimeGrid(props: {
   }, [anime]);
 
   return (
-    <>
-      <ViewHeader
-        title={category?.name ?? "Anime"}
-        subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
-        onBack={onBack}
-      />
-      {anime.length === 0 ? (
-        <div className="empty empty--wide">
-          <h2>No anime found here yet</h2>
-          <p className="muted">Add root folders and rescan from settings, or move anime into this category later.</p>
-          <button type="button" onClick={onOpenSettings}>
-            Open settings
+    <div className="anime-grid">
+      {anime.map((item) => {
+        const cover = covers[item.id];
+        return (
+          <button type="button" className="anime-card" key={item.id} onClick={() => onOpenAnime(item)}>
+            <div className={`poster-placeholder${cover ? " poster-placeholder--image" : ""}`}>
+              {cover ? <img src={cover} alt="" loading="lazy" /> : item.title.slice(0, 2).toUpperCase()}
+            </div>
+            <div className="anime-card-body">
+              <div className="anime-card-title" title={item.title}>
+                {item.title}
+              </div>
+              <div className="anime-card-meta">
+                {item.episode_count} eps - {item.unwatched_count} unwatched
+              </div>
+            </div>
+            <div className="anime-tooltip">{item.anilist_title ?? item.title}</div>
           </button>
-        </div>
-      ) : (
-        <div className="anime-grid">
-          {anime.map((item) => {
-            const cover = covers[item.id];
-            return (
-              <button type="button" className="anime-card" key={item.id} onClick={() => onOpenAnime(item)}>
-                <div className={`poster-placeholder${cover ? " poster-placeholder--image" : ""}`}>
-                  {cover ? <img src={cover} alt="" loading="lazy" /> : item.title.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="anime-card-body">
-                  <div className="anime-card-title" title={item.title}>
-                    {item.title}
-                  </div>
-                  <div className="anime-card-meta">
-                    {item.episode_count} eps - {item.unwatched_count} unwatched
-                  </div>
-                </div>
-                <div className="anime-tooltip">{item.anilist_title ?? item.title}</div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </>
+        );
+      })}
+    </div>
   );
 }
