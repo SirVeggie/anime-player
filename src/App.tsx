@@ -55,7 +55,7 @@ import { errorMessage, isTextInputTarget } from "./utils";
 import "./App.css";
 
 type View = "categories" | "anime" | "search" | "episodes" | "settings" | "player";
-type EpisodeReturnView = "anime" | "search";
+type EpisodeReturnView = "anime" | "search" | "categories";
 type ScrollRestoration = "top" | "restore";
 
 type AnilistProgressUpdate = {
@@ -661,7 +661,9 @@ function App() {
   const showPlayer = view === "player" && selectedEpisode;
   const playerLoadedInBackground = selectedEpisode && !showPlayer;
   const libraryViewActive =
-    view === "categories" || view === "anime" || (view === "episodes" && episodeReturnView === "anime");
+    view === "categories" ||
+    view === "anime" ||
+    (view === "episodes" && episodeReturnView !== "search");
   const searchViewActive = view === "search" || (view === "episodes" && episodeReturnView === "search");
 
   return (
@@ -744,7 +746,7 @@ function App() {
             <CategoryScreen
               library={library}
               onOpenCategory={navigateToCategory}
-              onOpenAnime={openAnime}
+              onOpenAnime={(anime) => void openAnime(anime, "categories")}
               onOpenSettings={() => navigateToView("settings")}
             />
           ) : null}
