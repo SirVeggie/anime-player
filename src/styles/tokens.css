@@ -1,0 +1,38 @@
+﻿/* Theme tokens stay centralized while the UI is still moving quickly. */
+:root,
+:root[data-theme="dark"] {
+  --app-bg: #0a0c12;
+  /* The shell paints --app-bg; .content paints --content-bg over it so the
+     rounded top-left of .content reads as a corner cut into the shell. */
+  --content-bg: #14161d;
+  --content-glow: radial-gradient(
+    1100px 400px at 100% -10%,
+    rgba(88, 166, 255, 0.09),
+    transparent 60%
+  );
+  /* Flat surfaces â€” no 1px borders, just subtle elevation via fill. */
+  --surface-1: rgba(255, 255, 255, 0.035);
+  --surface-2: rgba(255, 255, 255, 0.06);
+  --surface-3: rgba(255, 255, 255, 0.09);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --surface-grad: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+  --surface-grad-hover: linear-gradient(160deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.035));
+  --accent-grad: linear-gradient(140deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.06));
+  --accent-grad-hover: linear-gradient(140deg, rgba(88, 166, 255, 0.32), rgba(88, 166, 255, 0.1));
+  --text-color: #f6f6f6;
+  --text-muted: rgba(255, 255, 255, 0.55);
+  --focus-color: #8ab7ff;
+  --progress-color: #58a6ff;
+  --danger: #ff6b6b;
+  --success: #6dd58c;
+  /* Tighter, but not razor-sharp. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --controls-row-height: 35px;
+  --seekbar-height: 16px;
+  --player-controls-pad-x: 12px;
+  --player-controls-pad-bottom: 8px;
+  --titlebar-height: 34px;
+  --sidebar-width: 56px;
+}

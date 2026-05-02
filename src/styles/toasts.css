@@ -1,0 +1,30 @@
+﻿.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  z-index: 100;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  text-align: left;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  animation: toastSlideIn 180ms ease-out both;
+}
+
+.toast--success {
+  background: rgba(25, 72, 40, 0.96);
+  color: #d7ffe0;
+}
+
+.toast--error {
+  background: rgba(78, 28, 28, 0.96);
+  color: #ffd4d4;
+}

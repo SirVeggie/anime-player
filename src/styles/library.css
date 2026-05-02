@@ -1,0 +1,279 @@
+﻿.category-grid,
+.anime-grid,
+.continue-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.category-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.category-card,
+.continue-card,
+.anime-card,
+.episode-row {
+  color: var(--text-color);
+  text-align: left;
+  border: 0;
+  background: var(--surface-grad);
+  border-radius: var(--radius-lg);
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
+}
+
+.category-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 130px;
+  padding: 18px;
+  /* Fallback if no nth-child rule applies (>4 categories cycle). */
+  background: linear-gradient(160deg, rgba(88, 166, 255, 0.22), rgba(255, 255, 255, 0.025));
+}
+
+/* Each card picks up a different accent so the row reads as colorful even
+   though the category names are user-defined. Cycle through 4 hues. */
+.category-card:nth-child(4n + 1) {
+  background: linear-gradient(155deg, rgba(88, 166, 255, 0.28), rgba(88, 166, 255, 0.04) 70%);
+}
+.category-card:nth-child(4n + 2) {
+  background: linear-gradient(155deg, rgba(109, 213, 140, 0.26), rgba(109, 213, 140, 0.04) 70%);
+}
+.category-card:nth-child(4n + 3) {
+  background: linear-gradient(155deg, rgba(186, 130, 255, 0.28), rgba(186, 130, 255, 0.04) 70%);
+}
+.category-card:nth-child(4n + 4) {
+  background: linear-gradient(155deg, rgba(255, 168, 88, 0.26), rgba(255, 168, 88, 0.04) 70%);
+}
+
+.category-card:hover {
+  filter: brightness(1.18) saturate(1.08);
+}
+
+/* Soft corner highlight to give cards depth without a 1px outline. */
+.category-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    140% 80% at 0% 0%,
+    rgba(255, 255, 255, 0.08),
+    transparent 55%
+  );
+  pointer-events: none;
+}
+
+.category-name {
+  display: block;
+  font-size: 19px;
+  font-weight: 700;
+  margin-bottom: 36px;
+}
+
+.category-count {
+  color: var(--text-muted);
+}
+
+.continue-grid {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.continue-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 86px;
+  padding: 14px 14px 14px 18px;
+  overflow: hidden;
+}
+
+.continue-card span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Accent stripe on the leading edge â€” a small splash of color that helps the
+   card stand out against the content surface without a hairline border. */
+.continue-card::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--progress-color);
+  opacity: 0.85;
+}
+
+.continue-card:nth-child(4n + 2)::before {
+  background: #6dd58c;
+}
+.continue-card:nth-child(4n + 3)::before {
+  background: #ba82ff;
+}
+.continue-card:nth-child(4n + 4)::before {
+  background: #ffa858;
+}
+
+.anime-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.anime-card {
+  position: relative;
+  padding: 10px;
+  min-height: 264px;
+}
+
+.poster-placeholder {
+  display: grid;
+  place-items: center;
+  height: 210px;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(145deg, rgba(88, 166, 255, 0.22), rgba(255, 255, 255, 0.02)),
+    #171717;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.anime-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+
+.anime-card-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.anime-tooltip {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 56px;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: rgba(20, 20, 20, 0.97);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
+  z-index: 2;
+}
+
+.anime-card:hover .anime-tooltip {
+  display: flex;
+}
+
+.anime-tooltip span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.episode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.episode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px;
+}
+
+.episode-row--watched {
+  opacity: 0.58;
+}
+
+.episode-row--last {
+  background: linear-gradient(140deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.06));
+}
+
+.episode-row--last:hover {
+  background: linear-gradient(140deg, rgba(88, 166, 255, 0.3), rgba(88, 166, 255, 0.1));
+}
+
+.episode-thumb {
+  display: grid;
+  place-items: center;
+  width: 92px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.episode-thumb--image {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.episode-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.episode-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.episode-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.episode-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.episode-meta span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode-progress {
+  height: 3px;
+  margin-top: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.episode-progress span {
+  display: block;
+  height: 100%;
+  background: var(--progress-color);
+}
+
+.category-card:hover,
+.continue-card:hover,
+.anime-card:hover,
+.episode-row:hover {
+  background: var(--surface-grad-hover);
+}

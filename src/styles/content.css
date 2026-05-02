@@ -1,0 +1,115 @@
+﻿.content {
+  position: relative;
+  min-width: 0;
+  height: calc(100vh - var(--titlebar-height));
+  margin-top: var(--titlebar-height);
+  overflow: auto;
+  border-top-left-radius: 12px;
+  /* Distinct surface with a soft accent glow in the top-right corner. The glow
+     is a fixed background so it stays anchored as the content scrolls. */
+  background:
+    var(--content-glow),
+    var(--content-bg);
+  background-attachment: local, local;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.025),
+    -16px 0 32px rgba(0, 0, 0, 0.25);
+}
+
+.app--video-opening .content {
+  animation: contentFadeOutForVideo 180ms ease forwards;
+}
+
+.content-inner {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.view-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.back-button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.back-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+.view-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.panel,
+.empty {
+  background: var(--surface-grad);
+  border-radius: var(--radius-lg);
+}
+
+.panel {
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 28px 0 12px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-color);
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  padding: 28px 24px;
+  max-width: 360px;
+}
+
+.empty--wide {
+  max-width: 560px;
+  margin: 24px 0;
+}

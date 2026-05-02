@@ -18,7 +18,7 @@ Node 22, 7-Zip on PATH, and the local generated
 
 ## Architecture
 
-### Frontend — `src/App.tsx`, `src/App.css`, `src/api.ts`, `src/types.ts`
+### Frontend — `src/App.tsx`, `src/App.css` (barrel `@import` of `src/styles/*.css`), `src/api.ts`, `src/types.ts`
 
 - Visual design follows the local reference project
   (`reference/working-tauri-mpv-example-project` → Soia): `data-theme="dark"`,

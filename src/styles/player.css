@@ -1,0 +1,335 @@
+﻿.video-open-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--app-bg);
+  pointer-events: none;
+  z-index: 90;
+  animation: videoOpenFadeIn 180ms ease forwards;
+}
+
+/* Player compositing: the app grid stays transparent so libmpv's DComp layer can show through. */
+.player {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  grid-column: 1 / -1;
+  height: 100vh;
+  width: 100vw;
+}
+
+.player--hidden {
+  display: none;
+}
+
+.player--playback {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.player-canvas {
+  flex: 1;
+  width: 100%;
+  background: transparent;
+  user-select: none;
+  cursor: default;
+}
+
+.player-load-fade {
+  position: absolute;
+  inset: 0;
+  background: var(--app-bg);
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+  z-index: 8;
+}
+
+.player-load-fade--hidden {
+  opacity: 0;
+}
+
+.player-back {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 12;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.now-playing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.65), transparent);
+  padding: 12px 96px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 11;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.player-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  flex-shrink: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  padding: 0 var(--player-controls-pad-x) var(--player-controls-pad-bottom);
+  z-index: 10;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.player-controls-content {
+  color: #fff;
+}
+
+.player--controls-hidden {
+  cursor: none;
+}
+
+.player--controls-hidden .player-back,
+.player--controls-hidden .now-playing,
+.player--controls-hidden .player-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player--controls-hidden .player-back,
+.player--controls-hidden .now-playing {
+  transform: translateY(-8px);
+}
+
+.player--controls-hidden .player-controls {
+  transform: translateY(12px);
+}
+
+.progress-area {
+  height: var(--seekbar-height);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  touch-action: none;
+}
+
+.progress-bg {
+  height: 3px;
+  width: 100%;
+  background: rgba(58, 58, 58, 0.92);
+  position: relative;
+  overflow: hidden;
+  transition: height 0.1s;
+}
+
+.progress-area:hover .progress-bg,
+.progress-area.is-dragging .progress-bg {
+  height: 5px;
+}
+
+.progress-current {
+  height: 100%;
+  background: var(--progress-color);
+  position: relative;
+  z-index: 2;
+}
+
+.scrubber-head {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  width: 8px;
+  height: 8px;
+  background: var(--progress-color);
+  border: 1px solid rgba(236, 243, 255, 0.95);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(10, 22, 40, 0.2);
+  opacity: 0;
+  transition:
+    transform 0.1s,
+    opacity 0.1s;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.progress-area:hover .scrubber-head,
+.progress-area.is-dragging .scrubber-head {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.progress-area.is-dragging .scrubber-head {
+  transform: translate(-50%, -50%) scale(1.35);
+}
+
+.time-tooltip {
+  position: absolute;
+  bottom: 12px;
+  transform: translateX(-50%);
+  background: rgba(28, 28, 28, 0.85);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: var(--controls-row-height);
+  min-width: 0;
+}
+
+.controls-left,
+.controls-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.track-menu {
+  position: relative;
+}
+
+.track-menu-trigger {
+  height: 28px;
+  max-width: 130px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-menu-trigger:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.track-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  min-width: 180px;
+  max-width: 300px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 0;
+  overflow-x: hidden;
+  border-radius: var(--radius-md);
+  background: rgba(18, 18, 18, 0.98);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
+}
+
+.track-menu-option {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.track-menu-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.track-menu-option.active {
+  background: rgba(88, 166, 255, 0.2);
+  color: #cfe2ff;
+}
+
+.track-menu-empty {
+  padding: 7px 9px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.player-controls button.icon-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.player-controls button.icon-button:hover:not(:disabled) {
+  background: transparent;
+  border: none;
+}
+
+.icon-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  padding: 0;
+  font-family: inherit;
+}
+
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-button--player {
+  width: 32px;
+  height: 32px;
+  padding: 1px;
+  border-radius: 6px;
+  color: #fff;
+}
+
+.icon-button--player:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+.icon-button--lg,
+.icon-button--lg svg {
+  width: 32px;
+  height: 32px;
+}
+
+.icon-button--disabled {
+  color: rgba(255, 255, 255, 0.55);
+  cursor: not-allowed;
+}
+
+.time-display {
+  color: #fff;
+  font-size: 13px;
+  margin-left: 8px;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
