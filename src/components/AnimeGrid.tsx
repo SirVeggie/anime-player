@@ -1,7 +1,71 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getAnilistCoverImage } from "../api";
 import type { AnimeSummary, Category } from "../types";
+import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
+
+const GRID_SORT_STORAGE_KEY = "animePlayer.animeGridSort";
+
+const GRID_SORT_OPTIONS = [
+  { value: 0, label: "Alphabetical" },
+  { value: 1, label: "Date added" },
+  { value: 2, label: "Last watched" },
+  { value: 3, label: "Total episodes" },
+  { value: 4, label: "Unwatched episodes" },
+] as const;
+
+function readStoredGridSort(): number {
+  try {
+    const raw = localStorage.getItem(GRID_SORT_STORAGE_KEY);
+    if (raw === null) return 0;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 4) return 0;
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+function sortAnimeForGrid(anime: AnimeSummary[], sortValue: number): AnimeSummary[] {
+  const copy = [...anime];
+  const byTitle = (a: AnimeSummary, b: AnimeSummary) =>
+    a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+
+  copy.sort((a, b) => {
+    let cmp = 0;
+    switch (sortValue) {
+      case 0:
+        cmp = byTitle(a, b);
+        break;
+      case 1:
+        cmp = b.created_at.localeCompare(a.created_at);
+        if (cmp === 0) cmp = byTitle(a, b);
+        break;
+      case 2: {
+        const aw = a.last_watched_at;
+        const bw = b.last_watched_at;
+        if (aw === null && bw === null) cmp = byTitle(a, b);
+        else if (aw === null) cmp = 1;
+        else if (bw === null) cmp = -1;
+        else cmp = bw.localeCompare(aw);
+        if (cmp === 0) cmp = byTitle(a, b);
+        break;
+      }
+      case 3:
+        cmp = b.episode_count - a.episode_count;
+        if (cmp === 0) cmp = byTitle(a, b);
+        break;
+      case 4:
+        cmp = b.unwatched_count - a.unwatched_count;
+        if (cmp === 0) cmp = byTitle(a, b);
+        break;
+      default:
+        cmp = byTitle(a, b);
+    }
+    return cmp;
+  });
+  return copy;
+}
 
 export function AnimeGrid(props: {
   category: Category | null;
@@ -11,6 +75,20 @@ export function AnimeGrid(props: {
   onOpenSettings: () => void;
 }) {
   const { category, anime, onBack, onOpenAnime, onOpenSettings } = props;
+  const [sortValue, setSortValue] = useState(readStoredGridSort);
+
+  const sortedAnime = useMemo(() => sortAnimeForGrid(anime, sortValue), [anime, sortValue]);
+
+  const sortLabel = GRID_SORT_OPTIONS.find((o) => o.value === sortValue)?.label ?? "Alphabetical";
+
+  const handleSortChange = (value: number) => {
+    setSortValue(value);
+    try {
+      localStorage.setItem(GRID_SORT_STORAGE_KEY, String(value));
+    } catch {
+      /* ignore */
+    }
+  };
 
   return (
     <>
@@ -18,6 +96,16 @@ export function AnimeGrid(props: {
         title={category?.name ?? "Anime"}
         subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
         onBack={onBack}
+        action={
+          anime.length > 0 ? (
+            <CustomDropdown
+              label={`Sort: ${sortLabel}`}
+              options={[...GRID_SORT_OPTIONS]}
+              value={sortValue}
+              onChange={handleSortChange}
+            />
+          ) : null
+        }
       />
       {anime.length === 0 ? (
         <div className="empty empty--wide">
@@ -28,7 +116,7 @@ export function AnimeGrid(props: {
           </button>
         </div>
       ) : (
-        <AnimeCardGrid anime={anime} onOpenAnime={onOpenAnime} />
+        <AnimeCardGrid anime={sortedAnime} onOpenAnime={onOpenAnime} />
       )}
     </>
   );

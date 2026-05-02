@@ -56,6 +56,7 @@ pub struct AnimeSummary {
     episode_count: i64,
     unwatched_count: i64,
     last_watched_at: Option<String>,
+    created_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -634,7 +635,8 @@ fn list_anime(
                 a.anilist_cover_path,
                 COUNT(e.id) AS episode_count,
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
-                a.last_watched_at
+                a.last_watched_at,
+                a.created_at
          FROM anime a
          LEFT JOIN episodes e ON e.anime_id = a.id",
     );
@@ -662,6 +664,7 @@ fn list_anime(
             episode_count: row.get(7)?,
             unwatched_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
             last_watched_at: row.get(9)?,
+            created_at: row.get(10)?,
         })
     };
 

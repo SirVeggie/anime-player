@@ -30,7 +30,7 @@ Example anime filename: [SubsPlease] Sousou no Frieren S2 - 09 (1080p) [A3A99C65
 - [x] ~~Save data, settings, categories, etc. in SQLite database in the same folder as the executable.~~
 - [x] ~~Below categories on the main screen, you can quickly continue where you left off for the last 5 animes watched~~
     - [ ] Select how many are displayed in settings
-- [ ] Sorting options on the anime grid page: alphabetical, date added, last watched, total episodes, unwatched episodes
+- [x] ~~Sorting options on the anime grid page: alphabetical, date added, last watched, total episodes, unwatched episodes~~
 
 Episode selection page features
 - [x] ~~Show anime title, current progress~~

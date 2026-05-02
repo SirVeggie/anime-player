@@ -39,7 +39,9 @@ view components. Per-screen UI lives in `src/components/`:
   is disabled so mpv stays sharp.
 - Two-pane layout: 280px sidebar (Library, Settings, rescan, stats) +
   main content pane. Category navigation lives on the library page rather
-  than in the sidebar.
+  than in the sidebar. The anime grid header includes a sort dropdown
+  (alphabetical, date added, last watched, episode/unwatched counts);
+  the choice is persisted in `localStorage` under `animePlayer.animeGridSort`.
 - The MVP file list has been replaced by a SQLite-backed local library UI:
   category screen, anime grid, episode list, settings, and player view.
   `src/api.ts` contains the Tauri command bindings and `src/types.ts`
