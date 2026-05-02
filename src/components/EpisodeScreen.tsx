@@ -165,17 +165,17 @@ export function EpisodeScreen(props: {
         }
       />
 
-      <section className="anime-detail-panel">
-        <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
-          {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
-        </div>
-        <div>
-          <h2>{anime.anilist_title ?? anime.title}</h2>
-          <p className="muted">
-            {anime.anilist_id ? `Linked to AniList #${anime.anilist_id}` : "Not linked to AniList yet."}
-          </p>
-        </div>
-      </section>
+      {anime.anilist_id ? (
+        <section className="anime-detail-panel">
+          <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
+            {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <h2>{anime.anilist_title ?? anime.title}</h2>
+            <p className="muted">Linked to AniList #{anime.anilist_id}</p>
+          </div>
+        </section>
+      ) : null}
 
       {linkSearchOpen && !anime.anilist_id ? (
         <div
