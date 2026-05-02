@@ -66,7 +66,6 @@ export function AnimeGrid(props: {
                   </div>
                   <div className="anime-card-meta">
                     {item.episode_count} eps - {item.unwatched_count} unwatched
-                    {item.anilist_id ? " - AniList" : ""}
                   </div>
                 </div>
                 <div className="anime-tooltip">{item.anilist_title ?? item.title}</div>

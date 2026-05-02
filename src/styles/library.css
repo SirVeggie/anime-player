@@ -355,13 +355,53 @@
   object-fit: cover;
 }
 
-.anilist-link-panel {
-  margin-bottom: 18px;
+.modal-backdrop {
+  position: fixed;
+  inset: var(--titlebar-height) 0 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(8px);
+}
+
+.modal {
+  width: min(720px, 100%);
+  max-height: min(720px, calc(100vh - var(--titlebar-height) - 48px));
+  overflow: auto;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: rgba(18, 18, 18, 0.98);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.58);
+}
+
+.modal-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.modal-heading h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.modal-heading p {
+  margin: 0;
+}
+
+.anilist-link-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .anilist-results {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -369,6 +409,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-height: 82px;
   text-align: left;
 }
@@ -389,10 +430,17 @@
 }
 
 .anilist-result strong,
+.anilist-result em,
 .anilist-result small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.anilist-result em {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
 }
 
 .anilist-result small {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAnilistCoverImage, getFileThumbnail } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistSearchResult, Category, Episode } from "../types";
@@ -40,6 +40,7 @@ export function EpisodeScreen(props: {
   const [linkSearchOpen, setLinkSearchOpen] = useState(false);
   const [linkSearchBusy, setLinkSearchBusy] = useState(false);
   const [linkSearchError, setLinkSearchError] = useState<string | null>(null);
+  const linkSearchRequestRef = useRef(0);
   const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
 
@@ -92,19 +93,45 @@ export function EpisodeScreen(props: {
     };
   }, [episodes]);
 
-  const runLinkSearch = async () => {
-    const query = linkQuery.trim();
-    if (!query) return;
-    setLinkSearchBusy(true);
+  const closeLinkSearch = useCallback(() => {
+    linkSearchRequestRef.current += 1;
+    setLinkSearchOpen(false);
+    setLinkSearchBusy(false);
     setLinkSearchError(null);
-    try {
-      setLinkResults(await onSearchAnilist(query));
-    } catch (e) {
-      setLinkSearchError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLinkSearchBusy(false);
-    }
-  };
+  }, []);
+
+  const runLinkSearch = useCallback(
+    async (queryOverride?: string) => {
+      const query = (queryOverride ?? linkQuery).trim();
+      if (!query) return;
+      const requestId = linkSearchRequestRef.current + 1;
+      linkSearchRequestRef.current = requestId;
+      setLinkSearchBusy(true);
+      setLinkSearchError(null);
+      try {
+        const results = await onSearchAnilist(query);
+        if (linkSearchRequestRef.current === requestId) {
+          setLinkResults(results);
+        }
+      } catch (e) {
+        if (linkSearchRequestRef.current === requestId) {
+          setLinkSearchError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (linkSearchRequestRef.current === requestId) {
+          setLinkSearchBusy(false);
+        }
+      }
+    },
+    [linkQuery, onSearchAnilist],
+  );
+
+  const openLinkSearch = useCallback(() => {
+    setLinkQuery(anime.title);
+    setLinkResults([]);
+    setLinkSearchOpen(true);
+    void runLinkSearch(anime.title);
+  }, [anime.title, runLinkSearch]);
 
   return (
     <>
@@ -130,7 +157,7 @@ export function EpisodeScreen(props: {
                 </button>
               </>
             ) : (
-              <button type="button" onClick={() => setLinkSearchOpen((open) => !open)}>
+              <button type="button" onClick={openLinkSearch}>
                 Link AniList
               </button>
             )}
@@ -151,44 +178,70 @@ export function EpisodeScreen(props: {
       </section>
 
       {linkSearchOpen && !anime.anilist_id ? (
-        <section className="panel anilist-link-panel">
-          <div className="panel-heading">
-            <h2>Link AniList</h2>
-          </div>
-          <form
-            className="form-row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void runLinkSearch();
-            }}
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeLinkSearch();
+          }}
+        >
+          <section
+            className="modal anilist-link-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="anilist-link-title"
           >
-            <input type="text" value={linkQuery} onChange={(e) => setLinkQuery(e.currentTarget.value)} />
-            <button type="submit" disabled={linkSearchBusy || !linkQuery.trim()}>
-              {linkSearchBusy ? "Searching..." : "Search"}
-            </button>
-          </form>
-          {linkSearchError ? <p className="error">{linkSearchError}</p> : null}
-          <div className="anilist-results">
-            {linkResults.map((result) => (
-              <button
-                type="button"
-                className="anilist-result"
-                key={result.id}
-                onClick={() => onLinkAnilist(anime.id, result.id)}
-              >
-                {result.cover_image_url ? <img src={result.cover_image_url} alt="" loading="lazy" /> : null}
-                <span>
-                  <strong>{result.title}</strong>
-                  <small>
-                    {[result.season_year, result.format, result.episodes ? `${result.episodes} eps` : null]
-                      .filter(Boolean)
-                      .join(" - ")}
-                  </small>
-                </span>
+            <div className="modal-heading">
+              <div>
+                <h2 id="anilist-link-title">Link AniList</h2>
+                <p className="muted">Pick the AniList entry that matches "{anime.title}".</p>
+              </div>
+              <button type="button" onClick={closeLinkSearch} aria-label="Close AniList linking">
+                Close
               </button>
-            ))}
-          </div>
-        </section>
+            </div>
+            <form
+              className="form-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void runLinkSearch();
+              }}
+            >
+              <input type="text" value={linkQuery} onChange={(e) => setLinkQuery(e.currentTarget.value)} />
+              <button type="submit" disabled={linkSearchBusy || !linkQuery.trim()}>
+                {linkSearchBusy ? "Searching..." : "Search"}
+              </button>
+            </form>
+            {linkSearchError ? <p className="error">{linkSearchError}</p> : null}
+            <div className="anilist-results" aria-busy={linkSearchBusy}>
+              {linkResults.map((result) => (
+                <button
+                  type="button"
+                  className="anilist-result"
+                  key={result.id}
+                  onClick={() => {
+                    closeLinkSearch();
+                    onLinkAnilist(anime.id, result.id);
+                  }}
+                >
+                  {result.cover_image_url ? <img src={result.cover_image_url} alt="" loading="lazy" /> : null}
+                  <span>
+                    <strong>{result.title}</strong>
+                    {result.native_title ? <em>{result.native_title}</em> : null}
+                    <small>
+                      {[result.season_year, result.format, result.episodes ? `${result.episodes} eps` : null]
+                        .filter(Boolean)
+                        .join(" - ")}
+                    </small>
+                  </span>
+                </button>
+              ))}
+              {!linkSearchBusy && linkResults.length === 0 ? (
+                <p className="muted">No matches yet. Try a different search title.</p>
+              ) : null}
+            </div>
+          </section>
+        </div>
       ) : null}
 
       <section className="episode-list">
