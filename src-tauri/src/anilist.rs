@@ -55,6 +55,12 @@ pub struct AnilistMediaStatus {
     score: Option<f64>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct AnilistLocalProgressApplyResult {
+    progress: i64,
+    updated_episodes: i64,
+}
+
 #[tauri::command]
 pub fn get_anilist_auth_state(db: State<'_, AppDatabase>) -> Result<AnilistAuthState, String> {
     db.with_conn(|conn| auth_state(conn))
@@ -263,6 +269,51 @@ pub async fn get_anilist_media_status(
         return Ok(None);
     };
     get_media_status(&token, anilist_id).await.map(Some)
+}
+
+#[tauri::command]
+pub async fn apply_anilist_progress_to_local(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<Option<AnilistLocalProgressApplyResult>, String> {
+    let Some((token, anilist_id)) = auth_and_media_id_for_anime(&db, anime_id)? else {
+        return Ok(None);
+    };
+    let status = get_media_status(&token, anilist_id).await?;
+    let progress = status.progress.unwrap_or(0).max(0);
+    if progress == 0 {
+        return Ok(Some(AnilistLocalProgressApplyResult {
+            progress,
+            updated_episodes: 0,
+        }));
+    }
+
+    let updated_episodes = db.with_conn(|conn| {
+        conn.execute(
+            "UPDATE episodes
+             SET watched = 1,
+                 position_seconds = CASE
+                     WHEN duration_seconds > 0 THEN duration_seconds
+                     ELSE position_seconds
+                 END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE anime_id = ?1
+               AND episode_number >= 1
+               AND episode_number < ?2
+               AND (
+                   watched = 0
+                   OR (duration_seconds > 0 AND position_seconds < duration_seconds)
+               )",
+            params![anime_id, progress + 1],
+        )
+        .map(|count| count as i64)
+        .map_err(|e| e.to_string())
+    })?;
+
+    Ok(Some(AnilistLocalProgressApplyResult {
+        progress,
+        updated_episodes,
+    }))
 }
 
 #[tauri::command]

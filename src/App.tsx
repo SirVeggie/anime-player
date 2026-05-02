@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
+  applyAnilistProgressToLocal,
   completeAnilistLogin,
   createCategory,
   createRegexRule,
@@ -66,6 +67,10 @@ type AnilistProgressUpdate = {
 const VIDEO_OPEN_FADE_MS = 180;
 const appWindow = getCurrentWindow();
 
+function hasEpisodeProgress(episode: Episode): boolean {
+  return episode.watched || episode.position_seconds > 0;
+}
+
 function App() {
   const [library, setLibrary] = useState<LibraryState | null>(null);
   const [view, setView] = useState<View>("categories");
@@ -87,6 +92,7 @@ function App() {
   const [videoOpening, setVideoOpening] = useState(false);
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
   const contentRef = useRef<HTMLElement | null>(null);
+  const selectedAnimeIdRef = useRef<number | null>(null);
   const currentPageKeyRef = useRef("categories");
   const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
   const scrollPositionsRef = useRef(new Map<string, number>());
@@ -111,6 +117,10 @@ function App() {
     setAnilistAuth(state);
     return state;
   }, []);
+
+  useEffect(() => {
+    selectedAnimeIdRef.current = selectedAnime?.id ?? null;
+  }, [selectedAnime?.id]);
 
   useEffect(() => {
     void (async () => {
@@ -278,19 +288,51 @@ function App() {
     [showToast],
   );
 
+  const applyLocalAnilistProgress = useCallback(async (animeId: number) => {
+    const result = await applyAnilistProgressToLocal(animeId);
+    if (result) {
+      setAnilistProgressUpdate({ animeId, progress: result.progress, updatedAt: Date.now() });
+    }
+    return result;
+  }, []);
+
+  const refreshAnimePageData = useCallback(
+    async (animeId: number) => {
+      const [state, nextEpisodes] = await Promise.all([reloadLibrary(), listEpisodes(animeId)]);
+      if (selectedAnimeIdRef.current === animeId) {
+        setEpisodes(nextEpisodes);
+        const updated = state.anime.find((anime) => anime.id === animeId);
+        if (updated) setSelectedAnime(updated);
+      }
+      return state;
+    },
+    [reloadLibrary],
+  );
+
   const openAnime = useCallback(
     async (anime: AnimeSummary, returnView: EpisodeReturnView = "anime") => {
+      selectedAnimeIdRef.current = anime.id;
       setSelectedAnime(anime);
       setEpisodeReturnView(returnView);
       try {
         const nextEpisodes = await listEpisodes(anime.id);
         setEpisodes(nextEpisodes);
         navigateToView("episodes");
+        const shouldImportAnilistProgress =
+          anime.anilist_id && nextEpisodes.length > 0 && nextEpisodes.every((episode) => !hasEpisodeProgress(episode));
+        if (shouldImportAnilistProgress) {
+          void (async () => {
+            const result = await applyLocalAnilistProgress(anime.id);
+            if (result?.updated_episodes) {
+              await refreshAnimePageData(anime.id);
+            }
+          })().catch((e) => showToast("error", errorMessage(e)));
+        }
       } catch (e) {
         showToast("error", errorMessage(e));
       }
     },
-    [navigateToView, showToast],
+    [applyLocalAnilistProgress, navigateToView, refreshAnimePageData, showToast],
   );
 
   const handleAddRoot = useCallback(
@@ -470,13 +512,18 @@ function App() {
     async (animeId: number, anilistId: number) => {
       await runAction(async () => {
         await linkAnimeAnilist(animeId, anilistId);
-        const state = await reloadLibrary();
-        const updated = state.anime.find((anime) => anime.id === animeId);
-        if (updated) setSelectedAnime(updated);
+        const result = await applyLocalAnilistProgress(animeId);
+        if (result?.updated_episodes) {
+          await refreshAnimePageData(animeId);
+        } else {
+          const state = await reloadLibrary();
+          const updated = state.anime.find((anime) => anime.id === animeId);
+          if (updated) setSelectedAnime(updated);
+        }
         return "Anime linked to AniList.";
       });
     },
-    [reloadLibrary, runAction],
+    [applyLocalAnilistProgress, refreshAnimePageData, reloadLibrary, runAction],
   );
 
   const handleUnlinkAnilist = useCallback(

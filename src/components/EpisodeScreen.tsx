@@ -435,7 +435,7 @@ export function EpisodeScreen(props: {
 
       <section className="episode-list">
         {episodes.map((episode) => {
-          const percent = progressPercent(episode.position_seconds, episode.duration_seconds);
+          const percent = episode.watched ? 100 : progressPercent(episode.position_seconds, episode.duration_seconds);
           const thumbnail = episodeThumbnails[episode.id];
           return (
             <button

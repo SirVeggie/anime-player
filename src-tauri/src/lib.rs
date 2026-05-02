@@ -304,6 +304,7 @@ pub fn run() {
         anilist::get_anilist_cover_image,
         anilist::sync_anilist_episode_progress,
         anilist::get_anilist_media_status,
+        anilist::apply_anilist_progress_to_local,
         anilist::set_anilist_media_score,
         thumbnails::get_file_thumbnail,
         mpv_init,
@@ -347,6 +348,7 @@ pub fn run() {
         anilist::get_anilist_cover_image,
         anilist::sync_anilist_episode_progress,
         anilist::get_anilist_media_status,
+        anilist::apply_anilist_progress_to_local,
         anilist::set_anilist_media_score,
     ]);
 

@@ -116,3 +116,8 @@ export type AnilistMediaStatus = {
   episodes: number | null;
   score: number | null;
 };
+
+export type AnilistLocalProgressApplyResult = {
+  progress: number;
+  updated_episodes: number;
+};

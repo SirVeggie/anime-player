@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnilistAuthState,
+  AnilistLocalProgressApplyResult,
   AnilistMediaStatus,
   AnilistProgressSyncResult,
   AnilistSearchResult,
@@ -139,6 +140,10 @@ export function syncAnilistEpisodeProgress(episodeId: number): Promise<AnilistPr
 
 export function getAnilistMediaStatus(animeId: number): Promise<AnilistMediaStatus | null> {
   return invoke("get_anilist_media_status", { animeId });
+}
+
+export function applyAnilistProgressToLocal(animeId: number): Promise<AnilistLocalProgressApplyResult | null> {
+  return invoke("apply_anilist_progress_to_local", { animeId });
 }
 
 export function setAnilistMediaScore(animeId: number, score: number | null): Promise<AnilistMediaStatus> {
