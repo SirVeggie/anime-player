@@ -79,8 +79,10 @@ view components. Per-screen UI lives in `src/components/`:
   above and dismiss automatically.
 - The app window is frameless (`decorations: false`) and draws its own
   React title bar in `src/App.tsx`. The title bar owns dragging,
-  double-click maximize, and minimize / maximize / close controls. On
-  library/settings views it stays visible; **in the video player** it
+  double-click maximize, and minimize / maximize / close controls. While
+  the window is **fullscreen** (F11 or the player control), that title bar
+  is not rendered so those controls stay hidden. On
+  library/settings views it stays visible when not fullscreen; **in the video player** it
   shows and hides with the player chrome (see `onControlsVisibilityChange`
   in `PlayerView`), uses no extra top gradient (the player UI already
   shades the top/bottom), and the **“Anime Player”** label stays hidden

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
@@ -91,6 +92,7 @@ function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [videoOpening, setVideoOpening] = useState(false);
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
+  const [windowFullscreen, setWindowFullscreen] = useState(false);
   const [playerPaused, setPlayerPaused] = useState(true);
   const contentRef = useRef<HTMLElement | null>(null);
   const selectedAnimeIdRef = useRef<number | null>(null);
@@ -233,6 +235,30 @@ function App() {
   }, [pageKey, view]);
 
   useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        setWindowFullscreen(await appWindow.isFullscreen());
+      } catch {
+        /* ignore */
+      }
+      if (cancelled) return;
+      unlisten = await appWindow.onResized(async () => {
+        try {
+          setWindowFullscreen(await appWindow.isFullscreen());
+        } catch {
+          /* ignore */
+        }
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (e.code !== "F11") return;
@@ -242,6 +268,7 @@ function App() {
         try {
           const next = !(await appWindow.isFullscreen());
           await appWindow.setFullscreen(next);
+          setWindowFullscreen(next);
         } catch {
           /* ignore */
         }
@@ -672,7 +699,9 @@ function App() {
   if (loading) {
     return (
       <main className="app app--loading">
-        <WindowTitleBar playerOpen={false} playerControlsChromeVisible />
+        {!windowFullscreen ? (
+          <WindowTitleBar playerOpen={false} playerControlsChromeVisible />
+        ) : null}
         <div className="empty">
           <h2>Loading library...</h2>
         </div>
@@ -683,7 +712,9 @@ function App() {
   if (!library) {
     return (
       <main className="app app--loading">
-        <WindowTitleBar playerOpen={false} playerControlsChromeVisible />
+        {!windowFullscreen ? (
+          <WindowTitleBar playerOpen={false} playerControlsChromeVisible />
+        ) : null}
         <div className="empty">
           <h2>Library failed to load</h2>
           {fatalError ? <p className="muted">{fatalError}</p> : null}
@@ -705,10 +736,12 @@ function App() {
         playerLoadedInBackground ? " app--player-background" : ""
       }${videoOpening ? " app--video-opening" : ""}`}
     >
-      <WindowTitleBar
-        playerOpen={Boolean(showPlayer)}
-        playerControlsChromeVisible={playerControlsChromeVisible}
-      />
+      {!windowFullscreen ? (
+        <WindowTitleBar
+          playerOpen={Boolean(showPlayer)}
+          playerControlsChromeVisible={playerControlsChromeVisible}
+        />
+      ) : null}
       <aside className="sidebar">
         <nav className="nav-list" aria-label="Primary navigation">
           <button
