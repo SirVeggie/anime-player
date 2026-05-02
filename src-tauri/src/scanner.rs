@@ -126,6 +126,45 @@ fn compile_rules(rules: &[DetectionRule]) -> Result<Vec<CompiledRule>, String> {
         .collect()
 }
 
+/// First enabled rule that matches `file_name`, in the same order as a library rescan
+/// (`ORDER BY priority, id`). Used for UI; does not touch the database.
+pub fn match_rule_name_for_file_name(
+    file_name: &str,
+    named_rules: &[(String, DetectionRule)],
+) -> Result<Option<String>, String> {
+    if named_rules.is_empty() {
+        return Ok(None);
+    }
+    let detection_only: Vec<DetectionRule> = named_rules
+        .iter()
+        .map(|(_, rule)| rule.clone())
+        .collect();
+    let compiled = compile_rules(&detection_only)?;
+    for ((name, _), rule) in named_rules.iter().zip(compiled.iter()) {
+        if parse_episode_fields(file_name, rule).is_some() {
+            return Ok(Some(name.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_episode_fields(file_name: &str, rule: &CompiledRule) -> Option<(String, Option<f64>)> {
+    if !rule.detection.is_match(file_name) {
+        return None;
+    }
+    let caps = rule.title.captures(file_name)?;
+    let title = caps
+        .name("title")
+        .or_else(|| caps.get(1))
+        .map(|m| clean_title(m.as_str()))
+        .filter(|s| !s.is_empty())?;
+    let episode_number = caps
+        .name("episode")
+        .or_else(|| caps.get(2))
+        .and_then(|m| m.as_str().parse::<f64>().ok());
+    Some((title, episode_number))
+}
+
 fn detect_episode(
     path: &Path,
     file_name: &str,
@@ -134,21 +173,9 @@ fn detect_episode(
     rules: &[CompiledRule],
 ) -> Option<ScannedEpisode> {
     for rule in rules {
-        if !rule.detection.is_match(file_name) {
-            continue;
-        }
-        let Some(caps) = rule.title.captures(file_name) else {
+        let Some((title, episode_number)) = parse_episode_fields(file_name, rule) else {
             continue;
         };
-        let title = caps
-            .name("title")
-            .or_else(|| caps.get(1))
-            .map(|m| clean_title(m.as_str()))
-            .filter(|s| !s.is_empty())?;
-        let episode_number = caps
-            .name("episode")
-            .or_else(|| caps.get(2))
-            .and_then(|m| m.as_str().parse::<f64>().ok());
         let file_type = path
             .extension()
             .and_then(|ext| ext.to_str())

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getAnilistCoverImage, getFileThumbnail } from "../api";
+import { getAnilistCoverImage, getFileThumbnail, getMatchingDetectionRuleName } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
@@ -71,6 +71,7 @@ export function EpisodeScreen(props: {
   const [scoreDraft, setScoreDraft] = useState("");
   const [scoreSaving, setScoreSaving] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
+  const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
@@ -84,6 +85,21 @@ export function EpisodeScreen(props: {
     setLinkSearchOpen(false);
     setLinkSearchError(null);
   }, [anime.id, anime.title]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetectionRuleName(undefined);
+    void getMatchingDetectionRuleName(anime.id)
+      .then((name) => {
+        if (!cancelled) setDetectionRuleName(name);
+      })
+      .catch(() => {
+        if (!cancelled) setDetectionRuleName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [anime.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,7 +294,11 @@ export function EpisodeScreen(props: {
     <>
       <ViewHeader
         title={anime.title}
-        subtitle={`${episodes.length} episode${episodes.length === 1 ? "" : "s"} - ${remainingCount} remaining`}
+        subtitle={[
+          `${episodes.length} episode${episodes.length === 1 ? "" : "s"}`,
+          `${remainingCount} remaining`,
+          ...(detectionRuleName !== undefined && detectionRuleName !== null ? [`Rule: ${detectionRuleName}`] : []),
+        ].join(" · ")}
         onBack={onBack}
         action={
           <>

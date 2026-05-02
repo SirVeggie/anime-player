@@ -64,6 +64,11 @@ export function listEpisodes(animeId: number): Promise<Episode[]> {
   return invoke("list_episodes", { animeId });
 }
 
+/** Which enabled detection rule matches this anime's files (same logic as rescan; not persisted). */
+export function getMatchingDetectionRuleName(animeId: number): Promise<string | null> {
+  return invoke("get_matching_detection_rule_name", { animeId });
+}
+
 export function getFileThumbnail(path: string, size: number): Promise<string | null> {
   return invoke("get_file_thumbnail", { path, size });
 }

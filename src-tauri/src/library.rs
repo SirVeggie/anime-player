@@ -390,6 +390,28 @@ pub fn list_episodes(db: State<'_, AppDatabase>, anime_id: i64) -> Result<Vec<Ep
     db.with_conn(|conn| list_episodes_for_anime(conn, anime_id))
 }
 
+/// Resolves which enabled detection rule matches this anime's episode files, using the same
+/// rule order and filename logic as a rescan — computed on demand, not stored in the DB.
+#[tauri::command]
+pub fn get_matching_detection_rule_name(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<Option<String>, String> {
+    db.with_conn(|conn| {
+        let rules = list_enabled_detection_rules_named(conn)?;
+        if rules.is_empty() {
+            return Ok(None);
+        }
+        let file_names = list_episode_file_names_for_anime(conn, anime_id)?;
+        for file_name in file_names {
+            if let Some(name) = scanner::match_rule_name_for_file_name(&file_name, &rules)? {
+                return Ok(Some(name));
+            }
+        }
+        Ok(None)
+    })
+}
+
 #[tauri::command]
 pub fn save_episode_progress(
     db: State<'_, AppDatabase>,
@@ -615,6 +637,45 @@ fn list_enabled_detection_rules(conn: &Connection) -> Result<Vec<DetectionRule>,
                 title_regex: row.get(1)?,
             })
         })
+        .map_err(|e| e.to_string())?;
+    collect_rows(rows)
+}
+
+fn list_enabled_detection_rules_named(
+    conn: &Connection,
+) -> Result<Vec<(String, DetectionRule)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, detection_regex, title_regex
+             FROM regex_rules
+             WHERE enabled = 1
+             ORDER BY priority, id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                DetectionRule {
+                    detection_regex: row.get(1)?,
+                    title_regex: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    collect_rows(rows)
+}
+
+fn list_episode_file_names_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT file_name FROM episodes
+             WHERE anime_id = ?1
+             ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![anime_id], |row| row.get(0))
         .map_err(|e| e.to_string())?;
     collect_rows(rows)
 }

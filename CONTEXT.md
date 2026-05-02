@@ -188,7 +188,10 @@ view components. Per-screen UI lives in `src/components/`:
   not keep stale entries from removed roots),
   `create_category`, `delete_category`, `set_default_category`,
   `create_regex_rule`, `update_regex_rule`, `delete_regex_rule`,
-  `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
+  `move_anime_to_category`, `list_episodes`, `get_matching_detection_rule_name`
+  (re-runs filename matching against enabled rules for the episode list; the
+  episode page shows the resulting rule name without persisting it),
+  `save_episode_progress`,
   and `rescan_library`.   `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
   series is upserted once per scan instead of once per file. Each rescan
