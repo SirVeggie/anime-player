@@ -90,11 +90,10 @@ Node 22, 7-Zip on PATH, and the local generated
   interaction, not by hotkeys.
 - The video pane uses Tauri `startDragging` (single left-click) and
   `setFullscreen` (double left-click or **F**); right-click toggles
-  pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** toggles between
-  the player and episode list. At EOF the frontend saves progress,
-  loads the next episode if one exists, or stops mpv and returns to the
-  episode list. A **Close video** control still stops mpv and clears the
-  loaded playback session.
+  pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** or the back
+  control returns to the episode list (without unloading mpv). At EOF the
+  frontend saves progress, loads the next episode if one exists, or stops
+  mpv and returns to the episode list.
 
 ### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/db.rs`,
 `src-tauri/src/library.rs`, `src-tauri/src/scanner.rs`, `src-tauri/src/mpv/`
