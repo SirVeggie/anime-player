@@ -18,7 +18,7 @@ import {
 import { AnimeGrid } from "./components/AnimeGrid";
 import { CategoryScreen } from "./components/CategoryScreen";
 import { EpisodeScreen } from "./components/EpisodeScreen";
-import { LibraryIcon, RescanIcon, SettingsIcon } from "./components/icons";
+import { LibraryIcon, RescanIcon, SettingsIcon } from "./components/Icons";
 import { PlayerView } from "./components/PlayerView";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { type Toast, ToastStack } from "./components/ToastStack";

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowLeftIcon } from "./icons";
+import { ArrowLeftIcon } from "./Icons";
 
 export function ViewHeader(props: {
   title: string;
