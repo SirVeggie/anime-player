@@ -24,8 +24,12 @@ export function formatTime(seconds: number): string {
   return `${m}:${ss}`;
 }
 
+export function isEpisodeNumberKnown(value: number | null): value is number {
+  return value !== null && Number.isFinite(value);
+}
+
 export function formatEpisodeNumber(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "Episode ?";
+  if (!isEpisodeNumberKnown(value)) return "Episode ?";
   return Number.isInteger(value) ? `Episode ${value}` : `Episode ${value.toFixed(1)}`;
 }
 

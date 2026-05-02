@@ -3,7 +3,7 @@ import { getAnilistCoverImage, getFileThumbnail, getMatchingDetectionRuleName } 
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
-import { formatEpisodeNumber, formatSize, formatTime, progressPercent } from "../utils";
+import { formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
@@ -459,6 +459,9 @@ export function EpisodeScreen(props: {
         {episodes.map((episode, index) => {
           const percent = episode.watched ? 100 : progressPercent(episode.position_seconds, episode.duration_seconds);
           const thumbnail = episodeThumbnails[episode.id];
+          const episodeTitle = isEpisodeNumberKnown(episode.episode_number)
+            ? formatEpisodeNumber(episode.episode_number)
+            : episode.file_name;
           return (
             <button
               type="button"
@@ -473,11 +476,11 @@ export function EpisodeScreen(props: {
               </div>
               <div className="episode-main">
                 <div className="episode-title">
-                  <span>{formatEpisodeNumber(episode.episode_number)}</span>
+                  <span>{episodeTitle}</span>
                   {episode.id === quickPlayEpisodeId ? <span className="pill">Up next</span> : null}
                 </div>
                 <div className="episode-meta">
-                  <span>{episode.file_name}</span>
+                  {isEpisodeNumberKnown(episode.episode_number) ? <span>{episode.file_name}</span> : null}
                   <span>{formatSize(episode.size)}</span>
                   {episode.duration_seconds > 0 ? <span>{formatTime(episode.duration_seconds)}</span> : null}
                 </div>
