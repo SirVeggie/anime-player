@@ -220,6 +220,8 @@ export function PlayerView(props: {
   const pendingResumeSecondsRef = useRef<number | null>(null);
   const controlsHideTimerRef = useRef<number | null>(null);
   const handlingEofRef = useRef(false);
+  const eventListenersReadyRef = useRef(false);
+  const [eventListenersReadyVersion, setEventListenersReadyVersion] = useState(0);
   const onErrorRef = useRef(onError);
 
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
@@ -375,74 +377,10 @@ export function PlayerView(props: {
       });
   }, [onClose, onError, onProgressSaved, onSelectEpisode, persistProgress, playlist, selectedIndex]);
 
-  // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
-  // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
-  // while mpv still had the file loaded, which broke reopening the same episode from the list.
-  useEffect(() => {
-    handlingEofRef.current = false;
-    setPosition(episode.position_seconds || 0);
-    setDuration(episode.duration_seconds || 0);
-    setTracks([]);
-    setVideoGeometry(null);
-    setActiveTrackMenu(null);
-    setVideoCompositorRevealed(false);
-  }, [episode.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const sidebarPx = sidebarPxForVisibility(visible);
-        if (!mpvReadyRef.current) {
-          await invoke("mpv_init", {
-            windowWidth: window.innerWidth,
-            sidebarPx,
-          });
-          mpvReadyRef.current = true;
-        } else {
-          await invoke("mpv_set_layout", {
-            windowWidth: window.innerWidth,
-            sidebarPx,
-          });
-        }
-        if (cancelled) return;
-        if (loadedPathRef.current === episode.path) {
-          if (visible) {
-            try {
-              await invoke("mpv_set_pause", { paused: false });
-              setPaused(false);
-              setVideoCompositorRevealed(true);
-            } catch (e) {
-              if (!cancelled) onErrorRef.current(errorMessage(e));
-            }
-          }
-          return;
-        }
-        pendingResumeSecondsRef.current =
-          episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
-        setPaused(false);
-        await invoke("mpv_load", { path: episode.path });
-        loadedPathRef.current = episode.path;
-      } catch (e) {
-        if (!cancelled) onErrorRef.current(errorMessage(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [episode.path, visible]);
-
-  useEffect(() => {
-    if (!mpvReadyRef.current) return;
-    void invoke("mpv_set_layout", {
-      windowWidth: window.innerWidth,
-      sidebarPx: sidebarPxForVisibility(visible),
-    }).catch((err) => onError(errorMessage(err)));
-  }, [onError, visible]);
-
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
+    eventListenersReadyRef.current = false;
 
     (async () => {
       const subs: Array<[string, (e: { payload: unknown }) => void]> = [
@@ -491,6 +429,7 @@ export function PlayerView(props: {
           () => {
             setPaused(false);
             setVideoCompositorRevealed(true);
+            void refreshVideoGeometry();
           },
         ],
       ];
@@ -503,13 +442,85 @@ export function PlayerView(props: {
         }
         unlisteners.push(fn);
       }
+
+      if (!cancelled) {
+        eventListenersReadyRef.current = true;
+        setEventListenersReadyVersion((version) => version + 1);
+      }
     })();
 
     return () => {
       cancelled = true;
+      eventListenersReadyRef.current = false;
       unlisteners.forEach((fn) => fn());
     };
-  }, [handlePlaybackFinished, onError, persistProgress, refreshTracks, refreshVideoGeometry]);
+  }, [handlePlaybackFinished, onError, refreshTracks, refreshVideoGeometry]);
+
+  // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
+  // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
+  // while mpv still had the file loaded, which broke reopening the same episode from the list.
+  useEffect(() => {
+    handlingEofRef.current = false;
+    setPosition(episode.position_seconds || 0);
+    setDuration(episode.duration_seconds || 0);
+    setTracks([]);
+    setVideoGeometry(null);
+    setActiveTrackMenu(null);
+    setVideoCompositorRevealed(false);
+  }, [episode.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!eventListenersReadyRef.current) return;
+        const sidebarPx = sidebarPxForVisibility(visible);
+        if (!mpvReadyRef.current) {
+          await invoke("mpv_init", {
+            windowWidth: window.innerWidth,
+            sidebarPx,
+          });
+          mpvReadyRef.current = true;
+        } else {
+          await invoke("mpv_set_layout", {
+            windowWidth: window.innerWidth,
+            sidebarPx,
+          });
+        }
+        if (cancelled) return;
+        if (loadedPathRef.current === episode.path) {
+          if (visible) {
+            try {
+              await invoke("mpv_set_pause", { paused: false });
+              setPaused(false);
+              setVideoCompositorRevealed(true);
+            } catch (e) {
+              if (!cancelled) onErrorRef.current(errorMessage(e));
+            }
+          }
+          return;
+        }
+        pendingResumeSecondsRef.current =
+          episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
+        setPaused(false);
+        await invoke("mpv_load", { path: episode.path });
+        loadedPathRef.current = episode.path;
+      } catch (e) {
+        if (!cancelled) onErrorRef.current(errorMessage(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [episode.path, eventListenersReadyVersion, visible]);
+
+  useEffect(() => {
+    if (!mpvReadyRef.current) return;
+    void invoke("mpv_set_layout", {
+      windowWidth: window.innerWidth,
+      sidebarPx: sidebarPxForVisibility(visible),
+    }).catch((err) => onError(errorMessage(err)));
+  }, [onError, visible]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
