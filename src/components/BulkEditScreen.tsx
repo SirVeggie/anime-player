@@ -5,7 +5,7 @@ import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
 const ALL_CATEGORIES_ID = 0;
-const REGEX_DEBOUNCE_MS = 2000;
+const REGEX_DEBOUNCE_MS = 1200;
 
 function categoryName(categories: Category[], categoryId: number): string {
   return categories.find((category) => category.id === categoryId)?.name ?? "Unknown";
@@ -202,7 +202,7 @@ export function BulkEditScreen(props: {
             </span>
           ) : null}
           <button type="button" onClick={handleApply} disabled={busy || matchingPaths || animeToMove.length === 0}>
-            Apply category edit
+            Apply category
           </button>
         </div>
       </section>

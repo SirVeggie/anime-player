@@ -82,12 +82,14 @@
   justify-content: space-between;
 }
 
-.bulk-edit-settings-actions {
-  justify-content: flex-end;
+/* Keep Apply pinned to the trailing edge whether or not the summary span is shown.
+   (Plain space-between with one flex item aligns that item to the start.) */
+.bulk-edit-panel .settings-actions.bulk-edit-settings-actions {
+  justify-content: flex-start;
 }
 
-.bulk-edit-settings-actions > .muted {
-  margin-right: auto;
+.bulk-edit-panel .settings-actions.bulk-edit-settings-actions > button {
+  margin-left: auto;
 }
 
 .stacked-field .custom-select {
