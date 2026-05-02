@@ -136,7 +136,8 @@ Node 22, 7-Zip on PATH, and the local generated
   `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
   and `rescan_library`. `save_episode_progress` stores `position_seconds`
   as 0 when the reported position is under 60 seconds so brief opens do
-  not leave a resume point.
+  not leave a resume point; when `watched` is true (end-of-episode
+  threshold), it stores `position_seconds` at full duration (100%).
 - `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
   in-process libmpv module. All Win32 and FFI code is gated behind
   `#[cfg(windows)]`.

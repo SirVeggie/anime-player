@@ -367,8 +367,11 @@ pub fn save_episode_progress(
 ) -> Result<Episode, String> {
     db.with_conn(|conn| {
         let watched_flag = if watched { 1 } else { 0 };
+        let duration_seconds = duration_seconds.max(0.0);
         let mut position_seconds = position_seconds.max(0.0);
-        if position_seconds < MIN_POSITION_SECONDS_TO_PERSIST {
+        if watched {
+            position_seconds = duration_seconds;
+        } else if position_seconds < MIN_POSITION_SECONDS_TO_PERSIST {
             position_seconds = 0.0;
         }
         conn.execute(
@@ -381,7 +384,7 @@ pub fn save_episode_progress(
              WHERE id = ?4",
             params![
                 position_seconds,
-                duration_seconds.max(0.0),
+                duration_seconds,
                 watched_flag,
                 episode_id
             ],
