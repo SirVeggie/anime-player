@@ -80,6 +80,11 @@ Node 22, 7-Zip on PATH, and the local generated
   file autoplays instead of inheriting the previous pause state. The
   player view is mounted as the loaded playback session even when hidden
   behind the episode list.
+  Player-internal reset for a new file keys off `episode.id` only (not
+  saved progress fields) so `save_episode_progress` updates do not clear
+  `videoCompositorRevealed` and paint opaque pending chrome over mpv.
+  When the same path is already loaded, showing the player again runs
+  unpause without a fresh `mpv_load` (matching Q-to-resume behavior).
 - The video player is full-window while visible: `.app--player-open`
   hides the sidebar/content and passes `sidebar_px = 0` to mpv so
   `video-margin-ratio-left` is cleared. When **Q** or the back arrow

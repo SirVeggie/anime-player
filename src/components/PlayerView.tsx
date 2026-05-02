@@ -333,6 +333,9 @@ export function PlayerView(props: {
       });
   }, [onClose, onError, onSelectEpisode, persistProgress, playlist, selectedIndex]);
 
+  // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
+  // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
+  // while mpv still had the file loaded, which broke reopening the same episode from the list.
   useEffect(() => {
     handlingEofRef.current = false;
     setPosition(episode.position_seconds || 0);
@@ -341,7 +344,7 @@ export function PlayerView(props: {
     setVideoGeometry(null);
     setActiveTrackMenu(null);
     setVideoCompositorRevealed(false);
-  }, [episode.id, episode.duration_seconds, episode.position_seconds]);
+  }, [episode.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,7 +364,18 @@ export function PlayerView(props: {
           });
         }
         if (cancelled) return;
-        if (loadedPathRef.current === episode.path) return;
+        if (loadedPathRef.current === episode.path) {
+          if (visible) {
+            try {
+              await invoke("mpv_set_pause", { paused: false });
+              setPaused(false);
+              setVideoCompositorRevealed(true);
+            } catch (e) {
+              if (!cancelled) onError(errorMessage(e));
+            }
+          }
+          return;
+        }
         pendingResumeSecondsRef.current =
           episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
         setPaused(false);
