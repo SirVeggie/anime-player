@@ -81,6 +81,7 @@ export type LibraryState = {
 export type ScanSummary = {
   roots_scanned: number;
   episodes_imported: number;
+  episodes_removed: number;
   unmatched_files: number;
 };
 

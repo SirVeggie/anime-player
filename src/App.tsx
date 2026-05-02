@@ -280,7 +280,11 @@ function App() {
     await runAction(async () => {
       const summary = await rescanLibrary();
       await reloadLibrary();
-      return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} imported, ${summary.unmatched_files} unmatched.`;
+      const removed =
+        summary.episodes_removed > 0
+          ? `, ${summary.episodes_removed} stale episode${summary.episodes_removed === 1 ? "" : "s"} removed`
+          : "";
+      return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} imported${removed}, ${summary.unmatched_files} unmatched.`;
     });
   }, [reloadLibrary, runAction]);
 

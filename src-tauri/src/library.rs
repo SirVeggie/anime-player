@@ -89,6 +89,7 @@ pub struct LibraryState {
 pub struct ScanSummary {
     roots_scanned: i64,
     episodes_imported: i64,
+    episodes_removed: i64,
     unmatched_files: i64,
 }
 
@@ -412,6 +413,7 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
         let mut summary = ScanSummary {
             roots_scanned: 0,
             episodes_imported: 0,
+            episodes_removed: 0,
             unmatched_files: 0,
         };
 
@@ -423,6 +425,9 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
 
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let mut anime_cache: HashMap<String, i64> = HashMap::new();
+
+            let removed = delete_episodes_not_in_scan(&tx, root.id, &scan.episodes)?;
+            summary.episodes_removed += removed as i64;
 
             tx.execute(
                 "DELETE FROM unmatched_files WHERE root_folder_id = ?1",
@@ -769,6 +774,40 @@ fn upsert_anime(
         |row| row.get(0),
     )
     .map_err(|e| e.to_string())
+}
+
+/// Removes episode rows for this root whose files are no longer present in the scan
+/// (deleted, moved, or no longer matched by detection rules).
+fn delete_episodes_not_in_scan(
+    tx: &rusqlite::Transaction<'_>,
+    root_folder_id: i64,
+    kept: &[scanner::ScannedEpisode],
+) -> Result<usize, String> {
+    tx.execute("DROP TABLE IF EXISTS rescan_keep_paths", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "CREATE TEMP TABLE rescan_keep_paths (path TEXT PRIMARY KEY)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    for ep in kept {
+        tx.execute(
+            "INSERT INTO rescan_keep_paths (path) VALUES (?1)",
+            params![ep.path],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let removed = tx
+        .execute(
+            "DELETE FROM episodes
+             WHERE root_folder_id = ?1
+             AND NOT EXISTS (
+                 SELECT 1 FROM rescan_keep_paths k WHERE k.path = episodes.path
+             )",
+            params![root_folder_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(removed)
 }
 
 fn upsert_episode(
