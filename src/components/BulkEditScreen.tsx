@@ -165,7 +165,7 @@ export function BulkEditScreen(props: {
               type="text"
               value={regexInput}
               onChange={(event) => setRegexInput(event.currentTarget.value)}
-              placeholder="Anime\Old or \[SubsPlease\]"
+              placeholder="Anime\\Watching or \[SubsPlease\]"
               spellCheck={false}
             />
           </label>
