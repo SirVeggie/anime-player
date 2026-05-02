@@ -103,9 +103,42 @@
   overflow: hidden;
 }
 
+.continue-card--with-cover {
+  flex-direction: row;
+  align-items: center;
+  padding-left: 14px;
+}
+
+.continue-card-cover {
+  width: 42px;
+  height: 58px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.continue-card-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.continue-card-body strong,
+.continue-card-body span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .continue-card span {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.continue-card strong {
+  color: var(--text-color);
 }
 
 /* Accent stripe on the leading edge â€” a small splash of color that helps the

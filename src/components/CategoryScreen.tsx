@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getAnilistCoverImage } from "../api";
 import type { AnimeSummary, LibraryState } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { ViewHeader } from "./ViewHeader";
@@ -11,6 +12,7 @@ export function CategoryScreen(props: {
 }) {
   const { library, onOpenCategory, onOpenAnime, onOpenSettings } = props;
   const getRovingItemProps = useRovingListNavigation(library.categories.length + library.recent_anime.length);
+  const [recentCovers, setRecentCovers] = useState<Record<number, string>>({});
   const animeByCategory = useMemo(() => {
     const counts = new Map<number, number>();
     for (const anime of library.anime) {
@@ -18,6 +20,29 @@ export function CategoryScreen(props: {
     }
     return counts;
   }, [library.anime]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRecentCovers({});
+    void Promise.all(
+      library.recent_anime
+        .filter((anime) => anime.anilist_cover_path)
+        .map(async (anime) => {
+          try {
+            const cover = await getAnilistCoverImage(anime.id);
+            return cover ? ([anime.id, cover] as const) : null;
+          } catch {
+            return null;
+          }
+        }),
+    ).then((entries) => {
+      if (cancelled) return;
+      setRecentCovers(Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [library.recent_anime]);
 
   return (
     <>
@@ -57,18 +82,26 @@ export function CategoryScreen(props: {
             <h2>Continue Watching</h2>
           </div>
           <div className="continue-grid">
-            {library.recent_anime.map((anime, index) => (
-              <button
-                type="button"
-                className="continue-card"
-                key={anime.id}
-                onClick={() => onOpenAnime(anime)}
-                {...getRovingItemProps(library.categories.length + index)}
-              >
-                <strong>{anime.title}</strong>
-                <span>{anime.episode_count} episodes</span>
-              </button>
-            ))}
+            {library.recent_anime.map((anime, index) => {
+              const cover = recentCovers[anime.id];
+              return (
+                <button
+                  type="button"
+                  className={`continue-card${cover ? " continue-card--with-cover" : ""}`}
+                  key={anime.id}
+                  onClick={() => onOpenAnime(anime)}
+                  {...getRovingItemProps(library.categories.length + index)}
+                >
+                  {cover ? (
+                    <img className="continue-card-cover" src={cover} alt="" loading="lazy" />
+                  ) : null}
+                  <div className="continue-card-body">
+                    <strong>{anime.title}</strong>
+                    <span>{anime.episode_count} episodes</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </>
       ) : null}
