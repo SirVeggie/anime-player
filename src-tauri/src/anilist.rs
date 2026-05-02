@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::Client;
@@ -18,6 +19,7 @@ const CLIENT_ID_KEY: &str = "anilist.client_id";
 const TOKEN_KEY: &str = "anilist.access_token";
 const VIEWER_ID_KEY: &str = "anilist.viewer_id";
 const VIEWER_NAME_KEY: &str = "anilist.viewer_name";
+const MEDIA_STATUS_CACHE_TTL_SECONDS: i64 = 60 * 60;
 
 #[derive(Debug, Serialize)]
 pub struct AnilistAuthState {
@@ -153,6 +155,10 @@ pub async fn link_anime_anilist(
                      anilist_title = ?2,
                      anilist_site_url = ?3,
                      anilist_cover_path = ?4,
+                     anilist_cached_progress = NULL,
+                     anilist_cached_episodes = NULL,
+                     anilist_cached_score = NULL,
+                     anilist_status_fetched_at = NULL,
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?5",
                 params![
@@ -180,6 +186,10 @@ pub fn unlink_anime_anilist(db: State<'_, AppDatabase>, anime_id: i64) -> Result
                  anilist_title = NULL,
                  anilist_site_url = NULL,
                  anilist_cover_path = NULL,
+                 anilist_cached_progress = NULL,
+                 anilist_cached_episodes = NULL,
+                 anilist_cached_score = NULL,
+                 anilist_status_fetched_at = NULL,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
             params![anime_id],
@@ -242,7 +252,13 @@ pub async fn sync_anilist_episode_progress(
         ));
     };
 
-    let remote_progress = get_remote_progress(&token, target.anilist_id).await?;
+    let remote_progress = match fresh_cached_media_status(&db, target.anime_id)? {
+        Some(status) => status.progress.unwrap_or(0),
+        None => {
+            let status = fetch_and_cache_media_status(&db, &token, target.anime_id, target.anilist_id).await?;
+            status.progress.unwrap_or(0)
+        }
+    };
     if remote_progress >= target.progress {
         return Ok(AnilistProgressSyncResult::skipped(
             "AniList progress is already at or beyond this episode.",
@@ -252,6 +268,7 @@ pub async fn sync_anilist_episode_progress(
     }
 
     let saved_progress = save_remote_progress(&token, target.anilist_id, target.progress).await?;
+    db.with_conn(|conn| cache_anilist_progress(conn, target.anime_id, saved_progress))?;
     Ok(AnilistProgressSyncResult {
         synced: true,
         reason: None,
@@ -268,7 +285,9 @@ pub async fn get_anilist_media_status(
     let Some((token, anilist_id)) = auth_and_media_id_for_anime(&db, anime_id)? else {
         return Ok(None);
     };
-    get_media_status(&token, anilist_id).await.map(Some)
+    cached_or_fetch_media_status(&db, &token, anime_id, anilist_id)
+        .await
+        .map(Some)
 }
 
 #[tauri::command]
@@ -279,7 +298,7 @@ pub async fn apply_anilist_progress_to_local(
     let Some((token, anilist_id)) = auth_and_media_id_for_anime(&db, anime_id)? else {
         return Ok(None);
     };
-    let status = get_media_status(&token, anilist_id).await?;
+    let status = cached_or_fetch_media_status(&db, &token, anime_id, anilist_id).await?;
     let progress = status.progress.unwrap_or(0).max(0);
     if progress == 0 {
         return Ok(Some(AnilistLocalProgressApplyResult {
@@ -324,7 +343,9 @@ pub async fn set_anilist_media_score(
 ) -> Result<AnilistMediaStatus, String> {
     let (token, anilist_id) = auth_and_media_id_for_anime(&db, anime_id)?
         .ok_or("Anime is not linked to AniList or AniList is not logged in.")?;
-    save_remote_score(&token, anilist_id, score).await
+    let status = save_remote_score(&token, anilist_id, score).await?;
+    db.with_conn(|conn| cache_anilist_media_status(conn, anime_id, &status))?;
+    Ok(status)
 }
 
 fn access_token_from_callback(callback_url: &str) -> Result<String, String> {
@@ -391,20 +412,27 @@ fn progress_target_for_episode(
     episode_id: i64,
 ) -> Result<Option<AnilistProgressTarget>, String> {
     conn.query_row(
-        "SELECT a.anilist_id, e.episode_number
+        "SELECT e.anime_id, a.anilist_id, e.episode_number
          FROM episodes e
          JOIN anime a ON a.id = e.anime_id
          WHERE e.id = ?1",
         params![episode_id],
-        |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<f64>>(1)?)),
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+            ))
+        },
     )
     .optional()
     .map_err(|e| e.to_string())
     .map(|row| {
-        row.and_then(|(anilist_id, episode_number)| {
+        row.and_then(|(anime_id, anilist_id, episode_number)| {
             let anilist_id = anilist_id?;
             let progress = episode_number?.floor() as i64;
             (progress > 0).then_some(AnilistProgressTarget {
+                anime_id,
                 anilist_id,
                 progress,
             })
@@ -429,6 +457,128 @@ fn auth_and_media_id_for_anime(
             .flatten();
         Ok(token.zip(anilist_id))
     })
+}
+
+fn now_seconds() -> Result<i64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .map_err(|e| format!("system clock is before Unix epoch: {e}"))
+}
+
+fn fresh_cached_media_status(
+    db: &AppDatabase,
+    anime_id: i64,
+) -> Result<Option<AnilistMediaStatus>, String> {
+    let now = now_seconds()?;
+    db.with_conn(|conn| cached_media_status(conn, anime_id, now))
+}
+
+fn cached_media_status(
+    conn: &Connection,
+    anime_id: i64,
+    now: i64,
+) -> Result<Option<AnilistMediaStatus>, String> {
+    let row = conn
+        .query_row(
+            "SELECT anilist_cached_progress,
+                    anilist_cached_episodes,
+                    anilist_cached_score,
+                    anilist_status_fetched_at
+             FROM anime
+             WHERE id = ?1",
+            params![anime_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<f64>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some((progress, episodes, score, fetched_at)) = row else {
+        return Ok(None);
+    };
+    let Some(fetched_at) = fetched_at else {
+        return Ok(None);
+    };
+    if now.saturating_sub(fetched_at) >= MEDIA_STATUS_CACHE_TTL_SECONDS {
+        return Ok(None);
+    }
+    Ok(Some(AnilistMediaStatus {
+        progress,
+        episodes,
+        score,
+    }))
+}
+
+async fn cached_or_fetch_media_status(
+    db: &AppDatabase,
+    token: &str,
+    anime_id: i64,
+    anilist_id: i64,
+) -> Result<AnilistMediaStatus, String> {
+    if let Some(status) = fresh_cached_media_status(db, anime_id)? {
+        return Ok(status);
+    }
+    fetch_and_cache_media_status(db, token, anime_id, anilist_id).await
+}
+
+async fn fetch_and_cache_media_status(
+    db: &AppDatabase,
+    token: &str,
+    anime_id: i64,
+    anilist_id: i64,
+) -> Result<AnilistMediaStatus, String> {
+    let status = get_media_status(token, anilist_id).await?;
+    db.with_conn(|conn| cache_anilist_media_status(conn, anime_id, &status))?;
+    Ok(status)
+}
+
+fn cache_anilist_media_status(
+    conn: &Connection,
+    anime_id: i64,
+    status: &AnilistMediaStatus,
+) -> Result<(), String> {
+    let fetched_at = now_seconds()?;
+    conn.execute(
+        "UPDATE anime
+         SET anilist_cached_progress = ?1,
+             anilist_cached_episodes = ?2,
+             anilist_cached_score = ?3,
+             anilist_status_fetched_at = ?4
+         WHERE id = ?5",
+        params![
+            status.progress,
+            status.episodes,
+            status.score,
+            fetched_at,
+            anime_id
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn cache_anilist_progress(
+    conn: &Connection,
+    anime_id: i64,
+    progress: i64,
+) -> Result<(), String> {
+    let fetched_at = now_seconds()?;
+    conn.execute(
+        "UPDATE anime
+         SET anilist_cached_progress = ?1,
+             anilist_status_fetched_at = ?2
+         WHERE id = ?3",
+        params![progress, fetched_at, anime_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 async fn validate_token(token: &str) -> Result<Viewer, String> {
@@ -471,43 +621,6 @@ async fn get_media_status(token: &str, anilist_id: i64) -> Result<AnilistMediaSt
     )
     .await?;
     Ok(data.media.into())
-}
-
-async fn get_remote_progress(token: &str, anilist_id: i64) -> Result<i64, String> {
-    #[derive(Debug, Deserialize)]
-    struct MediaData {
-        #[serde(rename = "Media")]
-        media: RemoteProgressMedia,
-    }
-    #[derive(Debug, Deserialize)]
-    struct RemoteProgressMedia {
-        #[serde(rename = "mediaListEntry")]
-        media_list_entry: Option<RemoteProgressEntry>,
-    }
-    #[derive(Debug, Deserialize)]
-    struct RemoteProgressEntry {
-        progress: Option<i64>,
-    }
-
-    let data: MediaData = graphql(
-        Some(token),
-        r#"
-        query CurrentProgress($id: Int!) {
-          Media(id: $id, type: ANIME) {
-            mediaListEntry {
-              progress
-            }
-          }
-        }
-        "#,
-        json!({ "id": anilist_id }),
-    )
-    .await?;
-    Ok(data
-        .media
-        .media_list_entry
-        .and_then(|entry| entry.progress)
-        .unwrap_or(0))
 }
 
 async fn save_remote_progress(token: &str, anilist_id: i64, progress: i64) -> Result<i64, String> {
@@ -723,6 +836,7 @@ struct Viewer {
 }
 
 struct AnilistProgressTarget {
+    anime_id: i64,
     anilist_id: i64,
     progress: i64,
 }

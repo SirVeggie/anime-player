@@ -227,13 +227,15 @@ view components. Per-screen UI lives in `src/components/`:
   metadata on `anime` rows (`anilist_id`, title, site URL, cached cover
   path), searches AniList via `https://graphql.anilist.co`, validates
   login tokens with `Viewer`, and downloads covers under the portable
-  `data/anilist-covers/` directory. `sync_anilist_episode_progress` queries
-  the current `mediaListEntry.progress` and only sends `SaveMediaListEntry`
-  when the finished local episode number is greater. Media status commands
-  read `progress`, `episodes`, and `score`; `apply_anilist_progress_to_local`
-  uses that remote progress to mark local episodes watched without changing
-  unwatched rows; score updates use `SaveMediaListEntry(score: ...)`. Network
-  requests are kept outside the SQLite mutex.
+  `data/anilist-covers/` directory. Linked media status (`progress`,
+  `episodes`, `score`) is cached on the `anime` row for one hour so normal
+  navigation does not repeatedly hit AniList; app-originated score/progress
+  writes update that cache immediately. `sync_anilist_episode_progress` uses
+  the fresh cache when possible and only sends `SaveMediaListEntry` when the
+  finished local episode number is greater than the known remote progress.
+  `apply_anilist_progress_to_local` uses the same cached-or-fetched media
+  status to mark local episodes watched without changing unwatched rows.
+  Network requests are kept outside the SQLite mutex.
 - `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
   in-process libmpv module. All Win32 and FFI code is gated behind
   `#[cfg(windows)]`.

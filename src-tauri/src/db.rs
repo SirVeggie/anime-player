@@ -107,6 +107,10 @@ fn apply_schema_updates(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "anime", "anilist_title", "TEXT")?;
     ensure_column(conn, "anime", "anilist_site_url", "TEXT")?;
     ensure_column(conn, "anime", "anilist_cover_path", "TEXT")?;
+    ensure_column(conn, "anime", "anilist_cached_progress", "INTEGER")?;
+    ensure_column(conn, "anime", "anilist_cached_episodes", "INTEGER")?;
+    ensure_column(conn, "anime", "anilist_cached_score", "REAL")?;
+    ensure_column(conn, "anime", "anilist_status_fetched_at", "INTEGER")?;
     ensure_column(conn, "anime", "latest_episode_at", "TEXT")?;
     ensure_column(conn, "episodes", "missing", "INTEGER NOT NULL DEFAULT 0")?;
     refresh_anime_latest_episode_at(conn)?;
@@ -209,6 +213,10 @@ CREATE TABLE IF NOT EXISTS anime (
   anilist_title TEXT,
   anilist_site_url TEXT,
   anilist_cover_path TEXT,
+  anilist_cached_progress INTEGER,
+  anilist_cached_episodes INTEGER,
+  anilist_cached_score REAL,
+  anilist_status_fetched_at INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_watched_at TEXT,
