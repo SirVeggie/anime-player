@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -55,6 +55,7 @@ import "./App.css";
 
 type View = "categories" | "anime" | "search" | "episodes" | "settings" | "player";
 type EpisodeReturnView = "anime" | "search";
+type ScrollRestoration = "top" | "restore";
 
 type AnilistProgressUpdate = {
   animeId: number;
@@ -85,6 +86,10 @@ function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [videoOpening, setVideoOpening] = useState(false);
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
+  const contentRef = useRef<HTMLElement | null>(null);
+  const currentPageKeyRef = useRef("categories");
+  const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
+  const scrollPositionsRef = useRef(new Map<string, number>());
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     const id = Date.now() + Math.random();
@@ -159,6 +164,54 @@ function App() {
     };
   }, [handleAnilistCallback, showToast]);
 
+  const pageKey = useMemo(() => {
+    switch (view) {
+      case "anime":
+        return `anime:${selectedCategoryId ?? "none"}`;
+      case "episodes":
+        return `episodes:${selectedAnime?.id ?? "none"}:${episodeReturnView}`;
+      case "player":
+        return `player:${selectedEpisode?.id ?? "none"}`;
+      default:
+        return view;
+    }
+  }, [episodeReturnView, selectedAnime?.id, selectedCategoryId, selectedEpisode?.id, view]);
+
+  const saveCurrentScrollPosition = useCallback(() => {
+    const content = contentRef.current;
+    const currentPageKey = currentPageKeyRef.current;
+    if (!content || currentPageKey.startsWith("player:")) return;
+    scrollPositionsRef.current.set(currentPageKey, content.scrollTop);
+  }, []);
+
+  const navigateToView = useCallback(
+    (nextView: View, restoration: ScrollRestoration = "top") => {
+      saveCurrentScrollPosition();
+      pendingScrollRestorationRef.current = restoration;
+      setView(nextView);
+    },
+    [saveCurrentScrollPosition],
+  );
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) {
+      currentPageKeyRef.current = pageKey;
+      return;
+    }
+
+    if (view === "player") {
+      currentPageKeyRef.current = pageKey;
+      return;
+    }
+
+    const restoration = pendingScrollRestorationRef.current;
+    const top = restoration === "restore" ? (scrollPositionsRef.current.get(pageKey) ?? 0) : 0;
+    content.scrollTo({ top, left: 0, behavior: "auto" });
+    currentPageKeyRef.current = pageKey;
+    pendingScrollRestorationRef.current = "top";
+  }, [pageKey, view]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
@@ -179,9 +232,9 @@ function App() {
   }, []);
 
   const openSearch = useCallback(() => {
-    setView("search");
+    navigateToView("search");
     setSearchFocusToken((current) => current + 1);
-  }, []);
+  }, [navigateToView]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -232,12 +285,12 @@ function App() {
       try {
         const nextEpisodes = await listEpisodes(anime.id);
         setEpisodes(nextEpisodes);
-        setView("episodes");
+        navigateToView("episodes");
       } catch (e) {
         showToast("error", errorMessage(e));
       }
     },
-    [showToast],
+    [navigateToView, showToast],
   );
 
   const handleAddRoot = useCallback(
@@ -464,17 +517,17 @@ function App() {
     setSelectedAnime(null);
     setSelectedEpisode(null);
     setEpisodes([]);
-    setView("anime");
-  }, []);
+    navigateToView("anime");
+  }, [navigateToView]);
 
   const openEpisode = useCallback((episode: Episode) => {
     setVideoOpening(true);
     window.setTimeout(() => {
       setSelectedEpisode(episode);
-      setView("player");
+      navigateToView("player");
       setVideoOpening(false);
     }, VIDEO_OPEN_FADE_MS);
-  }, []);
+  }, [navigateToView]);
 
   // Q on the episodes screen jumps into the current anime's last-played episode
   // (or the next one if that episode is already watched). Scoped to the
@@ -490,7 +543,7 @@ function App() {
       if (selectedEpisode && selectedEpisode.id === target.id) {
         // Same file already loaded in the hidden player; reveal it without
         // the open-fade. PlayerView's `visible` effect handles the unpause.
-        setView("player");
+        navigateToView("player");
       } else {
         openEpisode(target);
       }
@@ -507,24 +560,24 @@ function App() {
       if (view === "categories") return;
       e.preventDefault();
       if (view === "anime") {
-        setView("categories");
+        navigateToView("categories", "restore");
         return;
       }
       if (view === "search") {
-        setView("categories");
+        navigateToView("categories", "restore");
         return;
       }
       if (view === "episodes" && selectedAnime) {
-        setView(episodeReturnView);
+        navigateToView(episodeReturnView, "restore");
         return;
       }
       if (view === "settings") {
-        setView("categories");
+        navigateToView("categories", "restore");
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [episodeReturnView, selectedAnime, view]);
+  }, [episodeReturnView, navigateToView, selectedAnime, view]);
 
   if (loading) {
     return (
@@ -570,7 +623,7 @@ function App() {
           <button
             type="button"
             className={libraryViewActive ? "nav-item active" : "nav-item"}
-            onClick={() => setView("categories")}
+            onClick={() => navigateToView("categories")}
             aria-label="Library"
             title="Library"
           >
@@ -590,7 +643,7 @@ function App() {
           <button
             type="button"
             className={view === "settings" ? "nav-item active" : "nav-item"}
-            onClick={() => setView("settings")}
+            onClick={() => navigateToView("settings")}
             aria-label="Settings"
             title="Settings"
           >
@@ -617,10 +670,10 @@ function App() {
           playlist={episodes}
           visible={Boolean(showPlayer)}
           onSelectEpisode={setSelectedEpisode}
-          onBack={() => setView("episodes")}
+          onBack={() => navigateToView("episodes", "restore")}
           onClose={() => {
             setSelectedEpisode(null);
-            setView("episodes");
+            navigateToView("episodes", "restore");
           }}
           onProgressSaved={handleProgressSaved}
           onAnilistProgressSynced={handleAnilistProgressSynced}
@@ -629,14 +682,14 @@ function App() {
         />
       ) : null}
 
-      <section className="content">
+      <section className="content" ref={contentRef}>
         <div className="content-inner">
           {view === "categories" ? (
             <CategoryScreen
               library={library}
               onOpenCategory={navigateToCategory}
               onOpenAnime={openAnime}
-              onOpenSettings={() => setView("settings")}
+              onOpenSettings={() => navigateToView("settings")}
             />
           ) : null}
 
@@ -644,9 +697,9 @@ function App() {
             <AnimeGrid
               category={selectedCategory}
               anime={animeInCategory}
-              onBack={() => setView("categories")}
+              onBack={() => navigateToView("categories", "restore")}
               onOpenAnime={(anime) => void openAnime(anime, "anime")}
-              onOpenSettings={() => setView("settings")}
+              onOpenSettings={() => navigateToView("settings")}
             />
           ) : null}
 
@@ -665,7 +718,7 @@ function App() {
               anime={selectedAnime}
               episodes={episodes}
               categories={library.categories}
-              onBack={() => setView(episodeReturnView)}
+              onBack={() => navigateToView(episodeReturnView, "restore")}
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
               onSearchAnilist={handleSearchAnilist}
@@ -685,7 +738,7 @@ function App() {
               rootInput={rootInput}
               newCategoryName={newCategoryName}
               anilistAuth={anilistAuth}
-              onBack={() => setView("categories")}
+              onBack={() => navigateToView("categories", "restore")}
               onRootInput={setRootInput}
               onPickFolder={() => void handlePickFolder()}
               onAddRoot={() => void handleAddRoot(rootInput)}
