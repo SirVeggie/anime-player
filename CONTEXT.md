@@ -104,7 +104,14 @@ Node 22, 7-Zip on PATH, and the local generated
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
   pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** or the back
-  control returns to the episode list (without unloading mpv).   At EOF the
+  control returns to the episode list (without unloading mpv). On the
+  episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
+  helper: it plays the current anime's most recently played episode, or
+  the next episode in list order if that one is already watched (and
+  does nothing if there is no last-played episode or no next episode).
+  When the chosen target is the same file already loaded in the hidden
+  player, App skips the open-fade and just flips `view` to `"player"`
+  so PlayerView's `visible` effect handles the unpause.   At EOF the
   frontend saves progress, loads the next episode if one exists, or stops
   mpv and returns to the episode list. When advancing to the next episode
   from EOF or via **Next** while the current episode is past the near-end

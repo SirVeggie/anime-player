@@ -316,6 +316,29 @@ function App() {
     }, VIDEO_OPEN_FADE_MS);
   }, []);
 
+  // Q on the episodes screen jumps into the current anime's last-played episode
+  // (or the next one if that episode is already watched). Scoped to the
+  // episodes view so PlayerView keeps owning Q while playback is visible.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat || e.code !== "KeyQ") return;
+      if (isTextInputTarget(e.target)) return;
+      if (view !== "episodes" || !selectedAnime) return;
+      const target = pickQuickPlayEpisode(episodes);
+      if (!target) return;
+      e.preventDefault();
+      if (selectedEpisode && selectedEpisode.id === target.id) {
+        // Same file already loaded in the hidden player; reveal it without
+        // the open-fade. PlayerView's `visible` effect handles the unpause.
+        setView("player");
+      } else {
+        openEpisode(target);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [episodes, openEpisode, selectedAnime, selectedEpisode, view]);
+
   if (loading) {
     return (
       <main className="app app--loading">
@@ -394,10 +417,8 @@ function App() {
           episode={selectedEpisode}
           playlist={episodes}
           visible={Boolean(showPlayer)}
-          canRestoreFromKeyboard={view === "episodes"}
           onSelectEpisode={setSelectedEpisode}
           onBack={() => setView("episodes")}
-          onRestore={() => setView("player")}
           onClose={() => {
             setSelectedEpisode(null);
             setView("episodes");
@@ -1124,6 +1145,34 @@ function RescanIcon() {
       <path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.1A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h8V3l-3.35 3.35z" />
     </svg>
   );
+}
+
+/**
+ * Pick the episode to launch when the user presses Q on the episodes screen:
+ * the most recently played episode of the current anime, or the next episode
+ * if that one is already watched. Returns null when there is no suitable
+ * candidate (no playback history yet, or the watched candidate is the last
+ * episode in the list).
+ *
+ * `episodes` is assumed to come from `list_episodes`, which orders by
+ * episode_number then relative_path — so array index reflects in-anime order.
+ */
+function pickQuickPlayEpisode(episodes: Episode[]): Episode | null {
+  let lastIdx = -1;
+  let lastTimestamp = "";
+  for (let i = 0; i < episodes.length; i += 1) {
+    const ts = episodes[i].last_watched_at;
+    // SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" which sorts
+    // lexicographically, so string comparison is correct.
+    if (ts && ts > lastTimestamp) {
+      lastTimestamp = ts;
+      lastIdx = i;
+    }
+  }
+  if (lastIdx === -1) return null;
+  const last = episodes[lastIdx];
+  if (!last.watched) return last;
+  return episodes[lastIdx + 1] ?? null;
 }
 
 function ruleToInput(rule: RegexRule): RegexRuleInput {

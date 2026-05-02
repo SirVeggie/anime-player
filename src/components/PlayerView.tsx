@@ -181,10 +181,8 @@ export function PlayerView(props: {
   episode: Episode;
   playlist: Episode[];
   visible: boolean;
-  canRestoreFromKeyboard: boolean;
   onSelectEpisode: (episode: Episode) => void;
   onBack: () => void;
-  onRestore: () => void;
   onClose: () => void;
   onProgressSaved: (episode: Episode) => void;
   onError: (message: string) => void;
@@ -194,10 +192,8 @@ export function PlayerView(props: {
     episode,
     playlist,
     visible,
-    canRestoreFromKeyboard,
     onSelectEpisode,
     onBack,
-    onRestore,
     onClose,
     onProgressSaved,
     onError,
@@ -587,16 +583,6 @@ export function PlayerView(props: {
     }
   }, [onBack, onError, persistProgress]);
 
-  const restorePlayer = useCallback(async () => {
-    try {
-      onRestore();
-      await invoke("mpv_set_pause", { paused: false });
-      setPaused(false);
-    } catch (e) {
-      onError(errorMessage(e));
-    }
-  }, [onError, onRestore]);
-
   const loadSibling = useCallback(
     (delta: number) => {
       const next = playlist[selectedIndex + delta];
@@ -680,20 +666,16 @@ export function PlayerView(props: {
         return;
       }
       if (e.code === "KeyQ") {
-        if (visible) {
-          e.preventDefault();
-          void hidePlayer();
-          return;
-        }
-        if (canRestoreFromKeyboard) {
-          e.preventDefault();
-          void restorePlayer();
-        }
+        // Q outside the player is owned by App.tsx (it picks an episode for
+        // the current anime); here we only close the playback view.
+        if (!visible) return;
+        e.preventDefault();
+        void hidePlayer();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canRestoreFromKeyboard, hidePlayer, onError, onTogglePause, restorePlayer, toggleFullscreen, visible]);
+  }, [hidePlayer, onError, onTogglePause, toggleFullscreen, visible]);
 
   const safeDuration = duration > 0 ? duration : 0;
 
