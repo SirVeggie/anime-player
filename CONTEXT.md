@@ -24,9 +24,9 @@ The frontend is split so `App.tsx` only owns top-level state (library data,
 view selection, async handlers, toasts, F11 / Esc / Q hotkeys) and composes the
 view components. Per-screen UI lives in `src/components/`:
 `WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
-`EpisodeScreen.tsx`, `SettingsScreen.tsx` (plus the local `RuleEditor`),
-`PlayerView.tsx`, `ViewHeader.tsx`, `CustomDropdown.tsx`, `ToastStack.tsx`,
-`icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
+`EpisodeScreen.tsx`, `BulkEditScreen.tsx`, `SettingsScreen.tsx` (plus the local
+`RuleEditor`), `PlayerView.tsx`, `ViewHeader.tsx`, `CustomDropdown.tsx`,
+`ToastStack.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
 `EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
 
 - Visual design follows the local reference project
@@ -37,9 +37,11 @@ view components. Per-screen UI lives in `src/components/`:
   player pane share **`--ui-bg`** with **`backdrop-filter` blur** so the
   desktop shows through slightly frosted; during **`.player--playback`** blur
   is disabled so mpv stays sharp.
-- Two-pane layout: 280px sidebar (Library, Settings, rescan, stats) +
-  main content pane. Category navigation lives on the library page rather
-  than in the sidebar. A **Missing** sidebar page appears only when the
+- Two-pane layout: 280px sidebar (Library, Search, Bulk Edit, Settings, rescan,
+  stats) + main content pane. Category navigation lives on the library page rather
+  than in the sidebar. Bulk Edit can filter anime by source category and by a
+  case-insensitive regex matched against full episode paths, then move the
+  affected anime to another category. A **Missing** sidebar page appears only when the
   database has episodes that the latest scan could not currently match; normal
   library/search/episode views hide those missing rows so rule mistakes are
   obvious without deleting saved metadata. The anime grid header includes a sort dropdown

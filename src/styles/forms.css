@@ -61,6 +61,27 @@
   font-size: 15px;
 }
 
+.bulk-edit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bulk-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(220px, 1.4fr) minmax(160px, 0.7fr);
+  gap: 10px;
+}
+
+.bulk-edit-panel .muted,
+.bulk-edit-panel .error {
+  margin-bottom: 0;
+}
+
+.bulk-edit-panel .settings-actions {
+  justify-content: space-between;
+}
+
 .form-grid span,
 .stacked-field span {
   color: var(--text-muted);

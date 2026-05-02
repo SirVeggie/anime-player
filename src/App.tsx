@@ -32,9 +32,10 @@ import {
   updateRegexRule,
 } from "./api";
 import { AnimeGrid } from "./components/AnimeGrid";
+import { BulkEditScreen } from "./components/BulkEditScreen";
 import { CategoryScreen } from "./components/CategoryScreen";
 import { EpisodeScreen } from "./components/EpisodeScreen";
-import { LibraryIcon, MissingIcon, RescanIcon, SearchIcon, SettingsIcon } from "./components/Icons";
+import { BulkEditIcon, LibraryIcon, MissingIcon, RescanIcon, SearchIcon, SettingsIcon } from "./components/Icons";
 import { MissingScreen } from "./components/MissingScreen";
 import { PlayerView } from "./components/PlayerView";
 import { SearchScreen } from "./components/SearchScreen";
@@ -59,8 +60,8 @@ import type {
 import { APP_WINDOW_TITLE, errorMessage, isTextInputTarget, shortenForOsTitle } from "./utils";
 import "./App.css";
 
-type View = "categories" | "anime" | "search" | "missing" | "episodes" | "settings" | "player";
-type EpisodeReturnView = "anime" | "search" | "categories";
+type View = "categories" | "anime" | "search" | "bulkEdit" | "missing" | "episodes" | "settings" | "player";
+type EpisodeReturnView = "anime" | "search" | "bulkEdit" | "categories";
 type ScrollRestoration = "top" | "restore";
 
 type AnilistProgressUpdate = {
@@ -210,6 +211,8 @@ function App() {
         return `player:${selectedEpisode?.id ?? "none"}`;
       case "missing":
         return "missing";
+      case "bulkEdit":
+        return "bulkEdit";
       default:
         return view;
     }
@@ -552,6 +555,24 @@ function App() {
     [reloadLibrary, runAction, selectedAnime],
   );
 
+  const handleBulkMoveAnime = useCallback(
+    async (animeIds: number[], categoryId: number) => {
+      if (animeIds.length === 0) return;
+      await runAction(async () => {
+        for (const animeId of animeIds) {
+          await moveAnimeToCategory(animeId, categoryId);
+        }
+        const state = await reloadLibrary();
+        if (selectedAnimeIdRef.current !== null) {
+          const updated = state.anime.find((anime) => anime.id === selectedAnimeIdRef.current);
+          if (updated) setSelectedAnime(updated);
+        }
+        return `Moved ${animeIds.length} anime to a new category.`;
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
   const handleSaveAnilistClientId = useCallback(
     async (clientId: string) => {
       await runAction(async () => {
@@ -701,6 +722,10 @@ function App() {
         navigateToView("categories", "restore");
         return;
       }
+      if (view === "bulkEdit") {
+        navigateToView("categories", "restore");
+        return;
+      }
       if (view === "missing") {
         navigateToView("categories", "restore");
         return;
@@ -781,8 +806,9 @@ function App() {
   const libraryViewActive =
     view === "categories" ||
     view === "anime" ||
-    (view === "episodes" && episodeReturnView !== "search");
+    (view === "episodes" && episodeReturnView !== "search" && episodeReturnView !== "bulkEdit");
   const searchViewActive = view === "search" || (view === "episodes" && episodeReturnView === "search");
+  const bulkEditViewActive = view === "bulkEdit" || (view === "episodes" && episodeReturnView === "bulkEdit");
   const missingViewActive = view === "missing";
 
   return (
@@ -818,6 +844,16 @@ function App() {
           >
             <SearchIcon />
             <span className="nav-label">Search</span>
+          </button>
+          <button
+            type="button"
+            className={bulkEditViewActive ? "nav-item active" : "nav-item"}
+            onClick={() => navigateToView("bulkEdit")}
+            aria-label="Bulk edit"
+            title="Bulk edit"
+          >
+            <BulkEditIcon />
+            <span className="nav-label">Bulk edit</span>
           </button>
           {library.missing_anime.length > 0 ? (
             <button
@@ -902,6 +938,16 @@ function App() {
               focusToken={searchFocusToken}
               onQueryChange={setSearchQuery}
               onOpenAnime={(anime) => void openAnime(anime, "search")}
+            />
+          ) : null}
+
+          {view === "bulkEdit" ? (
+            <BulkEditScreen
+              library={library}
+              busy={busy}
+              onOpenAnime={(anime) => void openAnime(anime, "bulkEdit")}
+              onListEpisodes={listEpisodes}
+              onMoveAnime={(animeIds, categoryId) => void handleBulkMoveAnime(animeIds, categoryId)}
             />
           ) : null}
 
