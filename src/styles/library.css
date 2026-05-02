@@ -483,6 +483,8 @@
   flex-direction: column;
   width: 24px;
   pointer-events: none;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  overflow: hidden;
 }
 
 .score-stepper-button {
