@@ -109,3 +109,9 @@ export type AnilistProgressSyncResult = {
   remote_progress: number | null;
   target_progress: number | null;
 };
+
+export type AnilistMediaStatus = {
+  progress: number | null;
+  episodes: number | null;
+  score: number | null;
+};

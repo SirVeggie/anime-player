@@ -12,6 +12,7 @@ import {
   deleteRegexRule,
   getAnilistAuthState,
   getAnilistLoginUrl,
+  getAnilistMediaStatus,
   getLibraryState,
   linkAnimeAnilist,
   listEpisodes,
@@ -22,6 +23,7 @@ import {
   searchAnilistAnime,
   setDefaultCategory,
   setAnilistClientId,
+  setAnilistMediaScore,
   unlinkAnimeAnilist,
   updateRegexRule,
 } from "./api";
@@ -37,6 +39,7 @@ import { pickQuickPlayEpisode } from "./quickPlay";
 import type {
   AnimeSummary,
   AnilistAuthState,
+  AnilistMediaStatus,
   AnilistSearchResult,
   Category,
   Episode,
@@ -362,6 +365,14 @@ function App() {
     return searchAnilistAnime(query);
   }, []);
 
+  const handleGetAnilistStatus = useCallback((animeId: number): Promise<AnilistMediaStatus | null> => {
+    return getAnilistMediaStatus(animeId);
+  }, []);
+
+  const handleSetAnilistScore = useCallback((animeId: number, score: number | null): Promise<AnilistMediaStatus> => {
+    return setAnilistMediaScore(animeId, score);
+  }, []);
+
   const handleLinkAnilist = useCallback(
     async (animeId: number, anilistId: number) => {
       await runAction(async () => {
@@ -568,6 +579,8 @@ function App() {
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
               onSearchAnilist={handleSearchAnilist}
+              onGetAnilistStatus={handleGetAnilistStatus}
+              onSetAnilistScore={handleSetAnilistScore}
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
               onOpenAnilist={(url) => void handleOpenAnilist(url)}

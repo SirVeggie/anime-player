@@ -289,7 +289,7 @@ export function PlayerView(props: {
         watched,
       );
       onProgressSaved(saved);
-      if (forceWatched) {
+      if (watched) {
         void syncAnilistEpisodeProgress(saved.id).catch((err) => onError(errorMessage(err)));
       }
       return saved;

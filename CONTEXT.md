@@ -56,10 +56,12 @@ view components. Per-screen UI lives in `src/components/`:
   listens for Tauri deep-link callbacks, validates/stores the token through
   Rust, and exposes search/link/unlink/open controls on the anime episode
   page. Linked anime prefer cached AniList cover art over placeholder
-  initials in the grid and episode header. When mpv reaches EOF, the
-  player saves local watched progress and then asks Rust to sync AniList
-  progress for the linked anime if the parsed local episode number is ahead
-  of the viewer's current AniList progress.
+  initials in the grid and episode header; the linked info card opens
+  AniList, shows remote `Progress: current/total`, and has a debounced score
+  input that writes to AniList. When a local progress save marks an episode
+  watched (EOF or the near-end threshold used by hide/next), the player asks
+  Rust to sync AniList progress for the linked anime if the parsed local
+  episode number is ahead of the viewer's current AniList progress.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.
@@ -166,8 +168,10 @@ view components. Per-screen UI lives in `src/components/`:
   login tokens with `Viewer`, and downloads covers under the portable
   `data/anilist-covers/` directory. `sync_anilist_episode_progress` queries
   the current `mediaListEntry.progress` and only sends `SaveMediaListEntry`
-  when the finished local episode number is greater. Network requests are
-  kept outside the SQLite mutex.
+  when the finished local episode number is greater. Media status commands
+  read `progress`, `episodes`, and `score`; score updates use
+  `SaveMediaListEntry(score: ...)`. Network requests are kept outside the
+  SQLite mutex.
 - `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
   in-process libmpv module. All Win32 and FFI code is gated behind
   `#[cfg(windows)]`.

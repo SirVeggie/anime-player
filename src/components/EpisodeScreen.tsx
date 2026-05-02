@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAnilistCoverImage, getFileThumbnail } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
-import type { AnimeSummary, AnilistSearchResult, Category, Episode } from "../types";
+import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { formatEpisodeNumber, formatSize, formatTime, progressPercent } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
@@ -14,6 +14,8 @@ export function EpisodeScreen(props: {
   onPlay: (episode: Episode) => void;
   onMoveAnime: (categoryId: number) => void;
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
+  onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
+  onSetAnilistScore: (animeId: number, score: number | null) => Promise<AnilistMediaStatus>;
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
   onOpenAnilist: (url: string) => void;
@@ -26,6 +28,8 @@ export function EpisodeScreen(props: {
     onPlay,
     onMoveAnime,
     onSearchAnilist,
+    onGetAnilistStatus,
+    onSetAnilistScore,
     onLinkAnilist,
     onUnlinkAnilist,
     onOpenAnilist,
@@ -40,7 +44,13 @@ export function EpisodeScreen(props: {
   const [linkSearchOpen, setLinkSearchOpen] = useState(false);
   const [linkSearchBusy, setLinkSearchBusy] = useState(false);
   const [linkSearchError, setLinkSearchError] = useState<string | null>(null);
+  const [anilistStatus, setAnilistStatus] = useState<AnilistMediaStatus | null>(null);
+  const [scoreDraft, setScoreDraft] = useState("");
+  const [scoreSaving, setScoreSaving] = useState(false);
+  const [scoreError, setScoreError] = useState<string | null>(null);
   const linkSearchRequestRef = useRef(0);
+  const scoreSaveTimerRef = useRef<number | null>(null);
+  const scoreSaveRequestRef = useRef(0);
   const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
 
@@ -66,6 +76,34 @@ export function EpisodeScreen(props: {
       cancelled = true;
     };
   }, [anime.anilist_cover_path, anime.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAnilistStatus(null);
+    setScoreDraft("");
+    setScoreError(null);
+    if (!anime.anilist_id) return;
+    void onGetAnilistStatus(anime.id)
+      .then((status) => {
+        if (cancelled) return;
+        setAnilistStatus(status);
+        setScoreDraft(status?.score == null ? "" : String(status.score));
+      })
+      .catch((e) => {
+        if (!cancelled) setScoreError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [anime.anilist_id, anime.id, onGetAnilistStatus]);
+
+  useEffect(() => {
+    return () => {
+      if (scoreSaveTimerRef.current !== null) {
+        window.clearTimeout(scoreSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +171,55 @@ export function EpisodeScreen(props: {
     void runLinkSearch(anime.title);
   }, [anime.title, runLinkSearch]);
 
+  const saveScore = useCallback(
+    async (value: string) => {
+      if (!anime.anilist_id) return;
+      if (scoreSaveTimerRef.current !== null) {
+        window.clearTimeout(scoreSaveTimerRef.current);
+        scoreSaveTimerRef.current = null;
+      }
+      const trimmed = value.trim();
+      const score = trimmed === "" ? null : Number(trimmed);
+      if (score !== null && !Number.isFinite(score)) {
+        setScoreError("Score must be a number.");
+        return;
+      }
+      const requestId = scoreSaveRequestRef.current + 1;
+      scoreSaveRequestRef.current = requestId;
+      setScoreSaving(true);
+      setScoreError(null);
+      try {
+        const status = await onSetAnilistScore(anime.id, score);
+        if (scoreSaveRequestRef.current === requestId) {
+          setAnilistStatus(status);
+          setScoreDraft(status.score == null ? "" : String(status.score));
+        }
+      } catch (e) {
+        if (scoreSaveRequestRef.current === requestId) {
+          setScoreError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (scoreSaveRequestRef.current === requestId) {
+          setScoreSaving(false);
+        }
+      }
+    },
+    [anime.anilist_id, anime.id, onSetAnilistScore],
+  );
+
+  const scheduleScoreSave = useCallback(
+    (value: string) => {
+      if (scoreSaveTimerRef.current !== null) {
+        window.clearTimeout(scoreSaveTimerRef.current);
+      }
+      scoreSaveTimerRef.current = window.setTimeout(() => {
+        scoreSaveTimerRef.current = null;
+        void saveScore(value);
+      }, 650);
+    },
+    [saveScore],
+  );
+
   return (
     <>
       <ViewHeader
@@ -161,24 +248,56 @@ export function EpisodeScreen(props: {
       />
 
       {anime.anilist_id ? (
-        <button
-          type="button"
-          className="anime-detail-panel"
-          onClick={() => {
-            const url = anime.anilist_site_url;
-            if (url) onOpenAnilist(url);
-          }}
-          disabled={!anime.anilist_site_url}
-          aria-label={`Open ${anime.anilist_title ?? anime.title} on AniList`}
-        >
-          <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
-            {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
+        <section className="anime-detail-panel">
+          <button
+            type="button"
+            className="anime-detail-main"
+            onClick={() => {
+              const url = anime.anilist_site_url;
+              if (url) onOpenAnilist(url);
+            }}
+            disabled={!anime.anilist_site_url}
+            aria-label={`Open ${anime.anilist_title ?? anime.title} on AniList`}
+          >
+            <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
+              {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <h2>{anime.anilist_title ?? anime.title}</h2>
+              <p className="muted">Linked to AniList #{anime.anilist_id}</p>
+              <p className="muted">
+                Progress: {anilistStatus?.progress ?? "?"}/{anilistStatus?.episodes ?? "?"}
+              </p>
+            </div>
+          </button>
+          <div className="anilist-score-control">
+            <label>
+              <span>Score</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.5"
+                value={scoreDraft}
+                placeholder="No score"
+                disabled={scoreSaving}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setScoreDraft(value);
+                  scheduleScoreSave(value);
+                }}
+                onBlur={(e) => {
+                  if (scoreSaveTimerRef.current !== null) {
+                    window.clearTimeout(scoreSaveTimerRef.current);
+                    scoreSaveTimerRef.current = null;
+                    void saveScore(e.currentTarget.value);
+                  }
+                }}
+              />
+            </label>
+            {scoreError ? <span className="anilist-score-error">{scoreError}</span> : null}
           </div>
-          <div>
-            <h2>{anime.anilist_title ?? anime.title}</h2>
-            <p className="muted">Linked to AniList #{anime.anilist_id}</p>
-          </div>
-        </button>
+        </section>
       ) : null}
 
       {linkSearchOpen && !anime.anilist_id ? (

@@ -48,6 +48,13 @@ pub struct AnilistProgressSyncResult {
     target_progress: Option<i64>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct AnilistMediaStatus {
+    progress: Option<i64>,
+    episodes: Option<i64>,
+    score: Option<f64>,
+}
+
 #[tauri::command]
 pub fn get_anilist_auth_state(db: State<'_, AppDatabase>) -> Result<AnilistAuthState, String> {
     db.with_conn(auth_state)
@@ -247,6 +254,28 @@ pub async fn sync_anilist_episode_progress(
     })
 }
 
+#[tauri::command]
+pub async fn get_anilist_media_status(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<Option<AnilistMediaStatus>, String> {
+    let Some((token, anilist_id)) = auth_and_media_id_for_anime(&db, anime_id)? else {
+        return Ok(None);
+    };
+    get_media_status(&token, anilist_id).await.map(Some)
+}
+
+#[tauri::command]
+pub async fn set_anilist_media_score(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    score: Option<f64>,
+) -> Result<AnilistMediaStatus, String> {
+    let (token, anilist_id) = auth_and_media_id_for_anime(&db, anime_id)?
+        .ok_or("Anime is not linked to AniList or AniList is not logged in.")?;
+    save_remote_score(&token, anilist_id, score).await
+}
+
 fn access_token_from_callback(callback_url: &str) -> Result<String, String> {
     let url = Url::parse(callback_url).map_err(|e| format!("Invalid AniList callback URL: {e}"))?;
     if url.scheme() != "anime-player" || url.host_str() != Some("anilist-auth") {
@@ -332,6 +361,25 @@ fn progress_target_for_episode(
     })
 }
 
+fn auth_and_media_id_for_anime(
+    db: &AppDatabase,
+    anime_id: i64,
+) -> Result<Option<(String, i64)>, String> {
+    db.with_conn(|conn| {
+        let token = get_setting(conn, TOKEN_KEY)?;
+        let anilist_id = conn
+            .query_row(
+                "SELECT anilist_id FROM anime WHERE id = ?1",
+                params![anime_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        Ok(token.zip(anilist_id))
+    })
+}
+
 async fn validate_token(token: &str) -> Result<Viewer, String> {
     #[derive(Debug, Deserialize)]
     struct ViewerData {
@@ -346,6 +394,32 @@ async fn validate_token(token: &str) -> Result<Viewer, String> {
     )
     .await?;
     Ok(data.viewer)
+}
+
+async fn get_media_status(token: &str, anilist_id: i64) -> Result<AnilistMediaStatus, String> {
+    #[derive(Debug, Deserialize)]
+    struct MediaData {
+        #[serde(rename = "Media")]
+        media: StatusMedia,
+    }
+
+    let data: MediaData = graphql(
+        Some(token),
+        r#"
+        query MediaStatus($id: Int!) {
+          Media(id: $id, type: ANIME) {
+            episodes
+            mediaListEntry {
+              progress
+              score
+            }
+          }
+        }
+        "#,
+        json!({ "id": anilist_id }),
+    )
+    .await?;
+    Ok(data.media.into())
 }
 
 async fn get_remote_progress(token: &str, anilist_id: i64) -> Result<i64, String> {
@@ -409,6 +483,53 @@ async fn save_remote_progress(token: &str, anilist_id: i64, progress: i64) -> Re
     )
     .await?;
     Ok(data.save_media_list_entry.progress.unwrap_or(progress))
+}
+
+async fn save_remote_score(
+    token: &str,
+    anilist_id: i64,
+    score: Option<f64>,
+) -> Result<AnilistMediaStatus, String> {
+    #[derive(Debug, Deserialize)]
+    struct SaveData {
+        #[serde(rename = "SaveMediaListEntry")]
+        save_media_list_entry: SavedStatusEntry,
+    }
+    #[derive(Debug, Deserialize)]
+    struct SavedStatusEntry {
+        progress: Option<i64>,
+        score: Option<f64>,
+        media: Option<StatusMediaSummary>,
+    }
+    #[derive(Debug, Deserialize)]
+    struct StatusMediaSummary {
+        episodes: Option<i64>,
+    }
+
+    let data: SaveData = graphql(
+        Some(token),
+        r#"
+        mutation SetScore($mediaId: Int!, $score: Float) {
+          SaveMediaListEntry(mediaId: $mediaId, score: $score) {
+            progress
+            score
+            media {
+              episodes
+            }
+          }
+        }
+        "#,
+        json!({ "mediaId": anilist_id, "score": score }),
+    )
+    .await?;
+    Ok(AnilistMediaStatus {
+        progress: data.save_media_list_entry.progress,
+        episodes: data
+            .save_media_list_entry
+            .media
+            .and_then(|media| media.episodes),
+        score: data.save_media_list_entry.score,
+    })
 }
 
 async fn search_anime(
@@ -553,6 +674,30 @@ struct Viewer {
 struct AnilistProgressTarget {
     anilist_id: i64,
     progress: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusMedia {
+    episodes: Option<i64>,
+    #[serde(rename = "mediaListEntry")]
+    media_list_entry: Option<StatusMediaListEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusMediaListEntry {
+    progress: Option<i64>,
+    score: Option<f64>,
+}
+
+impl From<StatusMedia> for AnilistMediaStatus {
+    fn from(media: StatusMedia) -> Self {
+        let entry = media.media_list_entry;
+        Self {
+            progress: entry.as_ref().and_then(|entry| entry.progress),
+            episodes: media.episodes,
+            score: entry.and_then(|entry| entry.score),
+        }
+    }
 }
 
 impl AnilistProgressSyncResult {

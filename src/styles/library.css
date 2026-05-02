@@ -325,25 +325,31 @@
   background: var(--surface-grad);
 }
 
-button.anime-detail-panel {
-  width: 100%;
+.anime-detail-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
   border: none;
+  background: transparent;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-button.anime-detail-panel:hover:not(:disabled) {
-  background: var(--surface-grad-hover);
+.anime-detail-main:hover:not(:disabled) h2 {
+  text-decoration: underline;
 }
 
-button.anime-detail-panel:disabled {
+.anime-detail-main:disabled {
   cursor: default;
   opacity: 0.85;
 }
 
-button.anime-detail-panel:focus-visible {
+.anime-detail-main:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -376,6 +382,32 @@ button.anime-detail-panel:focus-visible {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.anilist-score-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.anilist-score-control label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.anilist-score-control input {
+  width: 110px;
+}
+
+.anilist-score-error {
+  max-width: 180px;
+  color: #ffb4b4;
+  font-size: 12px;
 }
 
 .modal-backdrop {
