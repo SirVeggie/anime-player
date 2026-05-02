@@ -12,13 +12,13 @@
   );
   --scrollbar-color: rgba(88, 166, 255, 0.22);
   --scrollbar-color-hover: rgba(88, 166, 255, 0.32);
-  /* Flat surfaces â€” no 1px borders, just subtle elevation via fill. */
-  --surface-1: rgba(255, 255, 255, 0.035);
-  --surface-2: rgba(255, 255, 255, 0.06);
-  --surface-3: rgba(255, 255, 255, 0.09);
-  --surface-hover: rgba(255, 255, 255, 0.08);
-  --surface-grad: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
-  --surface-grad-hover: linear-gradient(160deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.035));
+  /* Flat surfaces, no 1px borders, just subtle elevation via fill. */
+  --surface-1: rgba(88, 166, 255, 0.048);
+  --surface-2: rgba(88, 166, 255, 0.012);
+  --surface-3: rgba(88, 166, 255, 0.09);
+  --surface-hover: rgba(88, 166, 255, 0.115);
+  --surface-grad: linear-gradient(160deg, rgba(88, 166, 255, 0.0), rgba(88, 166, 255, 0.025));
+  --surface-grad-hover: linear-gradient(160deg, rgba(88, 166, 255, 0.15), rgba(88, 166, 255, 0.045));
   --accent-grad: linear-gradient(140deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.06));
   --accent-grad-hover: linear-gradient(140deg, rgba(88, 166, 255, 0.32), rgba(88, 166, 255, 0.1));
   --text-color: #f6f6f6;

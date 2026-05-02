@@ -165,15 +165,13 @@ button[type="submit"]:hover:not(:disabled),
   filter: brightness(1.08);
 }
 
-/* Library cards are <button type="button"> but paint their own gradients in
-   library.css. Excluding them here avoids this rule out-specificity-ing those
-   hovers (button + [type] beats .class:nth-child(...):hover). */
-button[type="button"]:not(.category-card):not(.continue-card):not(.anime-card):not(.episode-row) {
+:where(button[type="button"]) {
   background: var(--surface-2);
   color: var(--text-color);
+  transition: background 0.15s ease;
 }
 
-button[type="button"]:not(.category-card):not(.continue-card):not(.anime-card):not(.episode-row):hover:not(:disabled) {
+:where(button[type="button"]:hover:not(:disabled)) {
   background: var(--surface-3);
 }
 

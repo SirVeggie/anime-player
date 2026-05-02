@@ -30,6 +30,7 @@
   padding: 18px;
   /* Fallback if no nth-child rule applies (>4 categories cycle). */
   background: linear-gradient(160deg, rgba(88, 166, 255, 0.22), rgba(255, 255, 255, 0.025));
+  transition: background 0.15s ease;
 }
 
 /* Each card picks up a different accent so the row reads as colorful even
@@ -49,16 +50,16 @@
 
 /* Hover: intensify the same hue as each nth rule — avoid the flat grey
    --surface-grad-hover applied to .category-card:hover with other cards. */
-.category-card:nth-child(4n + 1):hover {
+.category-card:nth-child(4n + 1):hover:not(.disabled) {
   background: linear-gradient(155deg, rgba(88, 166, 255, 0.4), rgba(88, 166, 255, 0.1) 70%);
 }
-.category-card:nth-child(4n + 2):hover {
+.category-card:nth-child(4n + 2):hover:not(.disabled) {
   background: linear-gradient(155deg, rgba(109, 213, 140, 0.38), rgba(109, 213, 140, 0.1) 70%);
 }
-.category-card:nth-child(4n + 3):hover {
+.category-card:nth-child(4n + 3):hover:not(.disabled) {
   background: linear-gradient(155deg, rgba(186, 130, 255, 0.4), rgba(186, 130, 255, 0.1) 70%);
 }
-.category-card:nth-child(4n + 4):hover {
+.category-card:nth-child(4n + 4):hover:not(.disabled) {
   background: linear-gradient(155deg, rgba(255, 168, 88, 0.38), rgba(255, 168, 88, 0.1) 70%);
 }
 
