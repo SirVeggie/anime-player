@@ -53,6 +53,13 @@ Episode selection page features
 - [x] ~~The last played anime episode is highlighted on the episode select screen~~
 - [x] ~~Fit aspect ratio button. Pressing this will resize the window to match the aspect ratio of the video, so the are no black bars.~~
 
+## Keybindings
+
+- [ ] Add keybind setting support (as a separate page)
+- [ ] Ability to change the existing keyboard shortcuts
+- [ ] Add keybind for skipping 28 seconds (forwards and backwards).
+- [ ] Add keybind for skipping 85 seconds (forwards and backwards).
+
 ## AniList Support
 
 This will be added last, once the local functionality is working well
