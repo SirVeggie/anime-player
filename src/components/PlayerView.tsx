@@ -14,10 +14,13 @@ import type { Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
 
 const PLAYER_SIDEBAR_PX = 0;
+const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
+/** Same ratio as `persistProgress` marking an episode watched without EOF. */
+const NEAR_END_PROGRESS_RATIO = 0.9;
 const appWindow = getCurrentWindow();
 
 function sidebarPxForVisibility(visible: boolean) {
-  return visible ? PLAYER_SIDEBAR_PX : window.innerWidth;
+  return visible ? PLAYER_SIDEBAR_PX : HIDDEN_PLAYER_SIDEBAR_PX;
 }
 
 function SeekBar(props: {
@@ -280,7 +283,8 @@ export function PlayerView(props: {
       const current = playbackRef.current;
       const watched =
         forceWatched ||
-        (current.duration > 0 && current.position / current.duration >= 0.9);
+        (current.duration > 0 &&
+          current.position / current.duration >= NEAR_END_PROGRESS_RATIO);
       const saved = await saveEpisodeProgress(
         current.episode.id,
         current.position,
@@ -315,9 +319,21 @@ export function PlayerView(props: {
     const next = playlist[selectedIndex + 1];
     void persistProgress(true)
       .catch((err) => onError(errorMessage(err)))
-      .finally(() => {
+      .then(async () => {
         if (next) {
-          onSelectEpisode(next);
+          try {
+            const saved = await saveEpisodeProgress(
+              next.id,
+              0,
+              next.duration_seconds,
+              false,
+            );
+            onProgressSaved(saved);
+            onSelectEpisode(saved);
+          } catch (err) {
+            onError(errorMessage(err));
+            onSelectEpisode(next);
+          }
           return;
         }
 
@@ -331,7 +347,7 @@ export function PlayerView(props: {
             onClose();
           });
       });
-  }, [onClose, onError, onSelectEpisode, persistProgress, playlist, selectedIndex]);
+  }, [onClose, onError, onProgressSaved, onSelectEpisode, persistProgress, playlist, selectedIndex]);
 
   // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
   // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
@@ -587,9 +603,31 @@ export function PlayerView(props: {
       if (!next) return;
       void persistProgress()
         .catch((e) => onError(errorMessage(e)))
-        .finally(() => onSelectEpisode(next));
+        .then(async () => {
+          if (delta === 1) {
+            const cur = playbackRef.current;
+            const nearEnd =
+              cur.duration > 0 && cur.position / cur.duration >= NEAR_END_PROGRESS_RATIO;
+            if (nearEnd) {
+              try {
+                const saved = await saveEpisodeProgress(
+                  next.id,
+                  0,
+                  next.duration_seconds,
+                  false,
+                );
+                onProgressSaved(saved);
+                onSelectEpisode(saved);
+                return;
+              } catch (e) {
+                onError(errorMessage(e));
+              }
+            }
+          }
+          onSelectEpisode(next);
+        });
     },
-    [onError, onSelectEpisode, persistProgress, playlist, selectedIndex],
+    [onError, onProgressSaved, onSelectEpisode, persistProgress, playlist, selectedIndex],
   );
 
   const onCanvasMouseDown = useCallback(

@@ -89,7 +89,9 @@ Node 22, 7-Zip on PATH, and the local generated
   hides the sidebar/content and passes `sidebar_px = 0` to mpv so
   `video-margin-ratio-left` is cleared. When **Q** or the back arrow
   returns to the episode list, playback is paused via `mpv_set_pause`
-  and the stored sidebar margin is restored without unloading mpv.
+  and mpv is pushed fully off-screen with an oversized stored sidebar
+  margin, so native resize handling cannot reveal a stale video strip
+  without unloading mpv.
 - A custom HTML controls bar (transport + scrubber + time + track menus
   + aspect fit + fullscreen) drives mpv via `mpv_cycle_pause`,
   `mpv_set_pause`, `mpv_seek`, `mpv_seek_relative`, track selection
@@ -102,9 +104,12 @@ Node 22, 7-Zip on PATH, and the local generated
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
   pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** or the back
-  control returns to the episode list (without unloading mpv). At EOF the
+  control returns to the episode list (without unloading mpv).   At EOF the
   frontend saves progress, loads the next episode if one exists, or stops
-  mpv and returns to the episode list.
+  mpv and returns to the episode list. When advancing to the next episode
+  from EOF or via **Next** while the current episode is past the near-end
+  threshold (same 90% as the watched flag), the next episode’s saved
+  position is cleared so playback starts from the beginning.
 
 ### Backend — `src-tauri/src/lib.rs`, `src-tauri/src/db.rs`,
 `src-tauri/src/library.rs`, `src-tauri/src/scanner.rs`, `src-tauri/src/mpv/`
