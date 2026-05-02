@@ -22,6 +22,14 @@ export function SearchIcon() {
   );
 }
 
+export function MissingIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 2 2.8 19h18.4L12 2zm0 4.2L17.85 17H6.15L12 6.2zM11 9h2v4.8h-2V9zm0 6h2v2h-2v-2z" />
+    </svg>
+  );
+}
+
 export function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>

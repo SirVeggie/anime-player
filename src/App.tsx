@@ -34,7 +34,8 @@ import {
 import { AnimeGrid } from "./components/AnimeGrid";
 import { CategoryScreen } from "./components/CategoryScreen";
 import { EpisodeScreen } from "./components/EpisodeScreen";
-import { LibraryIcon, RescanIcon, SearchIcon, SettingsIcon } from "./components/Icons";
+import { LibraryIcon, MissingIcon, RescanIcon, SearchIcon, SettingsIcon } from "./components/Icons";
+import { MissingScreen } from "./components/MissingScreen";
 import { PlayerView } from "./components/PlayerView";
 import { SearchScreen } from "./components/SearchScreen";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -58,7 +59,7 @@ import type {
 import { APP_WINDOW_TITLE, errorMessage, isTextInputTarget, shortenForOsTitle } from "./utils";
 import "./App.css";
 
-type View = "categories" | "anime" | "search" | "episodes" | "settings" | "player";
+type View = "categories" | "anime" | "search" | "missing" | "episodes" | "settings" | "player";
 type EpisodeReturnView = "anime" | "search" | "categories";
 type ScrollRestoration = "top" | "restore";
 
@@ -207,6 +208,8 @@ function App() {
         return `episodes:${selectedAnime?.id ?? "none"}:${episodeReturnView}`;
       case "player":
         return `player:${selectedEpisode?.id ?? "none"}`;
+      case "missing":
+        return "missing";
       default:
         return view;
     }
@@ -312,6 +315,12 @@ function App() {
       setPlayerControlsChromeVisible(true);
     }
   }, [view, selectedEpisode]);
+
+  useEffect(() => {
+    if (view === "missing" && library?.missing_anime.length === 0) {
+      navigateToView("categories", "restore");
+    }
+  }, [library?.missing_anime.length, navigateToView, view]);
 
   const selectedCategory = useMemo(() => {
     if (!library || selectedCategoryId === null) return null;
@@ -424,11 +433,24 @@ function App() {
   const handleRescan = useCallback(async () => {
     await runAction(async () => {
       const summary = await rescanLibrary();
-      await reloadLibrary();
+      const state = await reloadLibrary();
+      if (view === "episodes" && selectedAnimeIdRef.current !== null) {
+        const selectedId = selectedAnimeIdRef.current;
+        const updated = state.anime.find((anime) => anime.id === selectedId);
+        if (updated) {
+          setSelectedAnime(updated);
+          setEpisodes(await listEpisodes(selectedId));
+        } else {
+          setSelectedAnime(null);
+          setEpisodes([]);
+          const isMissing = state.missing_anime.some((anime) => anime.id === selectedId);
+          navigateToView(isMissing ? "missing" : "categories", "restore");
+        }
+      }
       await reloadLocalDataStats();
       return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} added or updated, ${summary.unmatched_files} unmatched.`;
     });
-  }, [reloadLibrary, reloadLocalDataStats, runAction]);
+  }, [navigateToView, reloadLibrary, reloadLocalDataStats, runAction, view]);
 
   const handleCleanLocalData = useCallback(async () => {
     const confirmed = window.confirm(
@@ -679,6 +701,10 @@ function App() {
         navigateToView("categories", "restore");
         return;
       }
+      if (view === "missing") {
+        navigateToView("categories", "restore");
+        return;
+      }
       if (view === "episodes" && selectedAnime) {
         navigateToView(episodeReturnView, "restore");
         return;
@@ -757,6 +783,7 @@ function App() {
     view === "anime" ||
     (view === "episodes" && episodeReturnView !== "search");
   const searchViewActive = view === "search" || (view === "episodes" && episodeReturnView === "search");
+  const missingViewActive = view === "missing";
 
   return (
     <main
@@ -792,6 +819,18 @@ function App() {
             <SearchIcon />
             <span className="nav-label">Search</span>
           </button>
+          {library.missing_anime.length > 0 ? (
+            <button
+              type="button"
+              className={missingViewActive ? "nav-item active" : "nav-item"}
+              onClick={() => navigateToView("missing")}
+              aria-label="Missing"
+              title="Missing"
+            >
+              <MissingIcon />
+              <span className="nav-label">Missing</span>
+            </button>
+          ) : null}
           <button
             type="button"
             className={view === "settings" ? "nav-item active" : "nav-item"}
@@ -864,6 +903,10 @@ function App() {
               onQueryChange={setSearchQuery}
               onOpenAnime={(anime) => void openAnime(anime, "search")}
             />
+          ) : null}
+
+          {view === "missing" ? (
+            <MissingScreen anime={library.missing_anime} />
           ) : null}
 
           {view === "episodes" && selectedAnime ? (

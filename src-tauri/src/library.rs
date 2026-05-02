@@ -65,6 +65,25 @@ pub struct AnimeSummary {
 }
 
 #[derive(Debug, Serialize)]
+pub struct MissingAnimeSummary {
+    id: i64,
+    title: String,
+    category_id: i64,
+    anilist_id: Option<i64>,
+    anilist_title: Option<String>,
+    anilist_site_url: Option<String>,
+    anilist_cover_path: Option<String>,
+    episode_count: i64,
+    unwatched_count: i64,
+    missing_episode_count: i64,
+    total_episode_count: i64,
+    last_watched_at: Option<String>,
+    created_at: String,
+    latest_episode_at: Option<String>,
+    first_episode_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Episode {
     id: i64,
     anime_id: i64,
@@ -88,6 +107,7 @@ pub struct LibraryState {
     categories: Vec<Category>,
     anime: Vec<AnimeSummary>,
     recent_anime: Vec<AnimeSummary>,
+    missing_anime: Vec<MissingAnimeSummary>,
     unmatched_count: i64,
 }
 
@@ -184,6 +204,7 @@ pub fn get_library_state(db: State<'_, AppDatabase>) -> Result<LibraryState, Str
             categories: list_categories(conn)?,
             anime: list_anime(conn, None, false)?,
             recent_anime: list_anime(conn, None, true)?,
+            missing_anime: list_missing_anime(conn)?,
             unmatched_count: count_unmatched(conn)?,
         })
     })
@@ -493,6 +514,7 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let mut anime_cache: HashMap<String, i64> = HashMap::new();
 
+            mark_episodes_missing_not_in_scan(&tx, root.id, &scan.episodes)?;
             delete_unmatched_files_now_matched(&tx, root.id, &scan.episodes)?;
 
             for episode in scan.episodes {
@@ -733,6 +755,7 @@ fn list_episode_file_names_for_anime(conn: &Connection, anime_id: i64) -> Result
         .prepare(
             "SELECT file_name FROM episodes
              WHERE anime_id = ?1
+               AND missing = 0
              ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -796,16 +819,26 @@ fn list_anime(
                 a.created_at,
                 a.latest_episode_at,
                 (SELECT e2.path FROM episodes e2
-                 WHERE e2.anime_id = a.id
+                 WHERE e2.anime_id = a.id AND e2.missing = 0
                  ORDER BY e2.episode_number IS NULL, e2.episode_number, e2.relative_path COLLATE NOCASE
                  LIMIT 1) AS first_episode_path
          FROM anime a
-         LEFT JOIN episodes e ON e.anime_id = a.id",
+         LEFT JOIN episodes e ON e.anime_id = a.id AND e.missing = 0",
     );
     if category_id.is_some() {
-        sql.push_str(" WHERE a.category_id = ?1");
+        sql.push_str(
+            " WHERE a.category_id = ?1
+              AND EXISTS (SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0)",
+        );
     } else if recent_only {
-        sql.push_str(" WHERE a.last_watched_at IS NOT NULL");
+        sql.push_str(
+            " WHERE a.last_watched_at IS NOT NULL
+              AND EXISTS (SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0)",
+        );
+    } else {
+        sql.push_str(
+            " WHERE EXISTS (SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0)",
+        );
     }
     sql.push_str(" GROUP BY a.id");
     if recent_only {
@@ -842,6 +875,58 @@ fn list_anime(
     collect_rows(rows)
 }
 
+fn list_missing_anime(conn: &Connection) -> Result<Vec<MissingAnimeSummary>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.id,
+                    a.title,
+                    a.category_id,
+                    a.anilist_id,
+                    a.anilist_title,
+                    a.anilist_site_url,
+                    a.anilist_cover_path,
+                    SUM(CASE WHEN e.missing = 0 THEN 1 ELSE 0 END) AS available_count,
+                    SUM(CASE WHEN e.missing = 0 AND e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
+                    SUM(CASE WHEN e.missing != 0 THEN 1 ELSE 0 END) AS missing_count,
+                    COUNT(e.id) AS total_count,
+                    a.last_watched_at,
+                    a.created_at,
+                    a.latest_episode_at,
+                    (SELECT e2.path FROM episodes e2
+                     WHERE e2.anime_id = a.id
+                     ORDER BY e2.missing, e2.episode_number IS NULL, e2.episode_number, e2.relative_path COLLATE NOCASE
+                     LIMIT 1) AS first_episode_path
+             FROM anime a
+             JOIN episodes e ON e.anime_id = a.id
+             GROUP BY a.id
+             HAVING SUM(CASE WHEN e.missing != 0 THEN 1 ELSE 0 END) > 0
+             ORDER BY a.title COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MissingAnimeSummary {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                category_id: row.get(2)?,
+                anilist_id: row.get(3)?,
+                anilist_title: row.get(4)?,
+                anilist_site_url: row.get(5)?,
+                anilist_cover_path: row.get(6)?,
+                episode_count: row.get::<_, Option<i64>>(7)?.unwrap_or(0),
+                unwatched_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
+                missing_episode_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
+                total_episode_count: row.get(10)?,
+                last_watched_at: row.get(11)?,
+                created_at: row.get(12)?,
+                latest_episode_at: row.get(13)?,
+                first_episode_path: row.get(14)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    collect_rows(rows)
+}
+
 fn list_episodes_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<Episode>, String> {
     let mut stmt = conn
         .prepare(
@@ -850,6 +935,7 @@ fn list_episodes_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<Episo
                     watched, last_watched_at
              FROM episodes
              WHERE anime_id = ?1
+               AND missing = 0
              ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -981,7 +1067,7 @@ fn delete_episodes_not_in_scan(
     Ok(removed)
 }
 
-fn delete_unmatched_files_now_matched(
+fn mark_episodes_missing_not_in_scan(
     tx: &rusqlite::Transaction<'_>,
     root_folder_id: i64,
     matched: &[scanner::ScannedEpisode],
@@ -1000,6 +1086,28 @@ fn delete_unmatched_files_now_matched(
         )
         .map_err(|e| e.to_string())?;
     }
+    let marked = tx
+        .execute(
+            "UPDATE episodes
+             SET missing = 1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE root_folder_id = ?1
+               AND missing = 0
+               AND NOT EXISTS (
+                   SELECT 1 FROM rescan_matched_paths k WHERE k.path = episodes.path
+               )",
+            params![root_folder_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(marked)
+}
+
+fn delete_unmatched_files_now_matched(
+    tx: &rusqlite::Transaction<'_>,
+    root_folder_id: i64,
+    matched: &[scanner::ScannedEpisode],
+) -> Result<usize, String> {
+    ensure_rescan_matched_paths(tx, matched)?;
     let removed = tx
         .execute(
             "DELETE FROM unmatched_files
@@ -1011,6 +1119,27 @@ fn delete_unmatched_files_now_matched(
         )
         .map_err(|e| e.to_string())?;
     Ok(removed)
+}
+
+fn ensure_rescan_matched_paths(
+    tx: &rusqlite::Transaction<'_>,
+    matched: &[scanner::ScannedEpisode],
+) -> Result<(), String> {
+    tx.execute("DROP TABLE IF EXISTS rescan_matched_paths", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "CREATE TEMP TABLE rescan_matched_paths (path TEXT PRIMARY KEY)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    for ep in matched {
+        tx.execute(
+            "INSERT INTO rescan_matched_paths (path) VALUES (?1)",
+            params![ep.path],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn delete_unmatched_files_not_in_scan(
@@ -1152,8 +1281,8 @@ fn upsert_episode(
     let changed = conn.execute(
         "INSERT INTO episodes
             (anime_id, root_folder_id, path, relative_path, file_name, file_type,
-             episode_number, size)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             episode_number, size, missing)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)
          ON CONFLICT(path) DO UPDATE SET
             anime_id = excluded.anime_id,
             root_folder_id = excluded.root_folder_id,
@@ -1162,6 +1291,7 @@ fn upsert_episode(
             file_type = excluded.file_type,
             episode_number = excluded.episode_number,
             size = excluded.size,
+            missing = 0,
             updated_at = CURRENT_TIMESTAMP
          WHERE episodes.anime_id IS NOT excluded.anime_id
             OR episodes.root_folder_id IS NOT excluded.root_folder_id
@@ -1169,7 +1299,8 @@ fn upsert_episode(
             OR episodes.file_name IS NOT excluded.file_name
             OR episodes.file_type IS NOT excluded.file_type
             OR episodes.episode_number IS NOT excluded.episode_number
-            OR episodes.size IS NOT excluded.size",
+            OR episodes.size IS NOT excluded.size
+            OR episodes.missing != 0",
         params![
             anime_id,
             root_folder_id,

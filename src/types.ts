@@ -46,6 +46,11 @@ export type AnimeSummary = {
   first_episode_path: string | null;
 };
 
+export type MissingAnimeSummary = AnimeSummary & {
+  missing_episode_count: number;
+  total_episode_count: number;
+};
+
 export type Episode = {
   id: number;
   anime_id: number;
@@ -81,6 +86,7 @@ export type LibraryState = {
   categories: Category[];
   anime: AnimeSummary[];
   recent_anime: AnimeSummary[];
+  missing_anime: MissingAnimeSummary[];
   unmatched_count: number;
 };
 

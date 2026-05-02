@@ -374,6 +374,14 @@
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
 }
 
+.missing-card {
+  cursor: default;
+}
+
+.missing-card .anime-card-meta {
+  color: #ffb4b4;
+}
+
 .anime-detail-panel {
   display: flex;
   align-items: center;

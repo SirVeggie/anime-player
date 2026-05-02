@@ -39,7 +39,10 @@ view components. Per-screen UI lives in `src/components/`:
   is disabled so mpv stays sharp.
 - Two-pane layout: 280px sidebar (Library, Settings, rescan, stats) +
   main content pane. Category navigation lives on the library page rather
-  than in the sidebar. The anime grid header includes a sort dropdown
+  than in the sidebar. A **Missing** sidebar page appears only when the
+  database has episodes that the latest scan could not currently match; normal
+  library/search/episode views hide those missing rows so rule mistakes are
+  obvious without deleting saved metadata. The anime grid header includes a sort dropdown
   (alphabetical, most recent episode, last watched, episode/remaining counts);
   the choice is persisted in `localStorage` under `animePlayer.animeGridSort`.
   **Most recent** sorts by `anime.latest_episode_at` descending (shows with
@@ -206,7 +209,10 @@ view components. Per-screen UI lives in `src/components/`:
   reorder the "Most recent" grid. Rescans are intentionally nondestructive:
   episode rows that are missing or no longer match the current detection rules
   stay in SQLite so a temporary rule mistake does not lose links, categories,
-  or watch progress. Settings shows database and saved AniList cover sizes via
+  or watch progress. Rescans mark those rows with `episodes.missing = 1`;
+  regular library summaries and `list_episodes` filter to `missing = 0`, while
+  `LibraryState.missing_anime` drives the Missing sidebar page with
+  `missing/total` counts. Settings shows database and saved AniList cover sizes via
   `get_local_data_stats`; the explicit `clean_local_data` action prunes stale
   episodes/unmatched rows, removes anime with no episodes, vacuums SQLite, and
   deletes unreferenced saved covers.

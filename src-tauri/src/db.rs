@@ -108,6 +108,7 @@ fn apply_schema_updates(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "anime", "anilist_site_url", "TEXT")?;
     ensure_column(conn, "anime", "anilist_cover_path", "TEXT")?;
     ensure_column(conn, "anime", "latest_episode_at", "TEXT")?;
+    ensure_column(conn, "episodes", "missing", "INTEGER NOT NULL DEFAULT 0")?;
     refresh_anime_latest_episode_at(conn)?;
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_anime_anilist_id
@@ -116,17 +117,24 @@ fn apply_schema_updates(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_episodes_missing ON episodes(missing)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Sets `anime.latest_episode_at` to the latest `episodes.updated_at` per anime (max across rows).
+/// Sets `anime.latest_episode_at` to the latest available episode update.
 pub fn refresh_anime_latest_episode_at(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "UPDATE anime SET latest_episode_at = (
-            SELECT MAX(e.updated_at) FROM episodes e WHERE e.anime_id = anime.id
+            SELECT MAX(e.updated_at) FROM episodes e
+            WHERE e.anime_id = anime.id AND e.missing = 0
         )
         WHERE latest_episode_at IS NOT (
-            SELECT MAX(e.updated_at) FROM episodes e WHERE e.anime_id = anime.id
+            SELECT MAX(e.updated_at) FROM episodes e
+            WHERE e.anime_id = anime.id AND e.missing = 0
         )",
         [],
     )
@@ -221,6 +229,7 @@ CREATE TABLE IF NOT EXISTS episodes (
   duration_seconds REAL NOT NULL DEFAULT 0,
   position_seconds REAL NOT NULL DEFAULT 0,
   watched INTEGER NOT NULL DEFAULT 0,
+  missing INTEGER NOT NULL DEFAULT 0,
   date_added TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_watched_at TEXT,
