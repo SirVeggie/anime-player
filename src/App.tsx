@@ -402,7 +402,7 @@ function App() {
       await runAction(async () => {
         await removeRootFolder(root.id);
         await reloadLibrary();
-        return "Root folder removed. Existing library entries are preserved until rescanned.";
+        return "Root folder removed; episodes from that folder were dropped from the library.";
       });
     },
     [reloadLibrary, runAction],

@@ -192,10 +192,32 @@ pub fn add_root_folder(db: State<'_, AppDatabase>, path: String) -> Result<RootF
 #[tauri::command]
 pub fn remove_root_folder(db: State<'_, AppDatabase>, id: i64) -> Result<(), String> {
     db.with_conn(|conn| {
-        conn.execute("DELETE FROM root_folders WHERE id = ?1", params![id])
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        // Episodes FK uses ON DELETE SET NULL; deleting the root would orphan rows that
+        // rescan never prunes (delete_episodes_not_in_scan filters by root_folder_id).
+        tx.execute(
+            "DELETE FROM episodes WHERE root_folder_id = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+        delete_anime_with_no_episodes(&tx)?;
+        tx.execute("DELETE FROM root_folders WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        refresh_anime_latest_episode_at(conn)?;
         Ok(())
     })
+}
+
+fn delete_anime_with_no_episodes(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM anime WHERE NOT EXISTS (
+            SELECT 1 FROM episodes e WHERE e.anime_id = anime.id
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -409,6 +431,12 @@ pub fn save_episode_progress(
 #[tauri::command]
 pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String> {
     db.with_conn(|conn| {
+        // Repair DBs from before remove_root_folder deleted episodes: SET NULL orphans.
+        conn.execute("DELETE FROM episodes WHERE root_folder_id IS NULL", [])
+            .map_err(|e| e.to_string())?;
+        delete_anime_with_no_episodes(conn)?;
+        refresh_anime_latest_episode_at(conn)?;
+
         let roots = list_root_folders(conn)?;
         let rules = list_enabled_detection_rules(conn)?;
         let default_category = default_category_id(conn)?;

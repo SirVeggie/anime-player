@@ -180,7 +180,9 @@ view components. Per-screen UI lives in `src/components/`:
   preserved in SQLite for diagnostics instead of silently disappearing.
 - `library.rs` exposes the local-library Tauri commands and keeps the
   legacy `scan_videos(folder)` command. Current commands include:
-  `get_library_state`, `add_root_folder`, `remove_root_folder`,
+  `get_library_state`, `add_root_folder`, `remove_root_folder` (deletes that
+  root’s episodes and any anime that no longer has files, so the library does
+  not keep stale entries from removed roots),
   `create_category`, `delete_category`, `set_default_category`,
   `create_regex_rule`, `update_regex_rule`, `delete_regex_rule`,
   `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
