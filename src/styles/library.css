@@ -159,6 +159,17 @@
   color: rgba(255, 255, 255, 0.65);
   font-size: 28px;
   font-weight: 700;
+  overflow: hidden;
+}
+
+.poster-placeholder--image {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.poster-placeholder img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .anime-card-body {
@@ -302,4 +313,88 @@
 
 .anime-card:hover {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+}
+
+.anime-detail-panel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  margin-bottom: 18px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-grad);
+}
+
+.anime-detail-panel h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.anime-detail-cover {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 118px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(145deg, rgba(88, 166, 255, 0.22), rgba(255, 255, 255, 0.02)),
+    #141414;
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 700;
+}
+
+.anime-detail-cover--image {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.anime-detail-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.anilist-link-panel {
+  margin-bottom: 18px;
+}
+
+.anilist-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.anilist-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 82px;
+  text-align: left;
+}
+
+.anilist-result img {
+  width: 46px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+}
+
+.anilist-result span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anilist-result strong,
+.anilist-result small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anilist-result small {
+  color: var(--text-muted);
 }

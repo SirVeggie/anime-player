@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Category, LibraryState, RegexRule, RegexRuleInput, RootFolder } from "../types";
+import type { AnilistAuthState, Category, LibraryState, RegexRule, RegexRuleInput, RootFolder } from "../types";
 import { ViewHeader } from "./ViewHeader";
 
 const EMPTY_RULE: RegexRuleInput = {
@@ -15,6 +15,7 @@ export function SettingsScreen(props: {
   busy: boolean;
   rootInput: string;
   newCategoryName: string;
+  anilistAuth: AnilistAuthState | null;
   onBack: () => void;
   onRootInput: (value: string) => void;
   onPickFolder: () => void;
@@ -28,12 +29,16 @@ export function SettingsScreen(props: {
   onCreateRule: (input: RegexRuleInput) => void;
   onUpdateRule: (id: number, input: RegexRuleInput) => void;
   onDeleteRule: (rule: RegexRule) => void;
+  onSaveAnilistClientId: (clientId: string) => void;
+  onLoginAnilist: () => void;
+  onLogoutAnilist: () => void;
 }) {
   const {
     library,
     busy,
     rootInput,
     newCategoryName,
+    anilistAuth,
     onBack,
     onRootInput,
     onPickFolder,
@@ -47,11 +52,57 @@ export function SettingsScreen(props: {
     onCreateRule,
     onUpdateRule,
     onDeleteRule,
+    onSaveAnilistClientId,
+    onLoginAnilist,
+    onLogoutAnilist,
   } = props;
+  const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
+
+  useEffect(() => {
+    setAnilistClientDraft(anilistAuth?.client_id ?? "");
+  }, [anilistAuth?.client_id]);
 
   return (
     <>
       <ViewHeader title="Settings" subtitle={`Portable database: ${library.db_path}`} onBack={onBack} />
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>AniList</h2>
+          <span className="muted">
+            {anilistAuth?.authenticated ? `Logged in as ${anilistAuth.viewer_name ?? "AniList user"}` : "Not logged in"}
+          </span>
+        </div>
+        <form
+          className="form-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSaveAnilistClientId(anilistClientDraft);
+          }}
+        >
+          <input
+            type="text"
+            value={anilistClientDraft}
+            onChange={(e) => setAnilistClientDraft(e.currentTarget.value)}
+            placeholder="AniList OAuth client ID..."
+            spellCheck={false}
+          />
+          <button type="submit" disabled={busy}>
+            Save
+          </button>
+          <button type="button" onClick={onLoginAnilist} disabled={busy || !anilistClientDraft.trim()}>
+            Login with AniList
+          </button>
+          {anilistAuth?.authenticated ? (
+            <button type="button" onClick={onLogoutAnilist} disabled={busy}>
+              Logout
+            </button>
+          ) : null}
+        </form>
+        <p className="muted">
+          Set the AniList app redirect URL to <code>anime-player://anilist-auth</code>.
+        </p>
+      </section>
 
       <section className="panel">
         <div className="panel-heading">

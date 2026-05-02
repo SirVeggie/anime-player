@@ -1,18 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
+  completeAnilistLogin,
   createCategory,
   createRegexRule,
   deleteCategory,
   deleteRegexRule,
+  getAnilistAuthState,
+  getAnilistLoginUrl,
   getLibraryState,
+  linkAnimeAnilist,
   listEpisodes,
+  logoutAnilist,
   moveAnimeToCategory,
   removeRootFolder,
   rescanLibrary,
+  searchAnilistAnime,
   setDefaultCategory,
+  setAnilistClientId,
+  unlinkAnimeAnilist,
   updateRegexRule,
 } from "./api";
 import { AnimeGrid } from "./components/AnimeGrid";
@@ -26,6 +36,8 @@ import { WindowTitleBar } from "./components/WindowTitleBar";
 import { pickQuickPlayEpisode } from "./quickPlay";
 import type {
   AnimeSummary,
+  AnilistAuthState,
+  AnilistSearchResult,
   Category,
   Episode,
   LibraryState,
@@ -46,6 +58,7 @@ function App() {
   const [view, setView] = useState<View>("categories");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
+  const [anilistAuth, setAnilistAuth] = useState<AnilistAuthState | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
   const [rootInput, setRootInput] = useState("");
@@ -72,17 +85,63 @@ function App() {
     return state;
   }, []);
 
+  const reloadAnilistAuth = useCallback(async () => {
+    const state = await getAnilistAuthState();
+    setAnilistAuth(state);
+    return state;
+  }, []);
+
   useEffect(() => {
     void (async () => {
       try {
-        await reloadLibrary();
+        await Promise.all([reloadLibrary(), reloadAnilistAuth()]);
       } catch (e) {
         setFatalError(errorMessage(e));
       } finally {
         setLoading(false);
       }
     })();
-  }, [reloadLibrary]);
+  }, [reloadAnilistAuth, reloadLibrary]);
+
+  const handleAnilistCallback = useCallback(
+    async (url: string) => {
+      if (!url.startsWith("anime-player://anilist-auth")) return;
+      setBusy(true);
+      try {
+        const state = await completeAnilistLogin(url);
+        setAnilistAuth(state);
+        showToast("success", `Logged in to AniList as ${state.viewer_name ?? "your account"}.`);
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        const currentUrls = await getCurrent();
+        if (!cancelled) {
+          currentUrls?.forEach((url) => void handleAnilistCallback(url));
+        }
+        unlisten = await onOpenUrl((urls) => {
+          urls.forEach((url) => void handleAnilistCallback(url));
+        });
+        if (cancelled) unlisten();
+      } catch (e) {
+        if (!cancelled) showToast("error", errorMessage(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [handleAnilistCallback, showToast]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -274,6 +333,65 @@ function App() {
     [reloadLibrary, runAction, selectedAnime],
   );
 
+  const handleSaveAnilistClientId = useCallback(
+    async (clientId: string) => {
+      await runAction(async () => {
+        const state = await setAnilistClientId(clientId);
+        setAnilistAuth(state);
+        return clientId.trim() ? "AniList client ID saved." : "AniList client ID cleared.";
+      });
+    },
+    [runAction],
+  );
+
+  const handleLoginAnilist = useCallback(async () => {
+    await runAction(async () => {
+      const url = await getAnilistLoginUrl();
+      await openUrl(url);
+    });
+  }, [runAction]);
+
+  const handleLogoutAnilist = useCallback(async () => {
+    await runAction(async () => {
+      setAnilistAuth(await logoutAnilist());
+      return "Logged out of AniList.";
+    });
+  }, [runAction]);
+
+  const handleSearchAnilist = useCallback((query: string): Promise<AnilistSearchResult[]> => {
+    return searchAnilistAnime(query);
+  }, []);
+
+  const handleLinkAnilist = useCallback(
+    async (animeId: number, anilistId: number) => {
+      await runAction(async () => {
+        await linkAnimeAnilist(animeId, anilistId);
+        const state = await reloadLibrary();
+        const updated = state.anime.find((anime) => anime.id === animeId);
+        if (updated) setSelectedAnime(updated);
+        return "Anime linked to AniList.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleUnlinkAnilist = useCallback(
+    async (animeId: number) => {
+      await runAction(async () => {
+        await unlinkAnimeAnilist(animeId);
+        const state = await reloadLibrary();
+        const updated = state.anime.find((anime) => anime.id === animeId);
+        if (updated) setSelectedAnime(updated);
+        return "Anime unlinked from AniList.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleOpenAnilist = useCallback(async (url: string) => {
+    await openUrl(url);
+  }, []);
+
   const handleProgressSaved = useCallback(
     (saved: Episode) => {
       setEpisodes((current) => {
@@ -449,6 +567,10 @@ function App() {
               onBack={() => setView("anime")}
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
+              onSearchAnilist={handleSearchAnilist}
+              onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
+              onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
+              onOpenAnilist={(url) => void handleOpenAnilist(url)}
             />
           ) : null}
 
@@ -458,6 +580,7 @@ function App() {
               busy={busy}
               rootInput={rootInput}
               newCategoryName={newCategoryName}
+              anilistAuth={anilistAuth}
               onBack={() => setView("categories")}
               onRootInput={setRootInput}
               onPickFolder={() => void handlePickFolder()}
@@ -471,6 +594,9 @@ function App() {
               onCreateRule={(input) => void handleCreateRule(input)}
               onUpdateRule={(id, input) => void handleUpdateRule(id, input)}
               onDeleteRule={(rule) => void handleDeleteRule(rule)}
+              onSaveAnilistClientId={(clientId) => void handleSaveAnilistClientId(clientId)}
+              onLoginAnilist={() => void handleLoginAnilist()}
+              onLogoutAnilist={() => void handleLogoutAnilist()}
             />
           ) : null}
         </div>
