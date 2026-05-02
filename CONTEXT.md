@@ -132,7 +132,8 @@ view components. Per-screen UI lives in `src/components/`:
 - The video pane uses Tauri `startDragging` (single left-click) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
-  pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q**, **Escape**, or the back
+  pause; Space and ArrowLeft/ArrowRight seek ±5s; Numpad 4/6 seek ±28s and
+  Numpad 7/9 seek ±85s; **Q**, **Escape**, or the back
   control returns to the episode list (without unloading mpv). On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the

@@ -668,6 +668,34 @@ export function PlayerView(props: {
         );
         return;
       }
+      if (e.code === "Numpad4") {
+        e.preventDefault();
+        void invoke("mpv_seek_relative", { delta: -28 }).catch((err) =>
+          onError(errorMessage(err)),
+        );
+        return;
+      }
+      if (e.code === "Numpad6") {
+        e.preventDefault();
+        void invoke("mpv_seek_relative", { delta: 28 }).catch((err) =>
+          onError(errorMessage(err)),
+        );
+        return;
+      }
+      if (e.code === "Numpad7") {
+        e.preventDefault();
+        void invoke("mpv_seek_relative", { delta: -85 }).catch((err) =>
+          onError(errorMessage(err)),
+        );
+        return;
+      }
+      if (e.code === "Numpad9") {
+        e.preventDefault();
+        void invoke("mpv_seek_relative", { delta: 85 }).catch((err) =>
+          onError(errorMessage(err)),
+        );
+        return;
+      }
       if (e.code === "KeyF") {
         e.preventDefault();
         void toggleFullscreen();
