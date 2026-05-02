@@ -198,13 +198,6 @@ export function SettingsScreen(props: {
           <h2>Detection Rules</h2>
           <span className="muted">{library.regex_rules.length} configured</span>
         </div>
-        <RuleEditor
-          title="Add rule"
-          busy={busy}
-          initial={EMPTY_RULE}
-          submitLabel="Add rule"
-          onSubmit={onCreateRule}
-        />
         <div className="settings-list">
           {library.regex_rules.map((rule) => (
             <RuleEditor
@@ -218,6 +211,13 @@ export function SettingsScreen(props: {
             />
           ))}
         </div>
+        <RuleEditor
+          title="New rule"
+          busy={busy}
+          initial={EMPTY_RULE}
+          submitLabel="Add rule"
+          onSubmit={onCreateRule}
+        />
       </section>
     </>
   );
@@ -317,28 +317,34 @@ function RuleEditor(props: {
           </div>
         </label>
       </div>
-      <label className="stacked-field">
-        <span>Detection regex</span>
-        <textarea
-          value={draft.detection_regex}
-          onChange={(e) => {
-            const detection_regex = e.currentTarget.value;
-            setDraft((current) => ({ ...current, detection_regex }));
-          }}
-          rows={2}
-        />
-      </label>
-      <label className="stacked-field">
-        <span>Title regex</span>
-        <textarea
-          value={draft.title_regex}
-          onChange={(e) => {
-            const title_regex = e.currentTarget.value;
-            setDraft((current) => ({ ...current, title_regex }));
-          }}
-          rows={2}
-        />
-      </label>
+      <div className="rule-editor-regex-row">
+        <label>
+          <span>Detection regex</span>
+          <input
+            type="text"
+            value={draft.detection_regex}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => {
+              const detection_regex = e.currentTarget.value;
+              setDraft((current) => ({ ...current, detection_regex }));
+            }}
+          />
+        </label>
+        <label>
+          <span>Title regex</span>
+          <input
+            type="text"
+            value={draft.title_regex}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => {
+              const title_regex = e.currentTarget.value;
+              setDraft((current) => ({ ...current, title_regex }));
+            }}
+          />
+        </label>
+      </div>
       <div className="settings-actions">
         <button type="submit" disabled={busy}>
           {submitLabel}
