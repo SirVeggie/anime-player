@@ -47,7 +47,9 @@ Node 22, 7-Zip on PATH, and the local generated
 - The app window is frameless (`decorations: false`) and draws its own
   React title bar in `src/App.tsx`. The title bar owns dragging,
   double-click maximize, and minimize / maximize / close controls; it
-  fades out over the player view and reappears on hover/focus.
+  fades out over the player view and reappears on hover/focus. Those
+  actions require explicit `core:window:allow-*` entries in
+  `src-tauri/capabilities/default.json` (Tauri v2 ACL).
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
