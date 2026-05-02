@@ -42,6 +42,8 @@ export type AnimeSummary = {
   created_at: string;
   /** Latest `episodes.updated_at` for this show; refreshed on library rescan */
   latest_episode_at: string | null;
+  /** First episode path in list order; used when AniList cover is missing */
+  first_episode_path: string | null;
 };
 
 export type Episode = {

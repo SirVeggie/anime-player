@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getAnilistCoverImage } from "../api";
+import { resolveAnimePosterUrl } from "../animePoster";
 import type { AnimeSummary, LibraryState } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { ViewHeader } from "./ViewHeader";
@@ -25,16 +25,10 @@ export function CategoryScreen(props: {
     let cancelled = false;
     setRecentCovers({});
     void Promise.all(
-      library.recent_anime
-        .filter((anime) => anime.anilist_cover_path)
-        .map(async (anime) => {
-          try {
-            const cover = await getAnilistCoverImage(anime.id);
-            return cover ? ([anime.id, cover] as const) : null;
-          } catch {
-            return null;
-          }
-        }),
+      library.recent_anime.map(async (anime) => {
+        const url = await resolveAnimePosterUrl(anime);
+        return url ? ([anime.id, url] as const) : null;
+      }),
     ).then((entries) => {
       if (cancelled) return;
       setRecentCovers(Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)));

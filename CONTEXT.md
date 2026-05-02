@@ -65,7 +65,10 @@ view components. Per-screen UI lives in `src/components/`:
   listens for Tauri deep-link callbacks, validates/stores the token through
   Rust, and exposes search/link/unlink/open controls on the anime episode
   page. Linked anime prefer cached AniList cover art over placeholder
-  initials in the grid and episode header; the linked info card opens
+  initials in the grid and episode header; if no cover is available (unlinked,
+  missing file, or load failure), the grid and Continue Watching use a
+  Windows shell thumbnail from the first local episode (`first_episode_path`
+  in `AnimeSummary`, same ordering as the episode list). The linked info card opens
   AniList, shows remote `Progress: current/total`, and has a debounced score
   input that writes to AniList. When a local progress save marks an episode
   watched (EOF or the near-end threshold used by hide/next), the player asks

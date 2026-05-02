@@ -59,6 +59,8 @@ pub struct AnimeSummary {
     created_at: String,
     /// Latest `episodes.updated_at` for this anime (refreshed on rescan); used for "Most recent" sort.
     latest_episode_at: Option<String>,
+    /// Path of the first episode in list order (same as `list_episodes`); grid thumbnail fallback.
+    first_episode_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -669,7 +671,11 @@ fn list_anime(
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
                 a.last_watched_at,
                 a.created_at,
-                a.latest_episode_at
+                a.latest_episode_at,
+                (SELECT e2.path FROM episodes e2
+                 WHERE e2.anime_id = a.id
+                 ORDER BY e2.episode_number IS NULL, e2.episode_number, e2.relative_path COLLATE NOCASE
+                 LIMIT 1) AS first_episode_path
          FROM anime a
          LEFT JOIN episodes e ON e.anime_id = a.id",
     );
@@ -699,6 +705,7 @@ fn list_anime(
             last_watched_at: row.get(9)?,
             created_at: row.get(10)?,
             latest_episode_at: row.get(11)?,
+            first_episode_path: row.get(12)?,
         })
     };
 
