@@ -15,6 +15,7 @@ export function SettingsScreen(props: {
   busy: boolean;
   rootInput: string;
   newCategoryName: string;
+  newRuleEditorKey: number;
   anilistAuth: AnilistAuthState | null;
   onBack: () => void;
   onRootInput: (value: string) => void;
@@ -38,6 +39,7 @@ export function SettingsScreen(props: {
     busy,
     rootInput,
     newCategoryName,
+    newRuleEditorKey,
     anilistAuth,
     onBack,
     onRootInput,
@@ -212,6 +214,7 @@ export function SettingsScreen(props: {
           ))}
         </div>
         <RuleEditor
+          key={newRuleEditorKey}
           title="New rule"
           busy={busy}
           initial={EMPTY_RULE}

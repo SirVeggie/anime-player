@@ -86,6 +86,7 @@ function App() {
   const [anilistProgressUpdate, setAnilistProgressUpdate] = useState<AnilistProgressUpdate | null>(null);
   const [rootInput, setRootInput] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newRuleEditorKey, setNewRuleEditorKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
@@ -460,6 +461,7 @@ function App() {
       await runAction(async () => {
         await createRegexRule(input);
         await reloadLibrary();
+        setNewRuleEditorKey((k) => k + 1);
         return "Detection rule added.";
       });
     },
@@ -862,6 +864,7 @@ function App() {
               busy={busy}
               rootInput={rootInput}
               newCategoryName={newCategoryName}
+              newRuleEditorKey={newRuleEditorKey}
               anilistAuth={anilistAuth}
               onBack={() => navigateToView("categories", "restore")}
               onRootInput={setRootInput}
