@@ -340,10 +340,6 @@
   cursor: pointer;
 }
 
-.anime-detail-main:hover:not(:disabled) h2 {
-  text-decoration: underline;
-}
-
 .anime-detail-main:disabled {
   cursor: default;
   opacity: 0.85;
