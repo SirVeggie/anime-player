@@ -941,14 +941,16 @@ function App() {
             />
           ) : null}
 
-          {view === "bulkEdit" ? (
-            <BulkEditScreen
-              library={library}
-              busy={busy}
-              onOpenAnime={(anime) => void openAnime(anime, "bulkEdit")}
-              onListEpisodes={listEpisodes}
-              onMoveAnime={(animeIds, categoryId) => void handleBulkMoveAnime(animeIds, categoryId)}
-            />
+          {bulkEditViewActive ? (
+            <div hidden={view !== "bulkEdit"}>
+              <BulkEditScreen
+                library={library}
+                busy={busy}
+                onOpenAnime={(anime) => void openAnime(anime, "bulkEdit")}
+                onListEpisodes={listEpisodes}
+                onMoveAnime={(animeIds, categoryId) => void handleBulkMoveAnime(animeIds, categoryId)}
+              />
+            </div>
           ) : null}
 
           {view === "missing" ? (
