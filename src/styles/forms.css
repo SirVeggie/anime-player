@@ -154,13 +154,13 @@ button {
     opacity 0.15s ease;
 }
 
-button[type="submit"],
+:where(button[type="submit"]),
 .view-actions button {
   background: var(--progress-color);
   color: #fff;
 }
 
-button[type="submit"]:hover:not(:disabled),
+:where(button[type="submit"]:hover:not(:disabled)),
 .view-actions button:hover:not(:disabled) {
   filter: brightness(1.08);
 }
@@ -244,7 +244,7 @@ button:disabled {
   z-index: 30;
 }
 
-.custom-select-option {
+button.custom-select-option {
   display: block;
   width: 100%;
   padding: 9px 12px;
