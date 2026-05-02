@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::db::AppDatabase;
+use crate::db::{refresh_anime_latest_episode_at, AppDatabase};
 use crate::scanner::{self, DetectionRule};
 
 /// Saved positions below this are stored as 0 (avoid sticky resume after brief opens).
@@ -57,6 +57,8 @@ pub struct AnimeSummary {
     unwatched_count: i64,
     last_watched_at: Option<String>,
     created_at: String,
+    /// Latest `episodes.updated_at` for this anime (refreshed on rescan); used for "Most recent" sort.
+    latest_episode_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -472,6 +474,8 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
             tx.commit().map_err(|e| e.to_string())?;
         }
 
+        refresh_anime_latest_episode_at(conn)?;
+
         Ok(summary)
     })
 }
@@ -636,7 +640,8 @@ fn list_anime(
                 COUNT(e.id) AS episode_count,
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
                 a.last_watched_at,
-                a.created_at
+                a.created_at,
+                a.latest_episode_at
          FROM anime a
          LEFT JOIN episodes e ON e.anime_id = a.id",
     );
@@ -665,6 +670,7 @@ fn list_anime(
             unwatched_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
             last_watched_at: row.get(9)?,
             created_at: row.get(10)?,
+            latest_episode_at: row.get(11)?,
         })
     };
 

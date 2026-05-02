@@ -40,6 +40,8 @@ export type AnimeSummary = {
   last_watched_at: string | null;
   /** ISO-ish timestamp from DB when the anime row was first created */
   created_at: string;
+  /** Latest `episodes.updated_at` for this show; refreshed on library rescan */
+  latest_episode_at: string | null;
 };
 
 export type Episode = {

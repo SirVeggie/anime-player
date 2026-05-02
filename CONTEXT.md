@@ -40,16 +40,15 @@ view components. Per-screen UI lives in `src/components/`:
 - Two-pane layout: 280px sidebar (Library, Settings, rescan, stats) +
   main content pane. Category navigation lives on the library page rather
   than in the sidebar. The anime grid header includes a sort dropdown
-  (alphabetical, date added, last watched, episode/remaining counts);
+  (alphabetical, most recent episode, last watched, episode/remaining counts);
   the choice is persisted in `localStorage` under `animePlayer.animeGridSort`.
-  **Date added** sorts by `anime.created_at` descending (most recently
-  inserted row first). That timestamp is **stored in SQLite**: it is set
-  once when a new anime row is first created during a library rescan
-  (`INSERT OR IGNORE` into `anime`, default `CURRENT_TIMESTAMP`). It is
-  **not** derived from episode file mtimes or the latest episode; adding
-  more episodes to an existing show does not change `created_at` (only
-  `updated_at` and episode rows update). Episodes have their own
-  `date_added` column, which the grid does not use for this sort.
+  **Most recent** sorts by `anime.latest_episode_at` descending (shows with
+  the freshest episode activity first). That field is **stored on `anime`**
+  and recomputed after every library rescan as `MAX(episodes.updated_at)`
+  per show (`db::refresh_anime_latest_episode_at`). On each app start, if at
+  least one root folder is configured, the app runs `rescan_library` once
+  (after the initial `get_library_state`) so the library and this timestamp
+  stay current without a manual rescan.
 - The MVP file list has been replaced by a SQLite-backed local library UI:
   category screen, anime grid, episode list, settings, and player view.
   `src/api.ts` contains the Tauri command bindings and `src/types.ts`

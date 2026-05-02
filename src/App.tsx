@@ -125,14 +125,23 @@ function App() {
   useEffect(() => {
     void (async () => {
       try {
-        await Promise.all([reloadLibrary(), reloadAnilistAuth()]);
+        const state = await reloadLibrary();
+        await reloadAnilistAuth();
+        if (state.root_folders.length > 0) {
+          try {
+            await rescanLibrary();
+            await reloadLibrary();
+          } catch (e) {
+            showToast("error", errorMessage(e));
+          }
+        }
       } catch (e) {
         setFatalError(errorMessage(e));
       } finally {
         setLoading(false);
       }
     })();
-  }, [reloadAnilistAuth, reloadLibrary]);
+  }, [reloadAnilistAuth, reloadLibrary, showToast]);
 
   const handleAnilistCallback = useCallback(
     async (url: string) => {

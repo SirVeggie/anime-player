@@ -107,10 +107,24 @@ fn apply_schema_updates(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "anime", "anilist_title", "TEXT")?;
     ensure_column(conn, "anime", "anilist_site_url", "TEXT")?;
     ensure_column(conn, "anime", "anilist_cover_path", "TEXT")?;
+    ensure_column(conn, "anime", "latest_episode_at", "TEXT")?;
+    refresh_anime_latest_episode_at(conn)?;
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_anime_anilist_id
          ON anime(anilist_id)
          WHERE anilist_id IS NOT NULL",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Sets `anime.latest_episode_at` to the latest `episodes.updated_at` per anime (max across rows).
+pub fn refresh_anime_latest_episode_at(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "UPDATE anime SET latest_episode_at = (
+            SELECT MAX(e.updated_at) FROM episodes e WHERE e.anime_id = anime.id
+        )",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -187,6 +201,7 @@ CREATE TABLE IF NOT EXISTS anime (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_watched_at TEXT,
+  latest_episode_at TEXT,
   FOREIGN KEY(category_id) REFERENCES categories(id)
 );
 

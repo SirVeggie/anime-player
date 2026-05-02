@@ -9,7 +9,7 @@ const GRID_SORT_STORAGE_KEY = "animePlayer.animeGridSort";
 
 const GRID_SORT_OPTIONS = [
   { value: 0, label: "Alphabetical" },
-  { value: 1, label: "Date added" },
+  { value: 1, label: "Most recent" },
   { value: 2, label: "Last watched" },
   { value: 3, label: "Total episodes" },
   { value: 4, label: "Remaining episodes" },
@@ -39,13 +39,20 @@ function sortAnimeForGrid(anime: AnimeSummary[], sortValue: number): AnimeSummar
         cmp = byTitle(a, b);
         break;
       case 1: {
-        // Newest first: `created_at` is when the anime row was first inserted into SQLite.
-        const ta = Date.parse(a.created_at.replace(" ", "T"));
-        const tb = Date.parse(b.created_at.replace(" ", "T"));
-        if (Number.isFinite(ta) && Number.isFinite(tb)) {
-          cmp = tb - ta;
-        } else {
-          cmp = b.created_at.localeCompare(a.created_at);
+        // Newest first: `latest_episode_at` (max episode updated_at), refreshed on rescan.
+        const aw = a.latest_episode_at;
+        const bw = b.latest_episode_at;
+        if (aw === null && bw === null) cmp = byTitle(a, b);
+        else if (aw === null) cmp = 1;
+        else if (bw === null) cmp = -1;
+        else {
+          const ta = Date.parse(aw.replace(" ", "T"));
+          const tb = Date.parse(bw.replace(" ", "T"));
+          if (Number.isFinite(ta) && Number.isFinite(tb)) {
+            cmp = tb - ta;
+          } else {
+            cmp = bw.localeCompare(aw);
+          }
         }
         if (cmp === 0) cmp = byTitle(a, b);
         break;
