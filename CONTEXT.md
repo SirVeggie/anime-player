@@ -21,7 +21,7 @@ Node 22, 7-Zip on PATH, and the local generated
 ### Frontend — `src/App.tsx`, `src/App.css` (barrel `@import` of `src/styles/*.css`), `src/api.ts`, `src/types.ts`, `src/components/*`
 
 The frontend is split so `App.tsx` only owns top-level state (library data,
-view selection, async handlers, toasts, F11 / Q hotkeys) and composes the
+view selection, async handlers, toasts, F11 / Esc / Q hotkeys) and composes the
 view components. Per-screen UI lives in `src/components/`:
 `WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
 `EpisodeScreen.tsx`, `SettingsScreen.tsx` (plus the local `RuleEditor`),
@@ -73,7 +73,10 @@ view components. Per-screen UI lives in `src/components/`:
   in `PlayerView`), uses no extra top gradient (the player UI already
   shades the top/bottom), and the **“Anime Player”** label stays hidden
   so only the system buttons appear. **F11** (globally, unless typing in a
-  field) toggles Tauri window fullscreen like a browser. Those actions
+  field) toggles Tauri window fullscreen like a browser. **Escape** matches
+  the per-screen back control (library → up a level, settings → library);
+  in the player it uses the same path as **Q** / the back arrow (pause +
+  persist + return to episodes). Those actions
   require explicit `core:window:allow-*` entries in
   `src-tauri/capabilities/default.json` (Tauri v2 ACL).
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
@@ -108,7 +111,7 @@ view components. Per-screen UI lives in `src/components/`:
   unpause without a fresh `mpv_load` (matching Q-to-resume behavior).
 - The video player is full-window while visible: `.app--player-open`
   hides the sidebar/content and passes `sidebar_px = 0` to mpv so
-  `video-margin-ratio-left` is cleared. When **Q** or the back arrow
+  `video-margin-ratio-left` is cleared. When **Q**, **Escape**, or the back arrow
   returns to the episode list, playback is paused via `mpv_set_pause`
   and mpv is pushed fully off-screen with an oversized stored sidebar
   margin, so native resize handling cannot reveal a stale video strip
@@ -124,7 +127,7 @@ view components. Per-screen UI lives in `src/components/`:
 - The video pane uses Tauri `startDragging` (single left-click) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
-  pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** or the back
+  pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q**, **Escape**, or the back
   control returns to the episode list (without unloading mpv). On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the

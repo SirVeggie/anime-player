@@ -11,7 +11,7 @@ import {
   selectMpvSubtitleTrack,
   syncAnilistEpisodeProgress,
 } from "../api";
-import type { Episode, MpvTrack, MpvVideoGeometry } from "../types";
+import type { AnilistProgressSyncResult, Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
 
 const PLAYER_SIDEBAR_PX = 0;
@@ -186,6 +186,7 @@ export function PlayerView(props: {
   onBack: () => void;
   onClose: () => void;
   onProgressSaved: (episode: Episode) => void;
+  onAnilistProgressSynced?: (animeId: number, result: AnilistProgressSyncResult) => void;
   onError: (message: string) => void;
   onControlsVisibilityChange?: (visible: boolean) => void;
 }) {
@@ -197,6 +198,7 @@ export function PlayerView(props: {
     onBack,
     onClose,
     onProgressSaved,
+    onAnilistProgressSynced,
     onError,
     onControlsVisibilityChange,
   } = props;
@@ -290,11 +292,13 @@ export function PlayerView(props: {
       );
       onProgressSaved(saved);
       if (watched) {
-        void syncAnilistEpisodeProgress(saved.id).catch((err) => onError(errorMessage(err)));
+        void syncAnilistEpisodeProgress(saved.id)
+          .then((result) => onAnilistProgressSynced?.(saved.anime_id, result))
+          .catch((err) => onError(errorMessage(err)));
       }
       return saved;
     },
-    [onError, onProgressSaved],
+    [onAnilistProgressSynced, onError, onProgressSaved],
   );
 
   const refreshTracks = useCallback(async () => {
@@ -672,6 +676,12 @@ export function PlayerView(props: {
       if (e.code === "KeyQ") {
         // Q outside the player is owned by App.tsx (it picks an episode for
         // the current anime); here we only close the playback view.
+        if (!visible) return;
+        e.preventDefault();
+        void hidePlayer();
+        return;
+      }
+      if (e.code === "Escape") {
         if (!visible) return;
         e.preventDefault();
         void hidePlayer();

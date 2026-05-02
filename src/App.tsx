@@ -40,6 +40,7 @@ import type {
   AnimeSummary,
   AnilistAuthState,
   AnilistMediaStatus,
+  AnilistProgressSyncResult,
   AnilistSearchResult,
   Category,
   Episode,
@@ -53,6 +54,12 @@ import "./App.css";
 
 type View = "categories" | "anime" | "episodes" | "settings" | "player";
 
+type AnilistProgressUpdate = {
+  animeId: number;
+  progress: number;
+  updatedAt: number;
+};
+
 const VIDEO_OPEN_FADE_MS = 180;
 const appWindow = getCurrentWindow();
 
@@ -64,6 +71,7 @@ function App() {
   const [anilistAuth, setAnilistAuth] = useState<AnilistAuthState | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+  const [anilistProgressUpdate, setAnilistProgressUpdate] = useState<AnilistProgressUpdate | null>(null);
   const [rootInput, setRootInput] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -373,6 +381,12 @@ function App() {
     return setAnilistMediaScore(animeId, score);
   }, []);
 
+  const handleAnilistProgressSynced = useCallback((animeId: number, result: AnilistProgressSyncResult) => {
+    const progress = result.remote_progress ?? result.target_progress;
+    if (progress === null) return;
+    setAnilistProgressUpdate({ animeId, progress, updatedAt: Date.now() });
+  }, []);
+
   const handleLinkAnilist = useCallback(
     async (animeId: number, anilistId: number) => {
       await runAction(async () => {
@@ -459,6 +473,29 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [episodes, openEpisode, selectedAnime, selectedEpisode, view]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat || e.code !== "Escape") return;
+      if (isTextInputTarget(e.target)) return;
+      if (view === "player") return;
+      if (view === "categories") return;
+      e.preventDefault();
+      if (view === "anime") {
+        setView("categories");
+        return;
+      }
+      if (view === "episodes" && selectedAnime) {
+        setView("anime");
+        return;
+      }
+      if (view === "settings") {
+        setView("categories");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [selectedAnime, view]);
+
   if (loading) {
     return (
       <main className="app app--loading">
@@ -544,6 +581,7 @@ function App() {
             setView("episodes");
           }}
           onProgressSaved={handleProgressSaved}
+          onAnilistProgressSynced={handleAnilistProgressSynced}
           onError={(message) => showToast("error", message)}
           onControlsVisibilityChange={setPlayerControlsChromeVisible}
         />
@@ -581,6 +619,7 @@ function App() {
               onSearchAnilist={handleSearchAnilist}
               onGetAnilistStatus={handleGetAnilistStatus}
               onSetAnilistScore={handleSetAnilistScore}
+              anilistProgressUpdate={anilistProgressUpdate}
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
