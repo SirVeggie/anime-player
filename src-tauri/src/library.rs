@@ -48,6 +48,10 @@ pub struct AnimeSummary {
     id: i64,
     title: String,
     category_id: i64,
+    anilist_id: Option<i64>,
+    anilist_title: Option<String>,
+    anilist_site_url: Option<String>,
+    anilist_cover_path: Option<String>,
     episode_count: i64,
     unwatched_count: i64,
     last_watched_at: Option<String>,
@@ -382,12 +386,7 @@ pub fn save_episode_progress(
                  last_watched_at = CURRENT_TIMESTAMP,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?4",
-            params![
-                position_seconds,
-                duration_seconds,
-                watched_flag,
-                episode_id
-            ],
+            params![position_seconds, duration_seconds, watched_flag, episode_id],
         )
         .map_err(|e| e.to_string())?;
         conn.execute(
@@ -613,6 +612,10 @@ fn list_anime(
         "SELECT a.id,
                 a.title,
                 a.category_id,
+                a.anilist_id,
+                a.anilist_title,
+                a.anilist_site_url,
+                a.anilist_cover_path,
                 COUNT(e.id) AS episode_count,
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
                 a.last_watched_at
@@ -636,9 +639,13 @@ fn list_anime(
             id: row.get(0)?,
             title: row.get(1)?,
             category_id: row.get(2)?,
-            episode_count: row.get(3)?,
-            unwatched_count: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
-            last_watched_at: row.get(5)?,
+            anilist_id: row.get(3)?,
+            anilist_title: row.get(4)?,
+            anilist_site_url: row.get(5)?,
+            anilist_cover_path: row.get(6)?,
+            episode_count: row.get(7)?,
+            unwatched_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
+            last_watched_at: row.get(9)?,
         })
     };
 

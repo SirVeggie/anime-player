@@ -31,6 +31,10 @@ export type AnimeSummary = {
   id: number;
   title: string;
   category_id: number;
+  anilist_id: number | null;
+  anilist_title: string | null;
+  anilist_site_url: string | null;
+  anilist_cover_path: string | null;
   episode_count: number;
   unwatched_count: number;
   last_watched_at: string | null;
@@ -78,4 +82,23 @@ export type ScanSummary = {
   roots_scanned: number;
   episodes_imported: number;
   unmatched_files: number;
+};
+
+export type AnilistAuthState = {
+  client_id: string | null;
+  viewer_id: number | null;
+  viewer_name: string | null;
+  authenticated: boolean;
+};
+
+export type AnilistSearchResult = {
+  id: number;
+  title: string;
+  native_title: string | null;
+  format: string | null;
+  status: string | null;
+  episodes: number | null;
+  season_year: number | null;
+  cover_image_url: string | null;
+  site_url: string;
 };

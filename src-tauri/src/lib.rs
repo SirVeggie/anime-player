@@ -1,7 +1,9 @@
 use std::sync::Mutex;
 
 use tauri::{Manager, State};
+use tauri_plugin_deep_link::DeepLinkExt;
 
+mod anilist;
 mod db;
 mod library;
 mod scanner;
@@ -223,12 +225,19 @@ fn mpv_stop(state: State<'_, AppState>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            app.deep_link().handle_cli_arguments(argv.into_iter());
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let db = db::AppDatabase::open_portable()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             app.manage(db);
+
+            #[cfg(any(windows, target_os = "linux"))]
+            let _ = app.deep_link().register_all();
 
             #[cfg(windows)]
             {
@@ -284,6 +293,15 @@ pub fn run() {
         library::list_episodes,
         library::save_episode_progress,
         library::rescan_library,
+        anilist::get_anilist_auth_state,
+        anilist::set_anilist_client_id,
+        anilist::get_anilist_login_url,
+        anilist::complete_anilist_login,
+        anilist::logout_anilist,
+        anilist::search_anilist_anime,
+        anilist::link_anime_anilist,
+        anilist::unlink_anime_anilist,
+        anilist::get_anilist_cover_image,
         thumbnails::get_file_thumbnail,
         mpv_init,
         mpv_load,
@@ -315,6 +333,15 @@ pub fn run() {
         library::list_episodes,
         library::save_episode_progress,
         library::rescan_library,
+        anilist::get_anilist_auth_state,
+        anilist::set_anilist_client_id,
+        anilist::get_anilist_login_url,
+        anilist::complete_anilist_login,
+        anilist::logout_anilist,
+        anilist::search_anilist_anime,
+        anilist::link_anime_anilist,
+        anilist::unlink_anime_anilist,
+        anilist::get_anilist_cover_image,
     ]);
 
     builder

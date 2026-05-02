@@ -44,6 +44,7 @@ impl AppDatabase {
     fn migrate(&self) -> Result<(), String> {
         self.with_conn(|conn| {
             conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+            apply_schema_updates(conn)?;
             seed_defaults(conn)?;
             Ok(())
         })
@@ -93,6 +94,46 @@ fn seed_defaults(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn apply_schema_updates(conn: &Connection) -> Result<(), String> {
+    ensure_column(conn, "anime", "anilist_id", "INTEGER")?;
+    ensure_column(conn, "anime", "anilist_title", "TEXT")?;
+    ensure_column(conn, "anime", "anilist_site_url", "TEXT")?;
+    ensure_column(conn, "anime", "anilist_cover_path", "TEXT")?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_anime_anilist_id
+         ON anime(anilist_id)
+         WHERE anilist_id IS NOT NULL",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|e| e.to_string())?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    if columns.iter().any(|existing| existing == column) {
+        return Ok(());
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY
@@ -131,6 +172,10 @@ CREATE TABLE IF NOT EXISTS anime (
   title TEXT NOT NULL,
   title_key TEXT NOT NULL UNIQUE,
   category_id INTEGER NOT NULL,
+  anilist_id INTEGER UNIQUE,
+  anilist_title TEXT,
+  anilist_site_url TEXT,
+  anilist_cover_path TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_watched_at TEXT,

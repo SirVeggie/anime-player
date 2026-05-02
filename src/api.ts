@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnilistAuthState,
+  AnilistSearchResult,
   Category,
   Episode,
   LibraryState,
@@ -91,4 +93,40 @@ export function saveEpisodeProgress(
     durationSeconds,
     watched,
   });
+}
+
+export function getAnilistAuthState(): Promise<AnilistAuthState> {
+  return invoke("get_anilist_auth_state");
+}
+
+export function setAnilistClientId(clientId: string): Promise<AnilistAuthState> {
+  return invoke("set_anilist_client_id", { clientId });
+}
+
+export function getAnilistLoginUrl(): Promise<string> {
+  return invoke("get_anilist_login_url");
+}
+
+export function completeAnilistLogin(callbackUrl: string): Promise<AnilistAuthState> {
+  return invoke("complete_anilist_login", { callbackUrl });
+}
+
+export function logoutAnilist(): Promise<AnilistAuthState> {
+  return invoke("logout_anilist");
+}
+
+export function searchAnilistAnime(query: string): Promise<AnilistSearchResult[]> {
+  return invoke("search_anilist_anime", { query });
+}
+
+export function linkAnimeAnilist(animeId: number, anilistId: number): Promise<void> {
+  return invoke("link_anime_anilist", { animeId, anilistId });
+}
+
+export function unlinkAnimeAnilist(animeId: number): Promise<void> {
+  return invoke("unlink_anime_anilist", { animeId });
+}
+
+export function getAnilistCoverImage(animeId: number): Promise<string | null> {
+  return invoke("get_anilist_cover_image", { animeId });
 }
