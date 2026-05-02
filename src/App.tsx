@@ -26,7 +26,14 @@ import type {
   RegexRuleInput,
   RootFolder,
 } from "./types";
-import { errorMessage, formatEpisodeNumber, formatSize, formatTime, progressPercent } from "./utils";
+import {
+  errorMessage,
+  formatEpisodeNumber,
+  formatSize,
+  formatTime,
+  isTextInputTarget,
+  progressPercent,
+} from "./utils";
 import "./App.css";
 
 type View = "categories" | "anime" | "episodes" | "settings" | "player";
@@ -57,6 +64,7 @@ function App() {
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [videoOpening, setVideoOpening] = useState(false);
+  const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     const id = Date.now() + Math.random();
@@ -84,6 +92,31 @@ function App() {
       }
     })();
   }, [reloadLibrary]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.code !== "F11") return;
+      if (isTextInputTarget(e.target)) return;
+      e.preventDefault();
+      void (async () => {
+        try {
+          const next = !(await appWindow.isFullscreen());
+          await appWindow.setFullscreen(next);
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
+  useEffect(() => {
+    if (!(view === "player" && selectedEpisode)) {
+      setPlayerControlsChromeVisible(true);
+    }
+  }, [view, selectedEpisode]);
 
   const selectedCategory = useMemo(() => {
     if (!library || selectedCategoryId === null) return null;
@@ -286,7 +319,7 @@ function App() {
   if (loading) {
     return (
       <main className="app app--loading">
-        <WindowTitleBar playerOpen={false} />
+        <WindowTitleBar playerOpen={false} playerControlsChromeVisible />
         <div className="empty">
           <h2>Loading library...</h2>
         </div>
@@ -297,7 +330,7 @@ function App() {
   if (!library) {
     return (
       <main className="app app--loading">
-        <WindowTitleBar playerOpen={false} />
+        <WindowTitleBar playerOpen={false} playerControlsChromeVisible />
         <div className="empty">
           <h2>Library failed to load</h2>
           {fatalError ? <p className="muted">{fatalError}</p> : null}
@@ -316,7 +349,10 @@ function App() {
         playerLoadedInBackground ? " app--player-background" : ""
       }${videoOpening ? " app--video-opening" : ""}`}
     >
-      <WindowTitleBar playerOpen={Boolean(showPlayer)} />
+      <WindowTitleBar
+        playerOpen={Boolean(showPlayer)}
+        playerControlsChromeVisible={playerControlsChromeVisible}
+      />
       <aside className="sidebar">
         <nav className="nav-list" aria-label="Primary navigation">
           <button
@@ -368,6 +404,7 @@ function App() {
           }}
           onProgressSaved={handleProgressSaved}
           onError={(message) => showToast("error", message)}
+          onControlsVisibilityChange={setPlayerControlsChromeVisible}
         />
       ) : null}
 
@@ -433,8 +470,8 @@ function App() {
   );
 }
 
-function WindowTitleBar(props: { playerOpen: boolean }) {
-  const { playerOpen } = props;
+function WindowTitleBar(props: { playerOpen: boolean; playerControlsChromeVisible: boolean }) {
+  const { playerOpen, playerControlsChromeVisible } = props;
   const [maximized, setMaximized] = useState(false);
 
   const refreshMaximized = useCallback(async () => {
@@ -473,7 +510,9 @@ function WindowTitleBar(props: { playerOpen: boolean }) {
 
   return (
     <header
-      className={`window-titlebar${playerOpen ? " window-titlebar--player" : ""}`}
+      className={`window-titlebar${playerOpen ? " window-titlebar--player" : ""}${
+        playerOpen && playerControlsChromeVisible ? " window-titlebar--player-visible" : ""
+      }`}
       onMouseDown={startDragOrMaximize}
     >
       <div className="window-titlebar-title">Anime Player</div>

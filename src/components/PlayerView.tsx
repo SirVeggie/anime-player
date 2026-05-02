@@ -11,20 +11,13 @@ import {
   selectMpvSubtitleTrack,
 } from "../api";
 import type { Episode, MpvTrack, MpvVideoGeometry } from "../types";
-import { errorMessage, formatTime } from "../utils";
+import { errorMessage, formatTime, isTextInputTarget } from "../utils";
 
 const PLAYER_SIDEBAR_PX = 0;
 const appWindow = getCurrentWindow();
 
 function sidebarPxForVisibility(visible: boolean) {
   return visible ? PLAYER_SIDEBAR_PX : window.innerWidth;
-}
-
-function isTextInputTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  return target.isContentEditable;
 }
 
 function SeekBar(props: {
@@ -192,6 +185,7 @@ export function PlayerView(props: {
   onClose: () => void;
   onProgressSaved: (episode: Episode) => void;
   onError: (message: string) => void;
+  onControlsVisibilityChange?: (visible: boolean) => void;
 }) {
   const {
     episode,
@@ -204,6 +198,7 @@ export function PlayerView(props: {
     onClose,
     onProgressSaved,
     onError,
+    onControlsVisibilityChange,
   } = props;
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(episode.position_seconds || 0);
@@ -275,6 +270,10 @@ export function PlayerView(props: {
       scheduleControlsHide();
     }
   }, [clearControlsHideTimer, controlsPinned, scheduleControlsHide]);
+
+  useEffect(() => {
+    onControlsVisibilityChange?.(controlsVisible);
+  }, [controlsVisible, onControlsVisibilityChange]);
 
   const persistProgress = useCallback(
     async (forceWatched = false) => {
@@ -763,7 +762,7 @@ export function PlayerView(props: {
                   type="button"
                   className="icon-button icon-button--player icon-button--lg"
                   onClick={() => void toggleFullscreen()}
-                  title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
+                  title={fullscreen ? "Exit fullscreen (F, F11)" : "Fullscreen (F, F11)"}
                 >
                   {fullscreen ? (
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>

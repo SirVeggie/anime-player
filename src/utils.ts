@@ -37,3 +37,11 @@ export function progressPercent(position: number, duration: number): number {
 export function errorMessage(error: unknown): string {
   return typeof error === "string" ? error : String(error);
 }
+
+/** True when the event target is typing in a field that should keep window shortcuts from firing. */
+export function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return target.isContentEditable;
+}

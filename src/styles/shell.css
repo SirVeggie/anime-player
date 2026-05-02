@@ -46,17 +46,25 @@
     background-color 180ms ease;
 }
 
+/* In the video player, chrome tracks PlayerView control visibility (see App.tsx). */
 .window-titlebar--player {
   z-index: 9;
   opacity: 0;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.62), transparent);
+  pointer-events: none;
+  background: transparent;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
 
-.window-titlebar--player:hover,
-.window-titlebar--player:focus-within {
+.window-titlebar--player.window-titlebar--player-visible {
+  z-index: 130;
   opacity: 1;
+  pointer-events: auto;
+}
+
+.window-titlebar--player .window-titlebar-title {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .window-titlebar-title {

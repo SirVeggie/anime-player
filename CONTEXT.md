@@ -46,9 +46,14 @@ Node 22, 7-Zip on PATH, and the local generated
   above and dismiss automatically.
 - The app window is frameless (`decorations: false`) and draws its own
   React title bar in `src/App.tsx`. The title bar owns dragging,
-  double-click maximize, and minimize / maximize / close controls; it
-  fades out over the player view and reappears on hover/focus. Those
-  actions require explicit `core:window:allow-*` entries in
+  double-click maximize, and minimize / maximize / close controls. On
+  library/settings views it stays visible; **in the video player** it
+  shows and hides with the player chrome (see `onControlsVisibilityChange`
+  in `PlayerView`), uses no extra top gradient (the player UI already
+  shades the top/bottom), and the **“Anime Player”** label stays hidden
+  so only the system buttons appear. **F11** (globally, unless typing in a
+  field) toggles Tauri window fullscreen like a browser. Those actions
+  require explicit `core:window:allow-*` entries in
   `src-tauri/capabilities/default.json` (Tauri v2 ACL).
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
@@ -89,7 +94,8 @@ Node 22, 7-Zip on PATH, and the local generated
   and are revealed only by mouse movement or active menu/seek
   interaction, not by hotkeys.
 - The video pane uses Tauri `startDragging` (single left-click) and
-  `setFullscreen` (double left-click or **F**); right-click toggles
+  `setFullscreen` (double left-click canvas, **F** on the player control,
+  or **F11** app-wide); right-click toggles
   pause; Space and ArrowLeft/ArrowRight seek ±5s; **Q** or the back
   control returns to the episode list (without unloading mpv). At EOF the
   frontend saves progress, loads the next episode if one exists, or stops
