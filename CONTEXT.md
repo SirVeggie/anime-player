@@ -134,10 +134,9 @@ view components. Per-screen UI lives in `src/components/`:
   control returns to the episode list (without unloading mpv). On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the
-  next episode in list order if that one is already watched, or the
-  first episode when the anime has no playback history yet. Returns
-  null (Q no-op) only when the watched candidate is the last episode
-  with no successor.
+  next unwatched episode in list order if that one is already watched, or the
+  first unwatched episode when the anime has no playback history yet. Returns
+  null (Q no-op) only when no unwatched candidate remains.
   When the chosen target is the same file already loaded in the hidden
   player, App skips the open-fade and just flips `view` to `"player"`
   so PlayerView's `visible` effect handles the unpause.   At EOF the
