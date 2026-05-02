@@ -654,6 +654,18 @@ export function PlayerView(props: {
         onTogglePause();
         return;
       }
+      if (e.ctrlKey && e.code === "ArrowLeft") {
+        if (!visible) return;
+        e.preventDefault();
+        if (canPrev) loadSibling(-1);
+        return;
+      }
+      if (e.ctrlKey && e.code === "ArrowRight") {
+        if (!visible) return;
+        e.preventDefault();
+        if (canNext) loadSibling(1);
+        return;
+      }
       if (e.code === "ArrowLeft") {
         e.preventDefault();
         void invoke("mpv_seek_relative", { delta: -5 }).catch((err) =>
@@ -717,7 +729,7 @@ export function PlayerView(props: {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [hidePlayer, onError, onTogglePause, toggleFullscreen, visible]);
+  }, [canNext, canPrev, hidePlayer, loadSibling, onError, onTogglePause, toggleFullscreen, visible]);
 
   const safeDuration = duration > 0 ? duration : 0;
 
