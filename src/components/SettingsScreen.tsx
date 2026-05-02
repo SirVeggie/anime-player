@@ -248,7 +248,7 @@ function RuleEditor(props: {
     >
       <div className="rule-editor-heading">
         <strong>{title}</strong>
-        <label>
+        <label className="custom-checkbox">
           <input
             type="checkbox"
             checked={draft.enabled}
@@ -260,7 +260,8 @@ function RuleEditor(props: {
               setDraft((current) => ({ ...current, enabled }));
             }}
           />
-          Enabled
+          <span className="custom-checkbox__box" aria-hidden />
+          <span className="custom-checkbox__text">Enabled</span>
         </label>
       </div>
       <div className="form-grid">
@@ -277,14 +278,43 @@ function RuleEditor(props: {
         </label>
         <label>
           <span>Priority</span>
-          <input
-            type="number"
-            value={draft.priority}
-            onChange={(e) => {
-              const priority = Number(e.currentTarget.value) || 0;
-              setDraft((current) => ({ ...current, priority }));
-            }}
-          />
+          <div className="score-stepper">
+            <input
+              type="number"
+              value={draft.priority}
+              disabled={busy}
+              onChange={(e) => {
+                const priority = Number(e.currentTarget.value) || 0;
+                setDraft((current) => ({ ...current, priority }));
+              }}
+            />
+            <div className="score-stepper-buttons">
+              <button
+                type="button"
+                className="score-stepper-button score-stepper-button--up"
+                aria-label="Increase priority"
+                disabled={busy}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    priority: current.priority + 1,
+                  }))
+                }
+              />
+              <button
+                type="button"
+                className="score-stepper-button score-stepper-button--down"
+                aria-label="Decrease priority"
+                disabled={busy}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    priority: current.priority - 1,
+                  }))
+                }
+              />
+            </div>
+          </div>
         </label>
       </div>
       <label className="stacked-field">
