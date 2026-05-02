@@ -18,6 +18,17 @@ function isVisibleItem(item: HTMLElement) {
   return item.offsetParent !== null && !item.hasAttribute("disabled");
 }
 
+function getScrollContainer(item: HTMLElement) {
+  return item.closest<HTMLElement>(".content");
+}
+
+function isInTopRow(items: HTMLElement[], item: HTMLElement) {
+  const firstItemTop = items[0]?.getBoundingClientRect().top;
+  if (firstItemTop === undefined) return false;
+  const itemTop = item.getBoundingClientRect().top;
+  return Math.abs(itemTop - firstItemTop) <= 4;
+}
+
 function findVerticalTargetIndex(items: HTMLElement[], currentIndex: number, direction: "up" | "down") {
   const currentRect = items[currentIndex].getBoundingClientRect();
   const currentCenter = getItemCenter(currentRect);
@@ -92,7 +103,11 @@ export function useRovingListNavigation(itemCount: number, options: { enabled?: 
 
       setActiveIndex(nextIndex);
       nextItem.focus({ preventScroll: true });
-      nextItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+      if (isInTopRow(items, nextItem)) {
+        getScrollContainer(nextItem)?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      } else {
+        nextItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
     };
 
     window.addEventListener("keydown", onKeyDown, true);
