@@ -4,11 +4,11 @@
   --app-bg: #0a0c12;
   /* The shell paints --app-bg; .content paints --content-bg over it so the
      rounded top-left of .content reads as a corner cut into the shell. */
-  --content-bg: #14161d;
+  --content-bg: #0a0c12;
   --content-glow: radial-gradient(
-    1100px 400px at 100% -10%,
+    1100px 1200px at -10% 110%,
     rgba(88, 166, 255, 0.09),
-    transparent 60%
+    transparent 100%
   );
   /* Flat surfaces â€” no 1px borders, just subtle elevation via fill. */
   --surface-1: rgba(255, 255, 255, 0.035);

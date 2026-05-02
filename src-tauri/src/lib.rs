@@ -43,13 +43,13 @@ impl Default for AppState {
 /// Re-compute the `video-margin-ratio-left` for the current sidebar
 /// width. The Tauri main HWND covers the whole client area; libmpv
 /// renders into the same canvas. To keep the video confined to the
-/// right pane (the sidebar is ~360px on the left) we tell mpv to leave
-/// that fraction of its canvas empty on the left. The opaque sidebar
-/// then visually covers the empty strip.
+/// right pane (or pushed fully off-screen while hidden) we tell mpv to
+/// leave that fraction of its canvas empty on the left. The opaque
+/// sidebar then visually covers the empty strip.
 #[cfg(windows)]
 fn apply_layout_to_mpv(mpv: &MpvHandle, window_width: f64, sidebar_px: f64) -> Result<(), String> {
     let ratio = if window_width > 0.0 {
-        (sidebar_px / window_width).clamp(0.0, 0.95)
+        (sidebar_px / window_width).clamp(0.0, 1.0)
     } else {
         0.0
     };
