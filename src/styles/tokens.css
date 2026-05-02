@@ -10,6 +10,8 @@
     rgba(88, 166, 255, 0.09),
     transparent 100%
   );
+  --scrollbar-color: rgba(88, 166, 255, 0.22);
+  --scrollbar-color-hover: rgba(88, 166, 255, 0.32);
   /* Flat surfaces â€” no 1px borders, just subtle elevation via fill. */
   --surface-1: rgba(255, 255, 255, 0.035);
   --surface-2: rgba(255, 255, 255, 0.06);
