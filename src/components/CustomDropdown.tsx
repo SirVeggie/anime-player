@@ -10,7 +10,14 @@ export function CustomDropdown(props: {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className={`custom-select${open ? " custom-select--open" : ""}`}>
+    <div
+      className={`custom-select${open ? " custom-select--open" : ""}`}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+    >
       <button type="button" className="custom-select-trigger" onClick={() => setOpen((current) => !current)}>
         <span>{label}</span>
         <span className="chevron" aria-hidden>

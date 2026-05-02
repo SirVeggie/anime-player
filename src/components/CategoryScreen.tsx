@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { AnimeSummary, LibraryState } from "../types";
+import { useRovingListNavigation } from "../useRovingListNavigation";
 import { ViewHeader } from "./ViewHeader";
 
 export function CategoryScreen(props: {
@@ -9,6 +10,7 @@ export function CategoryScreen(props: {
   onOpenSettings: () => void;
 }) {
   const { library, onOpenCategory, onOpenAnime, onOpenSettings } = props;
+  const getRovingItemProps = useRovingListNavigation(library.categories.length + library.recent_anime.length);
   const animeByCategory = useMemo(() => {
     const counts = new Map<number, number>();
     for (const anime of library.anime) {
@@ -35,12 +37,13 @@ export function CategoryScreen(props: {
       ) : null}
 
       <section className="category-grid">
-        {library.categories.map((category) => (
+        {library.categories.map((category, index) => (
           <button
             type="button"
             className="category-card"
             key={category.id}
             onClick={() => onOpenCategory(category.id)}
+            {...getRovingItemProps(index)}
           >
             <span className="category-name">{category.name}</span>
             <span className="category-count">{animeByCategory.get(category.id) ?? 0} anime</span>
@@ -54,8 +57,14 @@ export function CategoryScreen(props: {
             <h2>Continue Watching</h2>
           </div>
           <div className="continue-grid">
-            {library.recent_anime.map((anime) => (
-              <button type="button" className="continue-card" key={anime.id} onClick={() => onOpenAnime(anime)}>
+            {library.recent_anime.map((anime, index) => (
+              <button
+                type="button"
+                className="continue-card"
+                key={anime.id}
+                onClick={() => onOpenAnime(anime)}
+                {...getRovingItemProps(library.categories.length + index)}
+              >
                 <strong>{anime.title}</strong>
                 <span>{anime.episode_count} episodes</span>
               </button>

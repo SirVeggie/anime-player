@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAnilistCoverImage, getFileThumbnail } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
+import { useRovingListNavigation } from "../useRovingListNavigation";
 import { formatEpisodeNumber, formatSize, formatTime, progressPercent } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
@@ -75,6 +76,7 @@ export function EpisodeScreen(props: {
   const scoreSaveRequestRef = useRef(0);
   const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
+  const getRovingItemProps = useRovingListNavigation(episodes.length, { enabled: !linkSearchOpen });
 
   useEffect(() => {
     setLinkQuery(anime.title);
@@ -434,7 +436,7 @@ export function EpisodeScreen(props: {
       ) : null}
 
       <section className="episode-list">
-        {episodes.map((episode) => {
+        {episodes.map((episode, index) => {
           const percent = episode.watched ? 100 : progressPercent(episode.position_seconds, episode.duration_seconds);
           const thumbnail = episodeThumbnails[episode.id];
           return (
@@ -444,6 +446,7 @@ export function EpisodeScreen(props: {
               className={`episode-row${episode.watched ? " episode-row--watched" : ""}${episode.id === quickPlayEpisodeId ? " episode-row--last" : ""}`}
               onClick={() => onPlay(episode)}
               title={episode.path}
+              {...getRovingItemProps(index)}
             >
               <div className={`episode-thumb${thumbnail ? " episode-thumb--image" : ""}`}>
                 {thumbnail ? <img src={thumbnail} alt="" loading="lazy" /> : episode.file_type.toUpperCase()}

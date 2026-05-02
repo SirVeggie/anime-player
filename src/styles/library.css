@@ -20,6 +20,7 @@
   border-radius: var(--radius-lg);
   transition:
     background 0.15s ease,
+    box-shadow 0.15s ease,
     transform 0.15s ease;
 }
 
@@ -214,6 +215,10 @@
   display: block;
 }
 
+.anime-card:focus-visible .anime-tooltip {
+  display: block;
+}
+
 .episode-list {
   display: flex;
   flex-direction: column;
@@ -230,6 +235,10 @@
 
 .episode-row--watched {
   opacity: 0.58;
+}
+
+.episode-row--watched:focus-visible {
+  opacity: 0.82;
 }
 
 .episode-row--last {
@@ -311,6 +320,17 @@
   background: var(--surface-grad-hover);
 }
 
+.category-card:focus-visible,
+.continue-card:focus-visible,
+.anime-card:focus-visible,
+.episode-row:focus-visible {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px rgba(207, 226, 255, 0.66),
+    0 0 0 3px rgba(88, 166, 255, 0.2),
+    0 16px 34px rgba(0, 0, 0, 0.36);
+}
+
 .anime-card:hover {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
 }
@@ -346,8 +366,9 @@
 }
 
 .anime-detail-main:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(207, 226, 255, 0.54),
+    0 0 0 3px rgba(88, 166, 255, 0.16);
 }
 
 .anime-detail-panel h2 {

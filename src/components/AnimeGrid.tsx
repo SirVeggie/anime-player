@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getAnilistCoverImage } from "../api";
 import type { AnimeSummary, Category } from "../types";
+import { useRovingListNavigation } from "../useRovingListNavigation";
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
@@ -128,6 +129,7 @@ export function AnimeCardGrid(props: {
 }) {
   const { anime, onOpenAnime } = props;
   const [covers, setCovers] = useState<Record<number, string>>({});
+  const getRovingItemProps = useRovingListNavigation(anime.length);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,10 +156,16 @@ export function AnimeCardGrid(props: {
 
   return (
     <div className="anime-grid">
-      {anime.map((item) => {
+      {anime.map((item, index) => {
         const cover = covers[item.id];
         return (
-          <button type="button" className="anime-card" key={item.id} onClick={() => onOpenAnime(item)}>
+          <button
+            type="button"
+            className="anime-card"
+            key={item.id}
+            onClick={() => onOpenAnime(item)}
+            {...getRovingItemProps(index)}
+          >
             <div className={`poster-placeholder${cover ? " poster-placeholder--image" : ""}`}>
               {cover ? <img src={cover} alt="" loading="lazy" /> : item.title.slice(0, 2).toUpperCase()}
             </div>

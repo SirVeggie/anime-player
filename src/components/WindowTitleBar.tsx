@@ -50,12 +50,18 @@ export function WindowTitleBar(props: { playerOpen: boolean; playerControlsChrom
     >
       <div className="window-titlebar-title">Anime Player</div>
       <div className="window-controls" onMouseDown={(e) => e.stopPropagation()}>
-        <button type="button" className="window-control" onClick={() => void appWindow.minimize()} aria-label="Minimize">
+        <button type="button" className="window-control" onClick={() => void appWindow.minimize()} aria-label="Minimize" tabIndex={-1}>
           <svg viewBox="0 0 12 12" aria-hidden>
             <path d="M2 6.5h8v1H2z" />
           </svg>
         </button>
-        <button type="button" className="window-control" onClick={() => void toggleMaximized()} aria-label={maximized ? "Restore" : "Maximize"}>
+        <button
+          type="button"
+          className="window-control"
+          onClick={() => void toggleMaximized()}
+          aria-label={maximized ? "Restore" : "Maximize"}
+          tabIndex={-1}
+        >
           {maximized ? (
             <svg viewBox="0 0 12 12" aria-hidden>
               <path d="M3 2h7v7H8V8h1V3H4v1H3V2zm-1 3h6v5H2V5zm1 1v3h4V6H3z" />
@@ -66,7 +72,13 @@ export function WindowTitleBar(props: { playerOpen: boolean; playerControlsChrom
             </svg>
           )}
         </button>
-        <button type="button" className="window-control window-control--close" onClick={() => void appWindow.close()} aria-label="Close">
+        <button
+          type="button"
+          className="window-control window-control--close"
+          onClick={() => void appWindow.close()}
+          aria-label="Close"
+          tabIndex={-1}
+        >
           <svg viewBox="0 0 12 12" aria-hidden>
             <path d="m3.1 2.4 2.9 2.9 2.9-2.9.7.7L6.7 6l2.9 2.9-.7.7L6 6.7 3.1 9.6l-.7-.7L5.3 6 2.4 3.1l.7-.7z" />
           </svg>
