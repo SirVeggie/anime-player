@@ -524,11 +524,6 @@ function CategoryScreen(props: {
       <ViewHeader
         title="Library"
         subtitle="Browse your local anime by category, or continue where you left off."
-        action={
-          <button type="button" onClick={onOpenSettings}>
-            Settings
-          </button>
-        }
       />
 
       {library.root_folders.length === 0 ? (
@@ -559,7 +554,6 @@ function CategoryScreen(props: {
         <>
           <div className="section-heading">
             <h2>Continue Watching</h2>
-            <span className="muted">Last {library.recent_anime.length}</span>
           </div>
           <div className="continue-grid">
             {library.recent_anime.map((anime) => (

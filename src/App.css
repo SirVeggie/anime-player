@@ -1,8 +1,15 @@
 /* Theme tokens stay centralized while the UI is still moving quickly. */
 :root,
 :root[data-theme="dark"] {
-  --app-bg: #0f0f0f;
-  --ui-bg: rgba(15, 15, 15, 0.96);
+  --app-bg: #0a0c12;
+  /* The shell paints --app-bg; .content paints --content-bg over it so the
+     rounded top-left of .content reads as a corner cut into the shell. */
+  --content-bg: #14161d;
+  --content-glow: radial-gradient(
+    1100px 400px at 100% -10%,
+    rgba(88, 166, 255, 0.09),
+    transparent 60%
+  );
   /* Flat surfaces — no 1px borders, just subtle elevation via fill. */
   --surface-1: rgba(255, 255, 255, 0.035);
   --surface-2: rgba(255, 255, 255, 0.06);
@@ -26,7 +33,6 @@
   --seekbar-height: 16px;
   --player-controls-pad-x: 12px;
   --player-controls-pad-bottom: 8px;
-  --shell-backdrop-blur: 14px;
   --titlebar-height: 34px;
   --sidebar-width: 56px;
 }
@@ -53,11 +59,16 @@ body,
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background: transparent;
+  /* The shell base. Title bar, sidebar, and content sit on top of this. */
+  background: var(--app-bg);
 }
 
+/* While the player view is showing, the shell must compose-through to libmpv's
+   DComp swap-chain, so .app drops its base color. Sidebar/content are also
+   display:none in this state, so nothing else paints over the player. */
 .app--player-open {
   grid-template-columns: 1fr;
+  background: transparent;
 }
 
 .app--player-open .sidebar,
@@ -65,17 +76,8 @@ body,
   display: none;
 }
 
-.app--player-background .sidebar,
-.app--player-background .content,
-.app--player-background .window-titlebar {
-  background: var(--app-bg);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
 .app--loading {
   display: flex;
-  background: var(--ui-bg);
 }
 
 .window-titlebar {
@@ -89,9 +91,10 @@ body,
   align-items: center;
   height: var(--titlebar-height);
   color: rgba(255, 255, 255, 0.78);
-  background: rgba(15, 15, 15, 0.92);
-  -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
-  backdrop-filter: blur(var(--shell-backdrop-blur));
+  /* Transparent — sits on top of .app's solid bg, no separate fill, so the
+     content's rounded top-left corner reads as a clean curve cut from the
+     shared shell color. */
+  background: transparent;
   user-select: none;
   transition:
     opacity 180ms ease,
@@ -155,13 +158,6 @@ body,
   fill: currentColor;
 }
 
-.sidebar,
-.content {
-  background: var(--ui-bg);
-  -webkit-backdrop-filter: blur(var(--shell-backdrop-blur));
-  backdrop-filter: blur(var(--shell-backdrop-blur));
-}
-
 .player--playback-pending {
   background: var(--app-bg);
   -webkit-backdrop-filter: none;
@@ -173,7 +169,7 @@ body,
   flex-direction: column;
   padding-top: var(--titlebar-height);
   min-width: 0;
-  box-shadow: 12px 0 28px rgba(0, 0, 0, 0.35);
+  background: transparent;
 }
 
 h1,
@@ -249,13 +245,25 @@ p {
 }
 
 .nav-list button.nav-item.active {
-  background: transparent;
+  background: rgba(88, 166, 255, 0.14);
   color: var(--progress-color);
 }
 
 .nav-list button.nav-item.active:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.1);
-  color: var(--progress-color);
+  background: rgba(88, 166, 255, 0.2);
+}
+
+/* Accent strip on the left edge of the sidebar marks the active section. */
+.nav-list button.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 3px;
+  height: 20px;
+  border-radius: 0 2px 2px 0;
+  background: var(--progress-color);
+  transform: translateY(-50%);
 }
 
 .content {
@@ -264,8 +272,16 @@ p {
   height: calc(100vh - var(--titlebar-height));
   margin-top: var(--titlebar-height);
   overflow: auto;
-  border-top-left-radius: 10px;
-  box-shadow: -18px -18px 42px rgba(0, 0, 0, 0.18);
+  border-top-left-radius: 12px;
+  /* Distinct surface with a soft accent glow in the top-right corner. The glow
+     is a fixed background so it stays anchored as the content scrolls. */
+  background:
+    var(--content-glow),
+    var(--content-bg);
+  background-attachment: local, local;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.025),
+    -16px 0 32px rgba(0, 0, 0, 0.25);
 }
 
 .app--video-opening .content {
@@ -392,13 +408,45 @@ p {
 }
 
 .category-card {
+  position: relative;
+  overflow: hidden;
   min-height: 130px;
   padding: 18px;
-  background: linear-gradient(160deg, rgba(88, 166, 255, 0.16), rgba(255, 255, 255, 0.025));
+  /* Fallback if no nth-child rule applies (>4 categories cycle). */
+  background: linear-gradient(160deg, rgba(88, 166, 255, 0.22), rgba(255, 255, 255, 0.025));
+}
+
+/* Each card picks up a different accent so the row reads as colorful even
+   though the category names are user-defined. Cycle through 4 hues. */
+.category-card:nth-child(4n + 1) {
+  background: linear-gradient(155deg, rgba(88, 166, 255, 0.28), rgba(88, 166, 255, 0.04) 70%);
+}
+.category-card:nth-child(4n + 2) {
+  background: linear-gradient(155deg, rgba(109, 213, 140, 0.26), rgba(109, 213, 140, 0.04) 70%);
+}
+.category-card:nth-child(4n + 3) {
+  background: linear-gradient(155deg, rgba(186, 130, 255, 0.28), rgba(186, 130, 255, 0.04) 70%);
+}
+.category-card:nth-child(4n + 4) {
+  background: linear-gradient(155deg, rgba(255, 168, 88, 0.26), rgba(255, 168, 88, 0.04) 70%);
 }
 
 .category-card:hover {
-  background: linear-gradient(160deg, rgba(88, 166, 255, 0.26), rgba(255, 255, 255, 0.05));
+  filter: brightness(1.18) saturate(1.08);
+}
+
+/* Soft corner highlight to give cards depth without a 1px outline. */
+.category-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    140% 80% at 0% 0%,
+    rgba(255, 255, 255, 0.08),
+    transparent 55%
+  );
+  pointer-events: none;
 }
 
 .category-name {
@@ -417,16 +465,42 @@ p {
 }
 
 .continue-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 86px;
-  padding: 14px;
+  padding: 14px 14px 14px 18px;
+  overflow: hidden;
 }
 
 .continue-card span {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* Accent stripe on the leading edge — a small splash of color that helps the
+   card stand out against the content surface without a hairline border. */
+.continue-card::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--progress-color);
+  opacity: 0.85;
+}
+
+.continue-card:nth-child(4n + 2)::before {
+  background: #6dd58c;
+}
+.continue-card:nth-child(4n + 3)::before {
+  background: #ba82ff;
+}
+.continue-card:nth-child(4n + 4)::before {
+  background: #ffa858;
 }
 
 .anime-grid {
