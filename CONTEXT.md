@@ -18,7 +18,16 @@ Node 22, 7-Zip on PATH, and the local generated
 
 ## Architecture
 
-### Frontend — `src/App.tsx`, `src/App.css` (barrel `@import` of `src/styles/*.css`), `src/api.ts`, `src/types.ts`
+### Frontend — `src/App.tsx`, `src/App.css` (barrel `@import` of `src/styles/*.css`), `src/api.ts`, `src/types.ts`, `src/components/*`
+
+The frontend is split so `App.tsx` only owns top-level state (library data,
+view selection, async handlers, toasts, F11 / Q hotkeys) and composes the
+view components. Per-screen UI lives in `src/components/`:
+`WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
+`EpisodeScreen.tsx`, `SettingsScreen.tsx` (plus the local `RuleEditor`),
+`PlayerView.tsx`, `ViewHeader.tsx`, `CustomDropdown.tsx`, `ToastStack.tsx`,
+`icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
+`EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
 
 - Visual design follows the local reference project
   (`reference/working-tauri-mpv-example-project` → Soia): `data-theme="dark"`,
@@ -278,6 +287,9 @@ push, no rebase without an explicit request) lives in
 - `src/api.ts`, `src/types.ts`, `src/utils.ts` — frontend command
   bindings, shared DTOs, and formatting helpers.
 - `src/components/PlayerView.tsx` — mpv-backed player view and controls.
+- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ToastStack,icons}.tsx`
+  — split-out view components composed by `App.tsx`.
+- `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.
