@@ -82,6 +82,14 @@
   justify-content: space-between;
 }
 
+.bulk-edit-settings-actions {
+  justify-content: flex-end;
+}
+
+.bulk-edit-settings-actions > .muted {
+  margin-right: auto;
+}
+
 .stacked-field .custom-select {
   min-width: 0;
 }

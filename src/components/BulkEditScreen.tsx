@@ -23,7 +23,7 @@ export function BulkEditScreen(props: {
   const [regexInput, setRegexInput] = useState("");
   const [debouncedRegexInput, setDebouncedRegexInput] = useState("");
   const [targetCategoryId, setTargetCategoryId] = useState<number>(library.categories[0]?.id ?? 0);
-  const [matchingAnimeIds, setMatchingAnimeIds] = useState<Set<number>>(() => new Set(library.anime.map((anime) => anime.id)));
+  const [matchingAnimeIds, setMatchingAnimeIds] = useState<Set<number>>(() => new Set());
   const [matchingPaths, setMatchingPaths] = useState(false);
   const [regexError, setRegexError] = useState<string | null>(null);
   const [pathError, setPathError] = useState<string | null>(null);
@@ -53,7 +53,10 @@ export function BulkEditScreen(props: {
     if (!trimmedRegex) {
       setRegexError(null);
       setMatchingPaths(false);
-      setMatchingAnimeIds(new Set(candidateAnime.map((anime) => anime.id)));
+      // "All categories" with no regex = no scope; require a category filter or a regex to select anime.
+      setMatchingAnimeIds(
+        sourceCategoryId === ALL_CATEGORIES_ID ? new Set() : new Set(candidateAnime.map((anime) => anime.id)),
+      );
       return;
     }
 
@@ -97,7 +100,7 @@ export function BulkEditScreen(props: {
     return () => {
       cancelled = true;
     };
-  }, [candidateAnime, debouncedRegexInput, onListEpisodes]);
+  }, [candidateAnime, debouncedRegexInput, onListEpisodes, sourceCategoryId]);
 
   const matchingAnime = useMemo(
     () => candidateAnime.filter((anime) => matchingAnimeIds.has(anime.id)),
@@ -139,9 +142,12 @@ export function BulkEditScreen(props: {
     );
   };
 
+  const idleAllLibrary = sourceCategoryId === ALL_CATEGORIES_ID && !debouncedRegexInput.trim();
   const subtitle = matchingPaths
     ? "Checking episode paths..."
-    : `${matchingAnime.length} affected title${matchingAnime.length === 1 ? "" : "s"}.`;
+    : idleAllLibrary
+      ? "Pick a category or enter a path regex to see which anime are affected."
+      : `${matchingAnime.length} affected title${matchingAnime.length === 1 ? "" : "s"}.`;
 
   return (
     <>
@@ -189,10 +195,12 @@ export function BulkEditScreen(props: {
         {regexError ? <p className="error">Invalid regex: {regexError}</p> : null}
         {pathError ? <p className="error">{pathError}</p> : null}
 
-        <div className="settings-actions">
-          <span className="muted">
-            {animeToMove.length} anime will move to "{targetLabel}"
-          </span>
+        <div className="settings-actions bulk-edit-settings-actions">
+          {animeToMove.length > 0 ? (
+            <span className="muted">
+              {animeToMove.length} anime will move to "{targetLabel}"
+            </span>
+          ) : null}
           <button type="button" onClick={handleApply} disabled={busy || matchingPaths || animeToMove.length === 0}>
             Apply category edit
           </button>
@@ -207,7 +215,11 @@ export function BulkEditScreen(props: {
       ) : matchingAnime.length === 0 ? (
         <div className="empty empty--wide">
           <h2>No affected anime</h2>
-          <p className="muted">Adjust the category filter or regex to preview the titles that will be edited.</p>
+          <p className="muted">
+            {idleAllLibrary
+              ? "Choose a specific category or type a path regex (after a short pause) to preview matches."
+              : "Adjust the category filter or regex to preview the titles that will be edited."}
+          </p>
         </div>
       ) : (
         <AnimeCardGrid anime={matchingAnime} onOpenAnime={onOpenAnime} />
