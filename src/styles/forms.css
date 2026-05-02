@@ -241,11 +241,12 @@ button:disabled {
   min-width: 180px;
 }
 
-.custom-select-trigger {
+.view-actions .custom-select-trigger {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: var(--surface-3);
   gap: 12px;
 }
 
