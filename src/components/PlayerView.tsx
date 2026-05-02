@@ -218,6 +218,7 @@ export function PlayerView(props: {
   const pendingResumeSecondsRef = useRef<number | null>(null);
   const controlsHideTimerRef = useRef<number | null>(null);
   const handlingEofRef = useRef(false);
+  const onErrorRef = useRef(onError);
 
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
   const canPrev = selectedIndex > 0;
@@ -231,6 +232,10 @@ export function PlayerView(props: {
   useEffect(() => {
     playbackRef.current = { episode, position, duration };
   }, [duration, episode, position]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const clearControlsHideTimer = useCallback(() => {
     if (controlsHideTimerRef.current !== null) {
@@ -391,7 +396,7 @@ export function PlayerView(props: {
               setPaused(false);
               setVideoCompositorRevealed(true);
             } catch (e) {
-              if (!cancelled) onError(errorMessage(e));
+              if (!cancelled) onErrorRef.current(errorMessage(e));
             }
           }
           return;
@@ -402,13 +407,13 @@ export function PlayerView(props: {
         await invoke("mpv_load", { path: episode.path });
         loadedPathRef.current = episode.path;
       } catch (e) {
-        if (!cancelled) onError(errorMessage(e));
+        if (!cancelled) onErrorRef.current(errorMessage(e));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [episode.path, onError, visible]);
+  }, [episode.path, visible]);
 
   useEffect(() => {
     if (!mpvReadyRef.current) return;
