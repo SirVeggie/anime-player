@@ -107,6 +107,11 @@
   cursor: none;
 }
 
+/* `.player-canvas` sets `cursor: default`, which wins over the section above the hit-tested element. */
+.player--controls-hidden .player-canvas {
+  cursor: none;
+}
+
 .player--controls-hidden .player-back,
 .player--controls-hidden .now-playing,
 .player--controls-hidden .player-controls {
