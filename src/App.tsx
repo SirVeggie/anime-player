@@ -684,11 +684,9 @@ function EpisodeScreen(props: {
   onMoveAnime: (categoryId: number) => void;
 }) {
   const { anime, episodes, categories, onBack, onPlay, onMoveAnime } = props;
-  const latestEpisodeId = useMemo(() => {
-    return episodes
-      .filter((episode) => episode.last_watched_at)
-      .sort((a, b) => String(b.last_watched_at).localeCompare(String(a.last_watched_at)))[0]?.id;
-  }, [episodes]);
+  // Highlight whichever episode the Q hotkey would launch right now, so the
+  // pill always points at the same target as the keybind.
+  const quickPlayEpisodeId = useMemo(() => pickQuickPlayEpisode(episodes)?.id ?? null, [episodes]);
   const [episodeThumbnails, setEpisodeThumbnails] = useState<Record<number, string>>({});
   const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
@@ -743,7 +741,7 @@ function EpisodeScreen(props: {
             <button
               type="button"
               key={episode.id}
-              className={`episode-row${episode.watched ? " episode-row--watched" : ""}${episode.id === latestEpisodeId ? " episode-row--last" : ""}`}
+              className={`episode-row${episode.watched ? " episode-row--watched" : ""}${episode.id === quickPlayEpisodeId ? " episode-row--last" : ""}`}
               onClick={() => onPlay(episode)}
               title={episode.path}
             >
@@ -753,7 +751,7 @@ function EpisodeScreen(props: {
               <div className="episode-main">
                 <div className="episode-title">
                   <span>{formatEpisodeNumber(episode.episode_number)}</span>
-                  {episode.id === latestEpisodeId ? <span className="pill">Last played</span> : null}
+                  {episode.id === quickPlayEpisodeId ? <span className="pill">Up next</span> : null}
                 </div>
                 <div className="episode-meta">
                   <span>{episode.file_name}</span>
