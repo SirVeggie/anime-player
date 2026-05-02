@@ -50,6 +50,13 @@ view components. Per-screen UI lives in `src/components/`:
   `*_regex_rule` commands, `save_episode_progress`, and the Windows-only
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
   command still exists for compatibility.
+- AniList integration is a first-slice metadata/linking feature. Settings
+  stores an AniList OAuth client ID and opens the implicit OAuth flow with
+  `anime-player://anilist-auth` as the custom URI callback. `App.tsx`
+  listens for Tauri deep-link callbacks, validates/stores the token through
+  Rust, and exposes search/link/unlink/open controls on the anime episode
+  page. Linked anime prefer cached AniList cover art over placeholder
+  initials in the grid and episode header.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.
@@ -149,6 +156,13 @@ view components. Per-screen UI lives in `src/components/`:
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode
   threshold), it stores `position_seconds` at full duration (100%).
+- `anilist.rs` owns AniList GraphQL/OAuth work. It stores the OAuth
+  client ID, access token, and viewer metadata in `settings`, adds link
+  metadata on `anime` rows (`anilist_id`, title, site URL, cached cover
+  path), searches AniList via `https://graphql.anilist.co`, validates
+  login tokens with `Viewer`, and downloads covers under the portable
+  `data/anilist-covers/` directory. Network requests are kept outside the
+  SQLite mutex.
 - `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
   in-process libmpv module. All Win32 and FFI code is gated behind
   `#[cfg(windows)]`.
@@ -203,8 +217,10 @@ view components. Per-screen UI lives in `src/components/`:
 - The main window also has **`decorations: false`** so Windows does not
   draw the native title bar or 1px frame; the frontend supplies the
   custom title bar and window controls.
-- Permissions: `core:default`, `opener:default`, `dialog:default`. The
-  dialog plugin is used for the native folder picker.
+- Permissions: `core:default`, `opener:default`, `dialog:default`, and
+  `deep-link:default`. The dialog plugin is used for the native folder
+  picker; the deep-link and single-instance plugins support the AniList
+  `anime-player://anilist-auth` OAuth callback.
 - Window: `productName = "Anime Player"`, 1280x800 default, min 800x600.
 
 ## Critical design decision: in-process libmpv via FFI
@@ -293,6 +309,8 @@ push, no rebase without an explicit request) lives in
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.
+- `src-tauri/src/anilist.rs` — AniList OAuth callback handling, GraphQL
+  search/link commands, and local cover caching.
 - `scripts/download-mpv-libs.mjs` — setup entry point that downloads
   ignored local libmpv artifacts into `src-tauri/libs/mpv/`.
 - `scripts/update-mpv-libs.mjs` — compatibility updater for the same

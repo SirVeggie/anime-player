@@ -64,11 +64,11 @@ Episode selection page features
 
 This will be added last, once the local functionality is working well
 
-- [ ] Login with anilist
-- [ ] Link each anime with an ID from anilist using SQLite
-- [ ] Fetch anime thumbnail from anilist and save it locally
+- [x] ~~Login with anilist~~
+- [x] ~~Link each anime with an ID from anilist using SQLite~~
+- [x] ~~Fetch anime thumbnail from anilist and save it locally~~
 - [ ] When an episode is finished, update the progress on anilist by parsing the episode number from the filename
     - Note: If the episode is lower than the current tracked episode, then do nothing.
-- [ ] Add on an anime page to open the anilist page, or if it's not linked, start the linking process
-- [ ] Add linking process, where the anime title is used to fetch the best matches from anilist, and the user can pick the correct one
-- [ ] Add button to unlink the anime from anilist if linked
+- [x] ~~Add on an anime page to open the anilist page, or if it's not linked, start the linking process~~
+- [x] ~~Add linking process, where the anime title is used to fetch the best matches from anilist, and the user can pick the correct one~~
+- [x] ~~Add button to unlink the anime from anilist if linked~~
