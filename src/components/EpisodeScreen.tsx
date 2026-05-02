@@ -297,7 +297,7 @@ export function EpisodeScreen(props: {
         subtitle={[
           `${episodes.length} episode${episodes.length === 1 ? "" : "s"}`,
           `${remainingCount} remaining`,
-          ...(detectionRuleName !== undefined && detectionRuleName !== null ? [`Rule: ${detectionRuleName}`] : []),
+          ...(detectionRuleName !== undefined && detectionRuleName !== null ? [detectionRuleName] : []),
         ].join(" · ")}
         onBack={onBack}
         action={
