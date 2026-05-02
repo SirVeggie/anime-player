@@ -6,11 +6,11 @@
   overflow: auto;
   border-top-left-radius: 12px;
   /* Distinct surface with a soft accent glow in the top-right corner. The glow
-     is a fixed background so it stays anchored as the content scrolls. */
+     uses fixed attachment so it stays anchored to the viewport as content scrolls. */
   background:
     var(--content-glow),
     var(--content-bg);
-  background-attachment: local, local;
+  background-attachment: fixed, scroll;
   box-shadow: -16px 0 32px rgba(0, 0, 0, 0.25);
 }
 
