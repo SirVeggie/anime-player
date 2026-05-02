@@ -15,7 +15,7 @@ When building the new interface, try to build it in a way that is relatively eas
 
 Example anime filename: [SubsPlease] Sousou no Frieren S2 - 09 (1080p) [A3A99C65].mkv
 
-- [ ] Use the regex pairs mentioned below to filter out all anime files, then extract the anime titles, and display all the episodes of the anime with an identical name under the same page as a list, with each item looking like this [thumbnail from file | Episode x | filetype]
+- [x] ~~Use the regex pairs mentioned below to filter out all anime files, then extract the anime titles, and display all the episodes of the anime with an identical name under the same page as a list~~
 - [x] ~~Add a category screen, where user can select a category of anime (ongoing, completed, finished)~~
     - [x] ~~The user should be able to add or delete categories~~
     - [x] ~~One of the categories should be the default category for new anime~~
