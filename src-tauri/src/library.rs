@@ -8,6 +8,9 @@ use tauri::State;
 use crate::db::AppDatabase;
 use crate::scanner::{self, DetectionRule};
 
+/// Saved positions below this are stored as 0 (avoid sticky resume after brief opens).
+const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 10.0;
+
 #[derive(Debug, Serialize)]
 pub struct VideoFile {
     path: String,
@@ -364,6 +367,10 @@ pub fn save_episode_progress(
 ) -> Result<Episode, String> {
     db.with_conn(|conn| {
         let watched_flag = if watched { 1 } else { 0 };
+        let mut position_seconds = position_seconds.max(0.0);
+        if position_seconds < MIN_POSITION_SECONDS_TO_PERSIST {
+            position_seconds = 0.0;
+        }
         conn.execute(
             "UPDATE episodes
              SET position_seconds = ?1,
@@ -373,7 +380,7 @@ pub fn save_episode_progress(
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?4",
             params![
-                position_seconds.max(0.0),
+                position_seconds,
                 duration_seconds.max(0.0),
                 watched_flag,
                 episode_id

@@ -134,7 +134,9 @@ Node 22, 7-Zip on PATH, and the local generated
   `create_category`, `delete_category`, `set_default_category`,
   `create_regex_rule`, `update_regex_rule`, `delete_regex_rule`,
   `move_anime_to_category`, `list_episodes`, `save_episode_progress`,
-  and `rescan_library`.
+  and `rescan_library`. `save_episode_progress` stores `position_seconds`
+  as 0 when the reported position is under 10 seconds so brief opens do
+  not leave a resume point.
 - `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
   in-process libmpv module. All Win32 and FFI code is gated behind
   `#[cfg(windows)]`.
