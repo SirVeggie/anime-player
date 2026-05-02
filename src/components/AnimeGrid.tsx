@@ -12,7 +12,7 @@ const GRID_SORT_OPTIONS = [
   { value: 1, label: "Date added" },
   { value: 2, label: "Last watched" },
   { value: 3, label: "Total episodes" },
-  { value: 4, label: "Unwatched episodes" },
+  { value: 4, label: "Remaining episodes" },
 ] as const;
 
 function readStoredGridSort(): number {
@@ -174,7 +174,9 @@ export function AnimeCardGrid(props: {
                 {item.title}
               </div>
               <div className="anime-card-meta">
-                {item.episode_count} eps - {item.unwatched_count} unwatched
+                {item.unwatched_count > 0
+                  ? `${item.episode_count} eps - ${item.unwatched_count} remaining`
+                  : `${item.episode_count} eps`}
               </div>
             </div>
             <div className="anime-tooltip">{item.anilist_title ?? item.title}</div>

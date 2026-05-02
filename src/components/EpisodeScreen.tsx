@@ -74,7 +74,7 @@ export function EpisodeScreen(props: {
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
-  const unwatchedCount = episodes.filter((episode) => !episode.watched).length;
+  const remainingCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
   const getRovingItemProps = useRovingListNavigation(episodes.length, { enabled: !linkSearchOpen });
 
@@ -278,7 +278,7 @@ export function EpisodeScreen(props: {
     <>
       <ViewHeader
         title={anime.title}
-        subtitle={`${episodes.length} episode${episodes.length === 1 ? "" : "s"} - ${unwatchedCount} unwatched`}
+        subtitle={`${episodes.length} episode${episodes.length === 1 ? "" : "s"} - ${remainingCount} remaining`}
         onBack={onBack}
         action={
           <>
