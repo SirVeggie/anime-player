@@ -942,7 +942,13 @@ function RuleEditor(props: {
           <input
             type="checkbox"
             checked={draft.enabled}
-            onChange={(e) => setDraft((current) => ({ ...current, enabled: e.currentTarget.checked }))}
+            onChange={(e) => {
+              // Read the event field synchronously: React's functional updater
+              // can run twice under StrictMode, and by the second pass `e.currentTarget`
+              // has been nulled, throwing inside RuleEditor and unmounting the whole tree.
+              const enabled = e.currentTarget.checked;
+              setDraft((current) => ({ ...current, enabled }));
+            }}
           />
           Enabled
         </label>
@@ -953,7 +959,10 @@ function RuleEditor(props: {
           <input
             type="text"
             value={draft.name}
-            onChange={(e) => setDraft((current) => ({ ...current, name: e.currentTarget.value }))}
+            onChange={(e) => {
+              const name = e.currentTarget.value;
+              setDraft((current) => ({ ...current, name }));
+            }}
           />
         </label>
         <label>
@@ -961,9 +970,10 @@ function RuleEditor(props: {
           <input
             type="number"
             value={draft.priority}
-            onChange={(e) =>
-              setDraft((current) => ({ ...current, priority: Number(e.currentTarget.value) || 0 }))
-            }
+            onChange={(e) => {
+              const priority = Number(e.currentTarget.value) || 0;
+              setDraft((current) => ({ ...current, priority }));
+            }}
           />
         </label>
       </div>
@@ -971,7 +981,10 @@ function RuleEditor(props: {
         <span>Detection regex</span>
         <textarea
           value={draft.detection_regex}
-          onChange={(e) => setDraft((current) => ({ ...current, detection_regex: e.currentTarget.value }))}
+          onChange={(e) => {
+            const detection_regex = e.currentTarget.value;
+            setDraft((current) => ({ ...current, detection_regex }));
+          }}
           rows={2}
         />
       </label>
@@ -979,7 +992,10 @@ function RuleEditor(props: {
         <span>Title regex</span>
         <textarea
           value={draft.title_regex}
-          onChange={(e) => setDraft((current) => ({ ...current, title_regex: e.currentTarget.value }))}
+          onChange={(e) => {
+            const title_regex = e.currentTarget.value;
+            setDraft((current) => ({ ...current, title_regex }));
+          }}
           rows={2}
         />
       </label>
