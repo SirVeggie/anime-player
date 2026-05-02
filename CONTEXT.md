@@ -127,12 +127,12 @@ view components. Per-screen UI lives in `src/components/`:
   commands, and reads state from `mpv://time-pos`, `mpv://duration`,
   `mpv://pause`, `mpv://eof-reached`, `mpv://file-loaded`, and
   `mpv://playback-restart` events. Controls fade out after pointer idle
-  and are revealed only by mouse movement or active menu/seek
-  interaction, not by hotkeys.
+  and are revealed by mouse movement, active menu/seek interaction, or
+  **C** to toggle visibility.
 - The video pane uses Tauri `startDragging` (single left-click) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
-  pause; Space and ArrowLeft/ArrowRight seek ±5s; Ctrl+ArrowLeft/ArrowRight
+  pause; **C** toggles player chrome visibility; Space and ArrowLeft/ArrowRight seek ±5s; Ctrl+ArrowLeft/ArrowRight
   loads the previous/next episode in the list when available; Numpad 4/6 seek ±28s and
   Numpad 7/9 seek ±85s; **Q**, **Escape**, or the back
   control returns to the episode list (without unloading mpv). On the

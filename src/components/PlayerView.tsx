@@ -718,6 +718,21 @@ export function PlayerView(props: {
         void toggleFullscreen();
         return;
       }
+      if (e.code === "KeyC") {
+        if (!visible) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        e.preventDefault();
+        setControlsVisible((prev) => {
+          const next = !prev;
+          if (next) {
+            queueMicrotask(() => scheduleControlsHide());
+          } else {
+            clearControlsHideTimer();
+          }
+          return next;
+        });
+        return;
+      }
       if (e.code === "KeyQ") {
         // Q outside the player is owned by App.tsx (it picks an episode for
         // the current anime); here we only close the playback view.
@@ -734,7 +749,18 @@ export function PlayerView(props: {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canNext, canPrev, hidePlayer, loadSibling, onError, onTogglePause, toggleFullscreen, visible]);
+  }, [
+    canNext,
+    canPrev,
+    clearControlsHideTimer,
+    hidePlayer,
+    loadSibling,
+    onError,
+    onTogglePause,
+    scheduleControlsHide,
+    toggleFullscreen,
+    visible,
+  ]);
 
   const safeDuration = duration > 0 ? duration : 0;
 
