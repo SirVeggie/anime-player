@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { resolveAnimePosterUrl } from "../animePoster";
+import { loadAnimePosterUrls } from "../animePoster";
 import type { AnimeSummary, Category } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { CustomDropdown } from "./CustomDropdown";
@@ -149,15 +149,13 @@ export function AnimeCardGrid(props: {
   useEffect(() => {
     let cancelled = false;
     setCovers({});
-    void Promise.all(
-      anime.map(async (item) => {
-        const url = await resolveAnimePosterUrl(item);
-        return url ? ([item.id, url] as const) : null;
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setCovers(Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)));
-    });
+    void loadAnimePosterUrls(
+      anime,
+      (animeId, url) => {
+        setCovers((current) => (cancelled ? current : { ...current, [animeId]: url }));
+      },
+      () => !cancelled,
+    );
     return () => {
       cancelled = true;
     };

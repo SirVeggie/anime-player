@@ -198,7 +198,9 @@ export function SettingsScreen(props: {
       <section className="panel">
         <div className="panel-heading">
           <h2>Detection Rules</h2>
-          <span className="muted">{library.regex_rules.length} configured</span>
+          <span className="muted">
+            {library.regex_rules.length} configured; higher priority matches first
+          </span>
         </div>
         <div className="settings-list">
           {library.regex_rules.map((rule) => (
@@ -236,10 +238,6 @@ function RuleEditor(props: {
 }) {
   const { title, busy, initial, submitLabel, onSubmit, onDelete } = props;
   const [draft, setDraft] = useState(initial);
-
-  useEffect(() => {
-    setDraft(initial);
-  }, [initial]);
 
   return (
     <form

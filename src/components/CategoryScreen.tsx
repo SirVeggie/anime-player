@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { resolveAnimePosterUrl } from "../animePoster";
+import { loadAnimePosterUrls } from "../animePoster";
 import type { AnimeSummary, LibraryState } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { ViewHeader } from "./ViewHeader";
@@ -24,15 +24,13 @@ export function CategoryScreen(props: {
   useEffect(() => {
     let cancelled = false;
     setRecentCovers({});
-    void Promise.all(
-      library.recent_anime.map(async (anime) => {
-        const url = await resolveAnimePosterUrl(anime);
-        return url ? ([anime.id, url] as const) : null;
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setRecentCovers(Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)));
-    });
+    void loadAnimePosterUrls(
+      library.recent_anime,
+      (animeId, url) => {
+        setRecentCovers((current) => (cancelled ? current : { ...current, [animeId]: url }));
+      },
+      () => !cancelled,
+    );
     return () => {
       cancelled = true;
     };

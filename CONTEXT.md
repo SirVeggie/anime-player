@@ -68,7 +68,10 @@ view components. Per-screen UI lives in `src/components/`:
   initials in the grid and episode header; if no cover is available (unlinked,
   missing file, or load failure), the grid and Continue Watching use a
   Windows shell thumbnail from the first local episode (`first_episode_path`
-  in `AnimeSummary`, same ordering as the episode list). The linked info card opens
+  in `AnimeSummary`, same ordering as the episode list). Grid/Continue poster
+  loading is intentionally phased: cached AniList covers are loaded and shown
+  first, then local video thumbnail extraction runs with limited concurrency so
+  large categories do not flood the backend. The linked info card opens
   AniList, shows remote `Progress: current/total`, and has a debounced score
   input that writes to AniList. When a local progress save marks an episode
   watched (EOF or the near-end threshold used by hide/next), the player asks
@@ -179,8 +182,10 @@ view components. Per-screen UI lives in `src/components/`:
   fansub-style regex rule. `AppDatabase::with_conn` exposes `&mut Connection`
   so callers can start transactions (e.g. bulk rescan writes).
 - `scanner.rs` owns recursive video discovery, extension filtering, and
-  regex-based anime title / episode extraction. Unmatched video files are
-  preserved in SQLite for diagnostics instead of silently disappearing.
+  regex-based anime title / episode extraction. When multiple enabled
+  detection rules match a filename, the highest numeric `priority` wins
+  (`ORDER BY priority DESC, id`). Unmatched video files are preserved in
+  SQLite for diagnostics instead of silently disappearing.
 - `library.rs` exposes the local-library Tauri commands and keeps the
   legacy `scan_videos(folder)` command. Current commands include:
   `get_library_state`, `add_root_folder`, `remove_root_folder` (deletes that

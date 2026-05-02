@@ -566,7 +566,7 @@ fn list_regex_rules(conn: &Connection) -> Result<Vec<RegexRule>, String> {
         .prepare(
             "SELECT id, name, detection_regex, title_regex, enabled, priority
              FROM regex_rules
-             ORDER BY priority, id",
+             ORDER BY priority DESC, id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -627,7 +627,7 @@ fn list_enabled_detection_rules(conn: &Connection) -> Result<Vec<DetectionRule>,
             "SELECT detection_regex, title_regex
              FROM regex_rules
              WHERE enabled = 1
-             ORDER BY priority, id",
+             ORDER BY priority DESC, id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -649,7 +649,7 @@ fn list_enabled_detection_rules_named(
             "SELECT name, detection_regex, title_regex
              FROM regex_rules
              WHERE enabled = 1
-             ORDER BY priority, id",
+             ORDER BY priority DESC, id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt

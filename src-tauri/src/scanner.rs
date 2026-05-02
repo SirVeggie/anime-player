@@ -127,7 +127,7 @@ fn compile_rules(rules: &[DetectionRule]) -> Result<Vec<CompiledRule>, String> {
 }
 
 /// First enabled rule that matches `file_name`, in the same order as a library rescan
-/// (`ORDER BY priority, id`). Used for UI; does not touch the database.
+/// (`ORDER BY priority DESC, id`). Used for UI; does not touch the database.
 pub fn match_rule_name_for_file_name(
     file_name: &str,
     named_rules: &[(String, DetectionRule)],
