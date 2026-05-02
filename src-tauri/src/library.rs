@@ -9,7 +9,7 @@ use crate::db::AppDatabase;
 use crate::scanner::{self, DetectionRule};
 
 /// Saved positions below this are stored as 0 (avoid sticky resume after brief opens).
-const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 10.0;
+const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
 
 #[derive(Debug, Serialize)]
 pub struct VideoFile {
