@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnilistAuthState,
+  AnilistProgressSyncResult,
   AnilistSearchResult,
   Category,
   Episode,
@@ -129,4 +130,8 @@ export function unlinkAnimeAnilist(animeId: number): Promise<void> {
 
 export function getAnilistCoverImage(animeId: number): Promise<string | null> {
   return invoke("get_anilist_cover_image", { animeId });
+}
+
+export function syncAnilistEpisodeProgress(episodeId: number): Promise<AnilistProgressSyncResult> {
+  return invoke("sync_anilist_episode_progress", { episodeId });
 }

@@ -9,6 +9,7 @@ import {
   saveEpisodeProgress,
   selectMpvAudioTrack,
   selectMpvSubtitleTrack,
+  syncAnilistEpisodeProgress,
 } from "../api";
 import type { Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
@@ -288,9 +289,12 @@ export function PlayerView(props: {
         watched,
       );
       onProgressSaved(saved);
+      if (forceWatched) {
+        void syncAnilistEpisodeProgress(saved.id).catch((err) => onError(errorMessage(err)));
+      }
       return saved;
     },
-    [onProgressSaved],
+    [onError, onProgressSaved],
   );
 
   const refreshTracks = useCallback(async () => {

@@ -102,3 +102,10 @@ export type AnilistSearchResult = {
   cover_image_url: string | null;
   site_url: string;
 };
+
+export type AnilistProgressSyncResult = {
+  synced: boolean;
+  reason: string | null;
+  remote_progress: number | null;
+  target_progress: number | null;
+};
