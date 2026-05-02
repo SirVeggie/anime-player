@@ -68,7 +68,6 @@ pub fn get_anilist_login_url(db: State<'_, AppDatabase>) -> Result<String, Strin
     let mut url = Url::parse(AUTHORIZE_URL).map_err(|e| e.to_string())?;
     url.query_pairs_mut()
         .append_pair("client_id", &client_id)
-        .append_pair("redirect_uri", REDIRECT_URI)
         .append_pair("response_type", "token");
     Ok(url.to_string())
 }
@@ -203,7 +202,7 @@ pub fn get_anilist_cover_image(
 fn access_token_from_callback(callback_url: &str) -> Result<String, String> {
     let url = Url::parse(callback_url).map_err(|e| format!("Invalid AniList callback URL: {e}"))?;
     if url.scheme() != "anime-player" || url.host_str() != Some("anilist-auth") {
-        return Err("Unexpected AniList callback URL.".to_string());
+        return Err(format!("Unexpected AniList callback URL. Expected {REDIRECT_URI}."));
     }
     let fragment = url
         .fragment()
