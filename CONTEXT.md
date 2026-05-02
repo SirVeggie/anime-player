@@ -54,7 +54,8 @@ view components. Per-screen UI lives in `src/components/`:
   `src/api.ts` contains the Tauri command bindings and `src/types.ts`
   mirrors the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,
-  `add_root_folder`, `rescan_library`, `list_episodes`,
+  `add_root_folder`, `rescan_library`, `get_local_data_stats`,
+  `clean_local_data`, `list_episodes`,
   `move_anime_to_category`, `set_default_category`, editable
   `*_regex_rule` commands, `save_episode_progress`, and the Windows-only
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
@@ -196,12 +197,19 @@ view components. Per-screen UI lives in `src/components/`:
   `move_anime_to_category`, `list_episodes`, `get_matching_detection_rule_name`
   (re-runs filename matching against enabled rules for the episode list; the
   episode page shows the resulting rule name without persisting it),
-  `save_episode_progress`,
-  and `rescan_library`.   `rescan_library` commits one SQLite transaction per
+  `save_episode_progress`, `get_local_data_stats`, `clean_local_data`,
+  and `rescan_library`. `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
-  series is upserted once per scan instead of once per file. Each rescan
-  deletes episode rows for that root whose paths are not in the current
-  matched scan (missing files, or no longer matching detection rules).
+  series is upserted once per scan instead of once per file. The upserts are
+  idempotent: unchanged anime, episode, and unmatched-file rows are not
+  rewritten, so a no-op rescan does not refresh `updated_at`/`detected_at` or
+  reorder the "Most recent" grid. Rescans are intentionally nondestructive:
+  episode rows that are missing or no longer match the current detection rules
+  stay in SQLite so a temporary rule mistake does not lose links, categories,
+  or watch progress. Settings shows database and saved AniList cover sizes via
+  `get_local_data_stats`; the explicit `clean_local_data` action prunes stale
+  episodes/unmatched rows, removes anime with no episodes, vacuums SQLite, and
+  deletes unreferenced saved covers.
   `save_episode_progress` stores `position_seconds`
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode

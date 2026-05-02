@@ -8,6 +8,8 @@ import type {
   Category,
   Episode,
   LibraryState,
+  LocalDataCleanupSummary,
+  LocalDataStats,
   MpvTrack,
   MpvVideoGeometry,
   RegexRule,
@@ -30,6 +32,14 @@ export function removeRootFolder(id: number): Promise<void> {
 
 export function rescanLibrary(): Promise<ScanSummary> {
   return invoke("rescan_library");
+}
+
+export function getLocalDataStats(): Promise<LocalDataStats> {
+  return invoke("get_local_data_stats");
+}
+
+export function cleanLocalData(): Promise<LocalDataCleanupSummary> {
+  return invoke("clean_local_data");
 }
 
 export function createCategory(name: string): Promise<Category> {

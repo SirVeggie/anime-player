@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
   applyAnilistProgressToLocal,
+  cleanLocalData,
   completeAnilistLogin,
   createCategory,
   createRegexRule,
@@ -16,6 +17,7 @@ import {
   getAnilistLoginUrl,
   getAnilistMediaStatus,
   getLibraryState,
+  getLocalDataStats,
   linkAnimeAnilist,
   listEpisodes,
   logoutAnilist,
@@ -48,6 +50,7 @@ import type {
   Category,
   Episode,
   LibraryState,
+  LocalDataStats,
   RegexRule,
   RegexRuleInput,
   RootFolder,
@@ -79,6 +82,7 @@ function App() {
   const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
   const [episodeReturnView, setEpisodeReturnView] = useState<EpisodeReturnView>("anime");
   const [anilistAuth, setAnilistAuth] = useState<AnilistAuthState | null>(null);
+  const [localDataStats, setLocalDataStats] = useState<LocalDataStats | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -122,6 +126,12 @@ function App() {
     return state;
   }, []);
 
+  const reloadLocalDataStats = useCallback(async () => {
+    const stats = await getLocalDataStats();
+    setLocalDataStats(stats);
+    return stats;
+  }, []);
+
   useEffect(() => {
     selectedAnimeIdRef.current = selectedAnime?.id ?? null;
   }, [selectedAnime?.id]);
@@ -131,10 +141,12 @@ function App() {
       try {
         const state = await reloadLibrary();
         await reloadAnilistAuth();
+        await reloadLocalDataStats();
         if (state.root_folders.length > 0) {
           try {
             await rescanLibrary();
             await reloadLibrary();
+            await reloadLocalDataStats();
           } catch (e) {
             showToast("error", errorMessage(e));
           }
@@ -145,7 +157,7 @@ function App() {
         setLoading(false);
       }
     })();
-  }, [reloadAnilistAuth, reloadLibrary, showToast]);
+  }, [reloadAnilistAuth, reloadLibrary, reloadLocalDataStats, showToast]);
 
   const handleAnilistCallback = useCallback(
     async (url: string) => {
@@ -413,13 +425,27 @@ function App() {
     await runAction(async () => {
       const summary = await rescanLibrary();
       await reloadLibrary();
-      const removed =
-        summary.episodes_removed > 0
-          ? `, ${summary.episodes_removed} stale episode${summary.episodes_removed === 1 ? "" : "s"} removed`
-          : "";
-      return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} imported${removed}, ${summary.unmatched_files} unmatched.`;
+      await reloadLocalDataStats();
+      return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} added or updated, ${summary.unmatched_files} unmatched.`;
     });
-  }, [reloadLibrary, runAction]);
+  }, [reloadLibrary, reloadLocalDataStats, runAction]);
+
+  const handleCleanLocalData = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Clean local data now? This removes database entries for episodes that are missing or no longer match your current detection rules, plus unused saved thumbnails.",
+    );
+    if (!confirmed) return;
+
+    await runAction(async () => {
+      const summary = await cleanLocalData();
+      await reloadLibrary();
+      await reloadLocalDataStats();
+      const staleEpisodes = `${summary.stale_episodes_removed} stale episode${summary.stale_episodes_removed === 1 ? "" : "s"}`;
+      const emptyAnime = `${summary.empty_anime_removed} empty anime entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
+      const thumbnails = `${summary.thumbnails_removed} unused thumbnail${summary.thumbnails_removed === 1 ? "" : "s"}`;
+      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, and ${thumbnails}.`;
+    });
+  }, [reloadLibrary, reloadLocalDataStats, runAction]);
 
   const handleCreateCategory = useCallback(async () => {
     const name = newCategoryName.trim();
@@ -866,6 +892,7 @@ function App() {
               newCategoryName={newCategoryName}
               newRuleEditorKey={newRuleEditorKey}
               anilistAuth={anilistAuth}
+              localDataStats={localDataStats}
               onBack={() => navigateToView("categories", "restore")}
               onRootInput={setRootInput}
               onPickFolder={() => void handlePickFolder()}
@@ -882,6 +909,7 @@ function App() {
               onSaveAnilistClientId={(clientId) => void handleSaveAnilistClientId(clientId)}
               onLoginAnilist={() => void handleLoginAnilist()}
               onLogoutAnilist={() => void handleLogoutAnilist()}
+              onCleanLocalData={() => void handleCleanLocalData()}
             />
           ) : null}
         </div>

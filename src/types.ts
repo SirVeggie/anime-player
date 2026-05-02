@@ -91,6 +91,21 @@ export type ScanSummary = {
   unmatched_files: number;
 };
 
+export type LocalDataStats = {
+  database_bytes: number;
+  thumbnails_bytes: number;
+  total_bytes: number;
+};
+
+export type LocalDataCleanupSummary = {
+  roots_scanned: number;
+  stale_episodes_removed: number;
+  empty_anime_removed: number;
+  unmatched_files_removed: number;
+  thumbnails_removed: number;
+  bytes_removed: number;
+};
+
 export type AnilistAuthState = {
   client_id: string | null;
   viewer_id: number | null;

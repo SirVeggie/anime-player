@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import type { AnilistAuthState, Category, LibraryState, RegexRule, RegexRuleInput, RootFolder } from "../types";
+import type {
+  AnilistAuthState,
+  Category,
+  LibraryState,
+  LocalDataStats,
+  RegexRule,
+  RegexRuleInput,
+  RootFolder,
+} from "../types";
 import { ViewHeader } from "./ViewHeader";
 
 const EMPTY_RULE: RegexRuleInput = {
@@ -17,6 +25,7 @@ export function SettingsScreen(props: {
   newCategoryName: string;
   newRuleEditorKey: number;
   anilistAuth: AnilistAuthState | null;
+  localDataStats: LocalDataStats | null;
   onBack: () => void;
   onRootInput: (value: string) => void;
   onPickFolder: () => void;
@@ -33,6 +42,7 @@ export function SettingsScreen(props: {
   onSaveAnilistClientId: (clientId: string) => void;
   onLoginAnilist: () => void;
   onLogoutAnilist: () => void;
+  onCleanLocalData: () => void;
 }) {
   const {
     library,
@@ -41,6 +51,7 @@ export function SettingsScreen(props: {
     newCategoryName,
     newRuleEditorKey,
     anilistAuth,
+    localDataStats,
     onBack,
     onRootInput,
     onPickFolder,
@@ -57,6 +68,7 @@ export function SettingsScreen(props: {
     onSaveAnilistClientId,
     onLoginAnilist,
     onLogoutAnilist,
+    onCleanLocalData,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
 
@@ -104,6 +116,32 @@ export function SettingsScreen(props: {
         <p className="muted">
           Set the AniList app redirect URL to <code>anime-player://anilist-auth</code>.
         </p>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Local Data</h2>
+          <span className="muted">{localDataStats ? formatBytes(localDataStats.total_bytes) : "Calculating..."}</span>
+        </div>
+        <div className="local-data-summary">
+          <div className="local-data-stat">
+            <span>Database</span>
+            <strong>{localDataStats ? formatBytes(localDataStats.database_bytes) : "-"}</strong>
+          </div>
+          <div className="local-data-stat">
+            <span>Saved thumbnails</span>
+            <strong>{localDataStats ? formatBytes(localDataStats.thumbnails_bytes) : "-"}</strong>
+          </div>
+        </div>
+        <p className="muted">
+          Rescans keep temporarily missing or unmatched episodes so links, categories, and progress are not lost.
+          Use cleanup after your rules and folders are correct.
+        </p>
+        <div className="settings-actions">
+          <button type="button" onClick={onCleanLocalData} disabled={busy}>
+            Clean local data
+          </button>
+        </div>
       </section>
 
       <section className="panel">
@@ -368,4 +406,16 @@ function ruleToInput(rule: RegexRule): RegexRuleInput {
     enabled: rule.enabled,
     priority: rule.priority,
   };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unitIndex]}`;
 }

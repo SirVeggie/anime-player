@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -96,6 +97,23 @@ pub struct ScanSummary {
     episodes_imported: i64,
     episodes_removed: i64,
     unmatched_files: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalDataStats {
+    database_bytes: u64,
+    thumbnails_bytes: u64,
+    total_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalDataCleanupSummary {
+    roots_scanned: i64,
+    stale_episodes_removed: i64,
+    empty_anime_removed: i64,
+    unmatched_files_removed: i64,
+    thumbnails_removed: i64,
+    bytes_removed: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,15 +229,14 @@ pub fn remove_root_folder(db: State<'_, AppDatabase>, id: i64) -> Result<(), Str
     })
 }
 
-fn delete_anime_with_no_episodes(conn: &Connection) -> Result<(), String> {
+fn delete_anime_with_no_episodes(conn: &Connection) -> Result<usize, String> {
     conn.execute(
         "DELETE FROM anime WHERE NOT EXISTS (
             SELECT 1 FROM episodes e WHERE e.anime_id = anime.id
         )",
         [],
     )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -455,10 +472,6 @@ pub fn save_episode_progress(
 #[tauri::command]
 pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String> {
     db.with_conn(|conn| {
-        // Repair DBs from before remove_root_folder deleted episodes: SET NULL orphans.
-        conn.execute("DELETE FROM episodes WHERE root_folder_id IS NULL", [])
-            .map_err(|e| e.to_string())?;
-        delete_anime_with_no_episodes(conn)?;
         refresh_anime_latest_episode_at(conn)?;
 
         let roots = list_root_folders(conn)?;
@@ -475,20 +488,12 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
         for root in roots {
             let scan = scanner::scan_root(Path::new(&root.path), &rules)?;
             summary.roots_scanned += 1;
-            summary.episodes_imported += scan.episodes.len() as i64;
             summary.unmatched_files += scan.unmatched.len() as i64;
 
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let mut anime_cache: HashMap<String, i64> = HashMap::new();
 
-            let removed = delete_episodes_not_in_scan(&tx, root.id, &scan.episodes)?;
-            summary.episodes_removed += removed as i64;
-
-            tx.execute(
-                "DELETE FROM unmatched_files WHERE root_folder_id = ?1",
-                params![root.id],
-            )
-            .map_err(|e| e.to_string())?;
+            delete_unmatched_files_now_matched(&tx, root.id, &scan.episodes)?;
 
             for episode in scan.episodes {
                 let anime_id = cached_anime_id(
@@ -498,7 +503,9 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
                     &episode.title_key,
                     default_category,
                 )?;
-                upsert_episode(&tx, root.id, anime_id, &episode)?;
+                if upsert_episode(&tx, root.id, anime_id, &episode)? {
+                    summary.episodes_imported += 1;
+                }
             }
 
             for file in scan.unmatched {
@@ -511,7 +518,11 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
                         relative_path = excluded.relative_path,
                         file_name = excluded.file_name,
                         reason = excluded.reason,
-                        detected_at = CURRENT_TIMESTAMP",
+                        detected_at = CURRENT_TIMESTAMP
+                     WHERE unmatched_files.root_folder_id IS NOT excluded.root_folder_id
+                        OR unmatched_files.relative_path IS NOT excluded.relative_path
+                        OR unmatched_files.file_name IS NOT excluded.file_name
+                        OR unmatched_files.reason IS NOT excluded.reason",
                     params![
                         root.id,
                         file.path,
@@ -530,6 +541,57 @@ pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String>
 
         Ok(summary)
     })
+}
+
+#[tauri::command]
+pub fn get_local_data_stats(db: State<'_, AppDatabase>) -> Result<LocalDataStats, String> {
+    local_data_stats(&db)
+}
+
+#[tauri::command]
+pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSummary, String> {
+    let database_bytes_before = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
+    let mut summary = db.with_conn(|conn| {
+        let roots = list_root_folders(conn)?;
+        let rules = list_enabled_detection_rules(conn)?;
+        let mut summary = LocalDataCleanupSummary {
+            roots_scanned: 0,
+            stale_episodes_removed: 0,
+            empty_anime_removed: 0,
+            unmatched_files_removed: 0,
+            thumbnails_removed: 0,
+            bytes_removed: 0,
+        };
+
+        for root in roots {
+            let scan = scanner::scan_root(Path::new(&root.path), &rules)?;
+            summary.roots_scanned += 1;
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            summary.stale_episodes_removed +=
+                delete_episodes_not_in_scan(&tx, root.id, &scan.episodes)? as i64;
+            summary.unmatched_files_removed += delete_unmatched_files_not_in_scan(
+                &tx,
+                root.id,
+                &scan.unmatched,
+            )? as i64;
+            tx.commit().map_err(|e| e.to_string())?;
+        }
+
+        summary.stale_episodes_removed += conn
+            .execute("DELETE FROM episodes WHERE root_folder_id IS NULL", [])
+            .map_err(|e| e.to_string())? as i64;
+        summary.empty_anime_removed = delete_anime_with_no_episodes(conn)? as i64;
+        refresh_anime_latest_episode_at(conn)?;
+        conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
+        Ok(summary)
+    })?;
+
+    let database_bytes_after = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
+    let (removed, thumbnail_bytes_removed) = delete_unreferenced_thumbnails(&db)?;
+    summary.thumbnails_removed = removed as i64;
+    summary.bytes_removed =
+        database_bytes_before.saturating_sub(database_bytes_after) + thumbnail_bytes_removed;
+    Ok(summary)
 }
 
 fn list_root_folders(conn: &Connection) -> Result<Vec<RootFolder>, String> {
@@ -869,7 +931,11 @@ fn upsert_anime(
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE anime SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE title_key = ?2",
+        "UPDATE anime
+         SET title = ?1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE title_key = ?2
+           AND title IS NOT ?1",
         params![title, title_key],
     )
     .map_err(|e| e.to_string())?;
@@ -915,13 +981,175 @@ fn delete_episodes_not_in_scan(
     Ok(removed)
 }
 
+fn delete_unmatched_files_now_matched(
+    tx: &rusqlite::Transaction<'_>,
+    root_folder_id: i64,
+    matched: &[scanner::ScannedEpisode],
+) -> Result<usize, String> {
+    tx.execute("DROP TABLE IF EXISTS rescan_matched_paths", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "CREATE TEMP TABLE rescan_matched_paths (path TEXT PRIMARY KEY)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    for ep in matched {
+        tx.execute(
+            "INSERT INTO rescan_matched_paths (path) VALUES (?1)",
+            params![ep.path],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let removed = tx
+        .execute(
+            "DELETE FROM unmatched_files
+             WHERE root_folder_id = ?1
+             AND EXISTS (
+                 SELECT 1 FROM rescan_matched_paths k WHERE k.path = unmatched_files.path
+             )",
+            params![root_folder_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(removed)
+}
+
+fn delete_unmatched_files_not_in_scan(
+    tx: &rusqlite::Transaction<'_>,
+    root_folder_id: i64,
+    kept: &[scanner::UnmatchedFile],
+) -> Result<usize, String> {
+    tx.execute("DROP TABLE IF EXISTS cleanup_keep_unmatched_paths", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "CREATE TEMP TABLE cleanup_keep_unmatched_paths (path TEXT PRIMARY KEY)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    for file in kept {
+        tx.execute(
+            "INSERT INTO cleanup_keep_unmatched_paths (path) VALUES (?1)",
+            params![file.path],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let removed = tx
+        .execute(
+            "DELETE FROM unmatched_files
+             WHERE root_folder_id = ?1
+             AND NOT EXISTS (
+                 SELECT 1 FROM cleanup_keep_unmatched_paths k WHERE k.path = unmatched_files.path
+             )",
+            params![root_folder_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(removed)
+}
+
+fn local_data_stats(db: &AppDatabase) -> Result<LocalDataStats, String> {
+    let database_bytes = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
+    let thumbnails_bytes = db
+        .path()
+        .parent()
+        .map(|data_dir| directory_size(&data_dir.join("anilist-covers")))
+        .transpose()?
+        .unwrap_or(0);
+    Ok(LocalDataStats {
+        database_bytes,
+        thumbnails_bytes,
+        total_bytes: database_bytes + thumbnails_bytes,
+    })
+}
+
+fn directory_size(path: &Path) -> Result<u64, String> {
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0_u64;
+    let entries = fs::read_dir(path)
+        .map_err(|e| format!("failed to read directory {}: {e}", path.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        if metadata.is_dir() {
+            total += directory_size(&entry.path())?;
+        } else {
+            total += metadata.len();
+        }
+    }
+    Ok(total)
+}
+
+fn delete_unreferenced_thumbnails(db: &AppDatabase) -> Result<(usize, u64), String> {
+    let Some(data_dir) = db.path().parent() else {
+        return Ok((0, 0));
+    };
+    let cover_dir = data_dir.join("anilist-covers");
+    if !cover_dir.exists() {
+        return Ok((0, 0));
+    }
+
+    let referenced_paths = db.with_conn(list_referenced_thumbnail_paths)?;
+    let mut removed_count = 0_usize;
+    let mut removed_bytes = 0_u64;
+    for file in list_files_recursive(&cover_dir)? {
+        if referenced_paths.contains(&file) {
+            continue;
+        }
+        let size = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+        fs::remove_file(&file)
+            .map_err(|e| format!("failed to remove thumbnail {}: {e}", file.display()))?;
+        removed_count += 1;
+        removed_bytes += size;
+    }
+
+    Ok((removed_count, removed_bytes))
+}
+
+fn list_referenced_thumbnail_paths(conn: &mut Connection) -> Result<HashSet<PathBuf>, String> {
+    let mut stmt = conn
+        .prepare("SELECT anilist_cover_path FROM anime WHERE anilist_cover_path IS NOT NULL")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let paths = rows
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    Ok(paths)
+}
+
+fn list_files_recursive(path: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    if !path.exists() {
+        return Ok(files);
+    }
+
+    let entries = fs::read_dir(path)
+        .map_err(|e| format!("failed to read directory {}: {e}", path.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let entry_path = entry.path();
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        if metadata.is_dir() {
+            files.extend(list_files_recursive(&entry_path)?);
+        } else {
+            files.push(entry_path);
+        }
+    }
+    Ok(files)
+}
+
 fn upsert_episode(
     conn: &Connection,
     root_folder_id: i64,
     anime_id: i64,
     episode: &scanner::ScannedEpisode,
-) -> Result<(), String> {
-    conn.execute(
+) -> Result<bool, String> {
+    let changed = conn.execute(
         "INSERT INTO episodes
             (anime_id, root_folder_id, path, relative_path, file_name, file_type,
              episode_number, size)
@@ -934,7 +1162,14 @@ fn upsert_episode(
             file_type = excluded.file_type,
             episode_number = excluded.episode_number,
             size = excluded.size,
-            updated_at = CURRENT_TIMESTAMP",
+            updated_at = CURRENT_TIMESTAMP
+         WHERE episodes.anime_id IS NOT excluded.anime_id
+            OR episodes.root_folder_id IS NOT excluded.root_folder_id
+            OR episodes.relative_path IS NOT excluded.relative_path
+            OR episodes.file_name IS NOT excluded.file_name
+            OR episodes.file_type IS NOT excluded.file_type
+            OR episodes.episode_number IS NOT excluded.episode_number
+            OR episodes.size IS NOT excluded.size",
         params![
             anime_id,
             root_folder_id,
@@ -947,7 +1182,7 @@ fn upsert_episode(
         ],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(changed > 0)
 }
 
 fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>, String> {

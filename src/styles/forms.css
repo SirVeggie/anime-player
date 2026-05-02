@@ -110,6 +110,31 @@
   word-break: break-word;
 }
 
+.local-data-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.local-data-stat {
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.local-data-stat span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.local-data-stat strong {
+  font-size: 18px;
+  font-weight: 600;
+}
+
 .rule-editor {
   display: flex;
   flex-direction: column;

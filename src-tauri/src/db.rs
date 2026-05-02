@@ -124,6 +124,9 @@ pub fn refresh_anime_latest_episode_at(conn: &Connection) -> Result<(), String> 
     conn.execute(
         "UPDATE anime SET latest_episode_at = (
             SELECT MAX(e.updated_at) FROM episodes e WHERE e.anime_id = anime.id
+        )
+        WHERE latest_episode_at IS NOT (
+            SELECT MAX(e.updated_at) FROM episodes e WHERE e.anime_id = anime.id
         )",
         [],
     )
