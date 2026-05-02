@@ -228,7 +228,7 @@ view components. Per-screen UI lives in `src/components/`:
   path), searches AniList via `https://graphql.anilist.co`, validates
   login tokens with `Viewer`, and downloads covers under the portable
   `data/anilist-covers/` directory. Linked media status (`progress`,
-  `episodes`, `score`) is cached on the `anime` row for one hour so normal
+  `episodes`, `score`) is cached on the `anime` row for five minutes so normal
   navigation does not repeatedly hit AniList; app-originated score/progress
   writes update that cache immediately. `sync_anilist_episode_progress` uses
   the fresh cache when possible and only sends `SaveMediaListEntry` when the

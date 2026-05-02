@@ -19,7 +19,7 @@ const CLIENT_ID_KEY: &str = "anilist.client_id";
 const TOKEN_KEY: &str = "anilist.access_token";
 const VIEWER_ID_KEY: &str = "anilist.viewer_id";
 const VIEWER_NAME_KEY: &str = "anilist.viewer_name";
-const MEDIA_STATUS_CACHE_TTL_SECONDS: i64 = 60 * 60;
+const MEDIA_STATUS_CACHE_TTL_SECONDS: i64 = 5 * 60;
 
 #[derive(Debug, Serialize)]
 pub struct AnilistAuthState {
