@@ -126,9 +126,10 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_set_pause`, `mpv_seek`, `mpv_seek_relative`, track selection
   commands, and reads state from `mpv://time-pos`, `mpv://duration`,
   `mpv://pause`, `mpv://eof-reached`, `mpv://file-loaded`, and
-  `mpv://playback-restart` events. Controls fade out after pointer idle
-  and are revealed by mouse movement, active menu/seek interaction, or
-  **C** to toggle visibility.
+  `mpv://playback-restart` events. Controls fade out after pointer idle,
+  hide immediately when the pointer leaves the window (unless a seek or
+  track menu is active), and are revealed by mouse movement, active
+  menu/seek interaction, or **C** to toggle visibility.
 - The video pane uses Tauri `startDragging` (single left-click) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles

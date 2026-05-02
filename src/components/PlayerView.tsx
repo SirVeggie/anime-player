@@ -282,6 +282,17 @@ export function PlayerView(props: {
     onControlsVisibilityChange?.(controlsVisible);
   }, [controlsVisible, onControlsVisibilityChange]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    const onPointerLeaveWindow = () => {
+      if (!visible || controlsPinned) return;
+      clearControlsHideTimer();
+      setControlsVisible(false);
+    };
+    root.addEventListener("pointerleave", onPointerLeaveWindow);
+    return () => root.removeEventListener("pointerleave", onPointerLeaveWindow);
+  }, [clearControlsHideTimer, controlsPinned, visible]);
+
   const persistProgress = useCallback(
     async (forceWatched = false) => {
       const current = playbackRef.current;
