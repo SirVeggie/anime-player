@@ -40,6 +40,12 @@ Episode selection page features
 - [x] ~~Delete anime files from the episode page, mark rows missing, and leave database cleanup to Settings~~
 - [ ] Unset watched status on episode
 
+## Page transitions
+
+- [ ] Add a smooth transition between pages (sidebar tab change, opening a category / episode view).
+    - Cross-fade or slight slide+fade on the main content when switching views.
+    - Stretch goal: stagger grid items in (cards fade/slide in with a small delay between siblings) when entering a category or episode list.
+
 ## Video Player
 
 - [x] ~~Video player view takes full size of the window~~
