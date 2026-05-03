@@ -320,15 +320,6 @@ export function EpisodeScreen(props: {
               value={anime.category_id}
               onChange={onMoveAnime}
             />
-            {anime.anilist_site_url ? (
-              <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
-                Unlink
-              </button>
-            ) : (
-              <button type="button" onClick={openLinkSearch}>
-                Link AniList
-              </button>
-            )}
             <button
               type="button"
               className="header-icon-button"
@@ -339,6 +330,15 @@ export function EpisodeScreen(props: {
             >
               <FolderOpenIcon />
             </button>
+            {anime.anilist_site_url ? (
+              <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
+                Unlink
+              </button>
+            ) : (
+              <button type="button" onClick={openLinkSearch}>
+                Link AniList
+              </button>
+            )}
             <button type="button" className="button-danger" onClick={() => setDeleteConfirmOpen(true)}>
               Delete Anime
             </button>
