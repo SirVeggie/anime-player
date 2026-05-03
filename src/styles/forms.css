@@ -210,6 +210,33 @@
   flex-shrink: 0;
 }
 
+.settings-reorder-controls {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 2px;
+}
+
+button.settings-reorder-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 14px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+
+button.settings-reorder-button span {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+button.settings-reorder-button:hover:not(:disabled) span {
+  color: var(--text-color);
+}
+
 .settings-item code {
   color: rgba(255, 255, 255, 0.72);
   white-space: pre-wrap;

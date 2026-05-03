@@ -36,6 +36,7 @@ export function SettingsScreen(props: {
   onCreateCategory: () => void;
   onDeleteCategory: (category: Category) => void;
   onSetDefaultCategory: (category: Category) => void;
+  onReorderCategory: (category: Category, direction: "up" | "down") => void;
   onCreateRule: (input: RegexRuleInput) => void;
   onUpdateRule: (id: number, input: RegexRuleInput) => void;
   onDeleteRule: (rule: RegexRule) => void;
@@ -62,6 +63,7 @@ export function SettingsScreen(props: {
     onCreateCategory,
     onDeleteCategory,
     onSetDefaultCategory,
+    onReorderCategory,
     onCreateRule,
     onUpdateRule,
     onDeleteRule,
@@ -207,7 +209,7 @@ export function SettingsScreen(props: {
           </button>
         </form>
         <div className="settings-list">
-          {library.categories.map((category) => (
+          {library.categories.map((category, index) => (
             <div className="settings-item" key={category.id}>
               <span>
                 {category.name} {category.is_default ? <span className="pill">Default</span> : null}
@@ -227,6 +229,26 @@ export function SettingsScreen(props: {
                 >
                   Delete
                 </button>
+                <div className="settings-reorder-controls" aria-label="Reorder category">
+                  <button
+                    type="button"
+                    className="settings-reorder-button"
+                    onClick={() => onReorderCategory(category, "up")}
+                    disabled={busy || index === 0}
+                    aria-label={`Move ${category.name} up`}
+                  >
+                    <span aria-hidden>▴</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-reorder-button"
+                    onClick={() => onReorderCategory(category, "down")}
+                    disabled={busy || index === library.categories.length - 1}
+                    aria-label={`Move ${category.name} down`}
+                  >
+                    <span aria-hidden>▾</span>
+                  </button>
+                </div>
               </div>
             </div>
           ))}

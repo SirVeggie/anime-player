@@ -26,6 +26,7 @@ import {
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
   overrideAnimeProgress,
+  reorderCategories,
   renameAnime,
   renameFiles,
   removeRootFolder,
@@ -537,6 +538,28 @@ function App() {
       });
     },
     [reloadLibrary, runAction],
+  );
+
+  const handleReorderCategory = useCallback(
+    async (category: Category, direction: "up" | "down") => {
+      if (!library) return;
+      const currentIndex = library.categories.findIndex((item) => item.id === category.id);
+      if (currentIndex < 0) return;
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (targetIndex < 0 || targetIndex >= library.categories.length) return;
+
+      const reordered = [...library.categories];
+      const [moved] = reordered.splice(currentIndex, 1);
+      reordered.splice(targetIndex, 0, moved);
+      const categoryIds = reordered.map((item) => item.id);
+
+      await runAction(async () => {
+        await reorderCategories(categoryIds);
+        await reloadLibrary();
+        return "Category order updated.";
+      });
+    },
+    [library, reloadLibrary, runAction],
   );
 
   const handleCreateRule = useCallback(
@@ -1170,6 +1193,7 @@ function App() {
               onCreateCategory={() => void handleCreateCategory()}
               onDeleteCategory={(category) => void handleDeleteCategory(category)}
               onSetDefaultCategory={(category) => void handleSetDefaultCategory(category)}
+              onReorderCategory={(category, direction) => void handleReorderCategory(category, direction)}
               onCreateRule={(input) => void handleCreateRule(input)}
               onUpdateRule={(id, input) => void handleUpdateRule(id, input)}
               onDeleteRule={(rule) => void handleDeleteRule(rule)}

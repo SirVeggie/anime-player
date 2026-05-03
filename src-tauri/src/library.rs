@@ -396,6 +396,45 @@ pub fn set_default_category(db: State<'_, AppDatabase>, id: i64) -> Result<Categ
 }
 
 #[tauri::command]
+pub fn reorder_categories(db: State<'_, AppDatabase>, category_ids: Vec<i64>) -> Result<(), String> {
+    db.with_conn(|conn| {
+        if category_ids.is_empty() {
+            return Err("Category order cannot be empty.".to_string());
+        }
+
+        let existing = list_categories(conn)?;
+        if category_ids.len() != existing.len() {
+            return Err("Category order must include every category exactly once.".to_string());
+        }
+
+        let existing_ids = existing.into_iter().map(|category| category.id).collect::<HashSet<_>>();
+        let mut seen = HashSet::new();
+        for id in &category_ids {
+            if !existing_ids.contains(id) {
+                return Err(format!("Category does not exist: {id}"));
+            }
+            if !seen.insert(*id) {
+                return Err(format!("Category appears more than once: {id}"));
+            }
+        }
+        if seen.len() != existing_ids.len() {
+            return Err("Category order must include every category exactly once.".to_string());
+        }
+
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for (sort_order, id) in category_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE categories SET sort_order = ?1 WHERE id = ?2",
+                params![sort_order as i64, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
 pub fn create_regex_rule(
     db: State<'_, AppDatabase>,
     input: RegexRuleInput,

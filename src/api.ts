@@ -60,6 +60,10 @@ export function setDefaultCategory(id: number): Promise<Category> {
   return invoke("set_default_category", { id });
 }
 
+export function reorderCategories(categoryIds: number[]): Promise<void> {
+  return invoke("reorder_categories", { categoryIds });
+}
+
 export function moveAnimeToCategory(animeId: number, categoryId: number): Promise<void> {
   return invoke("move_anime_to_category", { animeId, categoryId });
 }
