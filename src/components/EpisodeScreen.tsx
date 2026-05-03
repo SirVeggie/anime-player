@@ -310,9 +310,6 @@ export function EpisodeScreen(props: {
               value={anime.category_id}
               onChange={onMoveAnime}
             />
-            <button type="button" className="button-danger" onClick={onDeleteAnime}>
-              Delete Anime
-            </button>
             {anime.anilist_site_url ? (
               <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
                 Unlink
@@ -322,6 +319,9 @@ export function EpisodeScreen(props: {
                 Link AniList
               </button>
             )}
+            <button type="button" className="button-danger" onClick={onDeleteAnime}>
+              Delete Anime
+            </button>
           </>
         }
       />
