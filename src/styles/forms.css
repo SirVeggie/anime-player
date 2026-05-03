@@ -349,17 +349,26 @@ button:focus-visible {
   background: var(--surface-3);
 }
 
-button.header-icon-button {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
+button.header-icon-button,
+.view-actions button.header-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  color: var(--text-color);
+  filter: none;
+}
+
+button.header-icon-button:hover:not(:disabled),
+.view-actions button.header-icon-button:hover:not(:disabled) {
+  background: var(--surface-3);
+  filter: none;
 }
 
 button.header-icon-button svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 button.button-danger,

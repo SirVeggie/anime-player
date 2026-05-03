@@ -293,8 +293,9 @@ view components. Per-screen UI lives in `src/components/`:
 - The main window also has **`decorations: false`** so Windows does not
   draw the native title bar or 1px frame; the frontend supplies the
   custom title bar and window controls.
-- Permissions: `core:default`, `opener:default`, `dialog:default`, and
-  `deep-link:default`. The dialog plugin is used for the native folder
+- Permissions: `core:default`, `opener:default`, `opener:allow-open-path`,
+  `dialog:default`, and `deep-link:default`. The opener plugin opens AniList
+  URLs and episode folders; the dialog plugin is used for the native folder
   picker; the deep-link and single-instance plugins support the AniList
   `anime-player://anilist-auth` OAuth callback.
 - Window: `productName = "Anime Player"`, 1280x800 default, min 800x600.
