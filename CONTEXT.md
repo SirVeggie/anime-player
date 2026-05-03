@@ -442,6 +442,10 @@ npm run tauri dev
 
 # Production build (installer in src-tauri/target/release/bundle/)
 npm run tauri build
+
+# Portable release: `tauri build` then versioned folder + zip under `releases/`
+# (that directory is listed in `.gitignore` so build artifacts stay local)
+npm run release
 ```
 
 A full `cargo check` from cold is ~25s on the user's machine; warm is <2s.
