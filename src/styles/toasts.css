@@ -1,30 +1,141 @@
 ﻿.toast-stack {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: calc(var(--titlebar-height) + 8px);
+  right: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(360px, calc(100vw - 32px));
-  z-index: 100;
+  width: min(380px, calc(100vw - 24px));
+  z-index: 140;
   pointer-events: none;
 }
 
 .toast {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 10px;
   pointer-events: auto;
-  text-align: left;
+  cursor: pointer;
+  padding: 11px 14px 12px;
   border-radius: var(--radius-md);
-  padding: 10px 12px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-  animation: toastSlideIn 180ms ease-out both;
+  background: rgba(20, 24, 32, 0.92);
+  color: var(--text-color);
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 14px 32px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+  transform-origin: top right;
+  /* Initial (closed/entering) state: offset slightly to the right and down,
+     slightly shrunk. The "open" state below transitions to the resting pose. */
+  opacity: 0;
+  transform: translate3d(16px, -6px, 0) scale(0.96);
+  transition:
+    opacity 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.toast--success {
-  background: rgba(25, 72, 40, 0.96);
-  color: #d7ffe0;
+.toast[data-state="open"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
 }
 
-.toast--error {
-  background: rgba(78, 28, 28, 0.96);
-  color: #ffd4d4;
+.toast[data-state="closed"] {
+  /* Slide right + fade out — feels like the toast is being swept off the
+     right edge where the stack is anchored. */
+  opacity: 0;
+  transform: translate3d(24px, 0, 0) scale(0.98);
+  transition:
+    opacity 180ms cubic-bezier(0.4, 0, 1, 1),
+    transform 200ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+.toast-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.toast-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.toast-message {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.toast--success .toast-icon {
+  background: rgba(109, 213, 140, 0.16);
+  color: var(--success);
+}
+
+.toast--error .toast-icon {
+  background: rgba(255, 107, 107, 0.18);
+  color: var(--danger);
+}
+
+.toast-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(1);
+  opacity: 0.55;
+}
+
+.toast--success .toast-progress {
+  background: var(--success);
+}
+
+.toast--error .toast-progress {
+  background: var(--danger);
+}
+
+/* The drain only runs while the toast is open; closed snaps it back so the
+   exit animation isn't competing with a finishing drain. */
+.toast-progress[data-state="open"] {
+  animation: toastProgressDrain 4500ms linear forwards;
+}
+
+.toast-progress[data-paused="true"] {
+  animation-play-state: paused;
+}
+
+.toast-progress[data-state="closed"] {
+  animation: none;
+  transform: scaleX(0);
+}
+
+@keyframes toastProgressDrain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toast[data-state="open"],
+  .toast[data-state="closed"] {
+    transition: opacity 120ms linear;
+    transform: none;
+  }
+  .toast-progress[data-state="open"] {
+    animation-duration: 4500ms;
+  }
 }

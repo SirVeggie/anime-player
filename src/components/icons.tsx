@@ -54,6 +54,22 @@ export function RescanIcon() {
   );
 }
 
+export function CheckCircleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.05 14.6-4.3-4.3 1.4-1.4 2.9 2.88 6.05-6.06 1.4 1.42-7.45 7.46z" />
+    </svg>
+  );
+}
+
+export function AlertCircleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 5h2v7h-2V7zm0 9h2v2h-2v-2z" />
+    </svg>
+  );
+}
+
 export function FolderOpenIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>

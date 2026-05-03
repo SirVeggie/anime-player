@@ -113,9 +113,6 @@ function App() {
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     const id = Date.now() + Math.random();
     setToasts((current) => [...current, { id, kind, message }]);
-    window.setTimeout(() => {
-      setToasts((current) => current.filter((toast) => toast.id !== id));
-    }, 4200);
   }, []);
 
   const reloadLibrary = useCallback(async () => {
