@@ -73,8 +73,27 @@ type AnilistProgressUpdate = {
   updatedAt: number;
 };
 
-const VIDEO_OPEN_FADE_MS = 180;
+type ScreenTransitionPhase = "idle" | "cover" | "uncover";
+
+// Cover hides the outgoing view, we swap state, then uncover reveals the
+// incoming view. Symmetric durations keep enter/exit feeling identical.
+const SCREEN_COVER_MS = 220;
+const SCREEN_UNCOVER_MS = 240;
+
 const appWindow = getCurrentWindow();
+
+function waitMs(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+// Wait two animation frames so the React commit triggered by `between()` has
+// actually been painted before we start the uncover transition. One rAF can
+// fire before paint in some engines; two is the standard "next paint" guard.
+function waitTwoFrames() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
 
 function hasEpisodeProgress(episode: Episode): boolean {
   return episode.watched || episode.position_seconds > 0;
@@ -100,7 +119,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [videoOpening, setVideoOpening] = useState(false);
+  const [screenTransition, setScreenTransition] = useState<ScreenTransitionPhase>("idle");
+  const screenTransitionRef = useRef<ScreenTransitionPhase>("idle");
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
   const [windowFullscreen, setWindowFullscreen] = useState(false);
   const [playerPaused, setPlayerPaused] = useState(true);
@@ -737,14 +757,44 @@ function App() {
     navigateToView("anime");
   }, [navigateToView]);
 
-  const openEpisode = useCallback((episode: Episode) => {
-    setVideoOpening(true);
-    window.setTimeout(() => {
-      setSelectedEpisode(episode);
-      navigateToView("player");
-      setVideoOpening(false);
-    }, VIDEO_OPEN_FADE_MS);
-  }, [navigateToView]);
+  // Cover the screen with an opaque fade, run `between` to swap views/state,
+  // then uncover. PlayerView's own .player-load-fade keeps the screen black
+  // for fresh playback after uncover until mpv emits playback-restart, so the
+  // hand-off is seamless without us coordinating with mpv directly.
+  const runScreenTransition = useCallback(async (between: () => void) => {
+    if (screenTransitionRef.current !== "idle") return;
+    screenTransitionRef.current = "cover";
+    setScreenTransition("cover");
+    await waitMs(SCREEN_COVER_MS);
+    between();
+    await waitTwoFrames();
+    screenTransitionRef.current = "uncover";
+    setScreenTransition("uncover");
+    await waitMs(SCREEN_UNCOVER_MS);
+    screenTransitionRef.current = "idle";
+    setScreenTransition("idle");
+  }, []);
+
+  const openEpisode = useCallback(
+    (episode: Episode) => {
+      void runScreenTransition(() => {
+        setSelectedEpisode(episode);
+        navigateToView("player");
+      });
+    },
+    [navigateToView, runScreenTransition],
+  );
+
+  const closePlayer = useCallback(
+    (options?: { unload?: boolean }) => {
+      const unload = options?.unload === true;
+      void runScreenTransition(() => {
+        if (unload) setSelectedEpisode(null);
+        navigateToView("episodes", "restore");
+      });
+    },
+    [navigateToView, runScreenTransition],
+  );
 
   // Q on the episodes screen jumps into the current anime's last-played episode
   // (or the next one if that episode is already watched). Scoped to the
@@ -758,16 +808,17 @@ function App() {
       if (!target) return;
       e.preventDefault();
       if (selectedEpisode && selectedEpisode.id === target.id) {
-        // Same file already loaded in the hidden player; reveal it without
-        // the open-fade. PlayerView's `visible` effect handles the unpause.
-        navigateToView("player");
+        // Same file already loaded; transition through the fade anyway so the
+        // reveal feels consistent with a fresh play. PlayerView's `visible`
+        // effect handles the unpause once we navigate.
+        void runScreenTransition(() => navigateToView("player"));
       } else {
         openEpisode(target);
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [episodes, openEpisode, selectedAnime, selectedEpisode, view]);
+  }, [episodes, navigateToView, openEpisode, runScreenTransition, selectedAnime, selectedEpisode, view]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -877,7 +928,7 @@ function App() {
     <main
       className={`app${showPlayer ? " app--player-open" : ""}${
         playerLoadedInBackground ? " app--player-background" : ""
-      }${videoOpening ? " app--video-opening" : ""}`}
+      }`}
     >
       {!windowFullscreen ? (
         <WindowTitleBar
@@ -959,11 +1010,8 @@ function App() {
           playlist={episodes}
           visible={Boolean(showPlayer)}
           onSelectEpisode={setSelectedEpisode}
-          onBack={() => navigateToView("episodes", "restore")}
-          onClose={() => {
-            setSelectedEpisode(null);
-            navigateToView("episodes", "restore");
-          }}
+          onBack={() => closePlayer()}
+          onClose={() => closePlayer({ unload: true })}
           onProgressSaved={handleProgressSaved}
           onAnilistProgressSynced={handleAnilistProgressSynced}
           onError={(message) => showToast("error", message)}
@@ -1070,7 +1118,7 @@ function App() {
         </div>
       </section>
 
-      {videoOpening ? <div className="video-open-overlay" /> : null}
+      <div className="screen-transition-overlay" data-state={screenTransition} aria-hidden />
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </main>
   );
