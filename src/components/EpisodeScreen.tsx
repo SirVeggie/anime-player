@@ -69,6 +69,7 @@ export function EpisodeScreen(props: {
   const [linkSearchOpen, setLinkSearchOpen] = useState(false);
   const [linkSearchBusy, setLinkSearchBusy] = useState(false);
   const [linkSearchError, setLinkSearchError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [anilistStatus, setAnilistStatus] = useState<AnilistMediaStatus | null>(null);
   const [scoreDraft, setScoreDraft] = useState("");
   const [scoreSaving, setScoreSaving] = useState(false);
@@ -79,13 +80,14 @@ export function EpisodeScreen(props: {
   const scoreSaveRequestRef = useRef(0);
   const remainingCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
-  const getRovingItemProps = useRovingListNavigation(episodes.length, { enabled: !linkSearchOpen });
+  const getRovingItemProps = useRovingListNavigation(episodes.length, { enabled: !linkSearchOpen && !deleteConfirmOpen });
 
   useEffect(() => {
     setLinkQuery(anime.title);
     setLinkResults([]);
     setLinkSearchOpen(false);
     setLinkSearchError(null);
+    setDeleteConfirmOpen(false);
   }, [anime.id, anime.title]);
 
   useEffect(() => {
@@ -225,6 +227,11 @@ export function EpisodeScreen(props: {
     void runLinkSearch(anime.title);
   }, [anime.title, runLinkSearch]);
 
+  const confirmDeleteAnime = useCallback(() => {
+    setDeleteConfirmOpen(false);
+    onDeleteAnime();
+  }, [onDeleteAnime]);
+
   const saveScore = useCallback(
     async (value: string) => {
       if (!anime.anilist_id) return;
@@ -319,7 +326,7 @@ export function EpisodeScreen(props: {
                 Link AniList
               </button>
             )}
-            <button type="button" className="button-danger" onClick={onDeleteAnime}>
+            <button type="button" className="button-danger" onClick={() => setDeleteConfirmOpen(true)}>
               Delete Anime
             </button>
           </>
@@ -455,6 +462,45 @@ export function EpisodeScreen(props: {
               {!linkSearchBusy && linkResults.length === 0 ? (
                 <p className="muted">No matches yet. Try a different search title.</p>
               ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {deleteConfirmOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setDeleteConfirmOpen(false);
+          }}
+        >
+          <section
+            className="modal delete-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-anime-title"
+            aria-describedby="delete-anime-description"
+          >
+            <div className="modal-heading">
+              <div>
+                <h2 id="delete-anime-title">Delete Anime Files?</h2>
+                <p className="muted" id="delete-anime-description">
+                  This will delete {episodes.length} episode file{episodes.length === 1 ? "" : "s"} for "{anime.title}".
+                </p>
+              </div>
+            </div>
+            <p className="delete-confirm-warning">
+              Files will be moved to the trash when possible. The database entries stay until you run cleanup in
+              Settings, but the local episode files will no longer be available.
+            </p>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setDeleteConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="button-danger" onClick={confirmDeleteAnime}>
+                Delete Files
+              </button>
             </div>
           </section>
         </div>

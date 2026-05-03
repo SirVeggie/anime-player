@@ -563,10 +563,6 @@ function App() {
       showToast("error", "There are no visible episode files to delete.");
       return;
     }
-    const confirmed = window.confirm(
-      `Delete ${episodes.length} episode file${episodes.length === 1 ? "" : "s"} for "${selectedAnime.title}"?\n\nFiles will be moved to the trash when possible. The database entries stay until you run cleanup in Settings.`,
-    );
-    if (!confirmed) return;
 
     setBusy(true);
     try {
