@@ -41,7 +41,10 @@ view components. Per-screen UI lives in `src/components/`:
   stats) + main content pane. Category navigation lives on the library page rather
   than in the sidebar. Bulk Edit can filter anime by source category and by a
   case-insensitive regex matched against full episode paths, then move the
-  affected anime to another category. A **Missing** sidebar page appears only when the
+  affected anime to another category. Its filename replacer tab scans all video
+  files under configured root folders, so malformed files that are not yet
+  detected as episodes can be renamed and then imported by the follow-up rescan.
+  A **Missing** sidebar page appears only when the
   database has episodes that the latest scan could not currently match; normal
   library/search/episode views hide those missing rows so rule mistakes are
   obvious without deleting saved metadata. The anime grid header includes a sort dropdown
@@ -60,9 +63,9 @@ view components. Per-screen UI lives in `src/components/`:
   mirrors the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,
   `add_root_folder`, `rescan_library`, `get_local_data_stats`,
-  `clean_local_data`, `list_episodes`, `delete_anime_files`,
+  `clean_local_data`, `list_episodes`, `list_root_video_files`, `delete_anime_files`,
   `move_anime_to_category`, `set_default_category`, editable
-  `*_regex_rule` commands, `save_episode_progress`, and the Windows-only
+  `*_regex_rule` commands, `rename_files`, `save_episode_progress`, and the Windows-only
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
   command still exists for compatibility.
 - AniList integration is a first-slice metadata/linking feature. Settings

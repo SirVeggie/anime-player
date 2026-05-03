@@ -21,11 +21,12 @@ import {
   getLocalDataStats,
   linkAnimeAnilist,
   listEpisodes,
+  listRootVideoFiles,
   logoutAnilist,
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
   overrideAnimeProgress,
-  renameEpisodeFiles,
+  renameFiles,
   removeRootFolder,
   rescanLibrary,
   searchAnilistAnime,
@@ -37,7 +38,7 @@ import {
   stopMpv,
   unlinkAnimeAnilist,
   updateRegexRule,
-  validateEpisodeFileRenames,
+  validateFileRenames,
 } from "./api";
 import { AnimeGrid } from "./components/AnimeGrid";
 import { BulkEditScreen } from "./components/BulkEditScreen";
@@ -63,7 +64,7 @@ import type {
   LocalDataStats,
   RegexRule,
   RegexRuleInput,
-  RenameEpisodeFileRequest,
+  RenameFileRequest,
   RootFolder,
 } from "./types";
 import { APP_WINDOW_TITLE, errorMessage, formatSize, isTextInputTarget, shortenForOsTitle } from "./utils";
@@ -664,11 +665,12 @@ function App() {
     [reloadLibrary, runAction],
   );
 
-  const handleRenameEpisodeFiles = useCallback(
-    async (renames: RenameEpisodeFileRequest[]) => {
+  const handleRenameFiles = useCallback(
+    async (renames: RenameFileRequest[]) => {
       if (renames.length === 0) return;
       await runAction(async () => {
-        const summary = await renameEpisodeFiles(renames);
+        const summary = await renameFiles(renames);
+        await rescanLibrary();
         const state = await reloadLibrary();
         if (selectedAnimeIdRef.current !== null) {
           const updated = state.anime.find((anime) => anime.id === selectedAnimeIdRef.current);
@@ -1107,9 +1109,10 @@ function App() {
                 busy={busy}
                 onOpenAnime={(anime) => void openAnime(anime, "bulkEdit")}
                 onListEpisodes={listEpisodes}
+                onListRootVideoFiles={listRootVideoFiles}
                 onMoveAnime={(animeIds, categoryId) => void handleBulkMoveAnime(animeIds, categoryId)}
-                onValidateEpisodeRenames={validateEpisodeFileRenames}
-                onRenameEpisodeFiles={(renames) => void handleRenameEpisodeFiles(renames)}
+                onValidateRenames={validateFileRenames}
+                onRenameFiles={(renames) => void handleRenameFiles(renames)}
               />
             </div>
           ) : null}

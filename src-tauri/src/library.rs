@@ -156,14 +156,13 @@ pub struct DeleteAnimeFilesSummary {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RenameEpisodeFileRequest {
-    episode_id: i64,
+pub struct RenameFileRequest {
     old_path: String,
     new_path: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct RenameEpisodeFilesSummary {
+pub struct RenameFilesSummary {
     files_renamed: i64,
 }
 
@@ -176,12 +175,11 @@ struct DeletableEpisode {
 
 #[derive(Debug)]
 struct RenameEpisodePlan {
-    episode_id: i64,
     old_path: PathBuf,
     old_path_string: String,
     new_path: PathBuf,
     new_path_string: String,
-    root_folder: Option<PathBuf>,
+    root_folder: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,11 +194,26 @@ pub struct RegexRuleInput {
 #[tauri::command]
 pub fn scan_videos(folder: String) -> Result<Vec<VideoFile>, String> {
     let root = Path::new(&folder);
+    scan_video_files_in_root(root)
+}
+
+#[tauri::command]
+pub fn list_root_video_files(db: State<'_, AppDatabase>) -> Result<Vec<VideoFile>, String> {
+    let roots = db.with_conn(|conn| list_root_folders(conn))?;
+    let mut files = Vec::new();
+    for root in roots {
+        files.extend(scan_video_files_in_root(Path::new(&root.path))?);
+    }
+    files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    Ok(files)
+}
+
+fn scan_video_files_in_root(root: &Path) -> Result<Vec<VideoFile>, String> {
     if !root.exists() {
-        return Err(format!("Folder does not exist: {folder}"));
+        return Err(format!("Folder does not exist: {}", root.display()));
     }
     if !root.is_dir() {
-        return Err(format!("Path is not a directory: {folder}"));
+        return Err(format!("Path is not a directory: {}", root.display()));
     }
 
     let mut results: Vec<VideoFile> = Vec::new();
@@ -585,18 +598,18 @@ pub fn delete_anime_files(
 }
 
 #[tauri::command]
-pub fn validate_episode_file_renames(
+pub fn validate_file_renames(
     db: State<'_, AppDatabase>,
-    renames: Vec<RenameEpisodeFileRequest>,
+    renames: Vec<RenameFileRequest>,
 ) -> Result<(), String> {
     db.with_conn(|conn| build_rename_episode_plan(conn, &renames).map(|_| ()))
 }
 
 #[tauri::command]
-pub fn rename_episode_files(
+pub fn rename_files(
     db: State<'_, AppDatabase>,
-    renames: Vec<RenameEpisodeFileRequest>,
-) -> Result<RenameEpisodeFilesSummary, String> {
+    renames: Vec<RenameFileRequest>,
+) -> Result<RenameFilesSummary, String> {
     let plans = db.with_conn(|conn| build_rename_episode_plan(conn, &renames))?;
     let temp_moves = move_episode_sources_to_temps(&plans)?;
 
@@ -610,7 +623,7 @@ pub fn rename_episode_files(
         return Err(error);
     }
 
-    Ok(RenameEpisodeFilesSummary {
+    Ok(RenameFilesSummary {
         files_renamed: plans.len() as i64,
     })
 }
@@ -1679,56 +1692,24 @@ fn upsert_episode(
 
 fn build_rename_episode_plan(
     conn: &Connection,
-    renames: &[RenameEpisodeFileRequest],
+    renames: &[RenameFileRequest],
 ) -> Result<Vec<RenameEpisodePlan>, String> {
     if renames.is_empty() {
         return Err("No files were selected for renaming.".to_string());
     }
 
-    let mut seen_episode_ids = HashSet::new();
+    let roots = list_root_folders(conn)?;
+    if roots.is_empty() {
+        return Err("No root folders are configured.".to_string());
+    }
+
     let mut source_keys = HashSet::new();
     let mut destination_keys = HashSet::new();
     let mut plans = Vec::with_capacity(renames.len());
 
     for request in renames {
-        if !seen_episode_ids.insert(request.episode_id) {
-            return Err(format!(
-                "Episode {} appears more than once in the rename request.",
-                request.episode_id
-            ));
-        }
         if request.old_path == request.new_path {
             return Err(format!("Rename request does not change the path: {}", request.old_path));
-        }
-
-        let row = conn
-            .query_row(
-                "SELECT e.path, e.missing, r.path
-                 FROM episodes e
-                 LEFT JOIN root_folders r ON r.id = e.root_folder_id
-                 WHERE e.id = ?1",
-                params![request.episode_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
-        let Some((current_path, missing, root_folder)) = row else {
-            return Err(format!("Episode {} no longer exists.", request.episode_id));
-        };
-        if missing != 0 {
-            return Err(format!("Episode {} is currently marked missing.", request.episode_id));
-        }
-        if current_path != request.old_path {
-            return Err(format!(
-                "Episode path changed before rename. Expected {}, found {}.",
-                request.old_path, current_path
-            ));
         }
 
         let old_path = PathBuf::from(&request.old_path);
@@ -1739,6 +1720,17 @@ fn build_rename_episode_plan(
         if !new_path.is_absolute() {
             return Err(format!("Destination path is not absolute: {}", request.new_path));
         }
+
+        let Some(root_folder) = roots
+            .iter()
+            .map(|root| PathBuf::from(&root.path))
+            .find(|root| old_path.starts_with(root))
+        else {
+            return Err(format!(
+                "Source file is not inside a configured root folder: {}",
+                request.old_path
+            ));
+        };
 
         let old_key = windows_path_key(&request.old_path);
         let new_key = windows_path_key(&request.new_path);
@@ -1778,16 +1770,16 @@ fn build_rename_episode_plan(
         }
 
         plans.push(RenameEpisodePlan {
-            episode_id: request.episode_id,
             old_path,
             old_path_string: request.old_path.clone(),
             new_path,
             new_path_string: request.new_path.clone(),
-            root_folder: root_folder.map(PathBuf::from),
+            root_folder,
         });
     }
 
     for plan in &plans {
+        ensure_rename_destination_not_in_database(conn, plan, &source_keys)?;
         if plan.new_path.exists() && !source_keys.contains(&windows_path_key(&plan.new_path_string)) {
             return Err(format!(
                 "Destination already exists outside the rename set: {}",
@@ -1797,6 +1789,42 @@ fn build_rename_episode_plan(
     }
 
     Ok(plans)
+}
+
+fn ensure_rename_destination_not_in_database(
+    conn: &Connection,
+    plan: &RenameEpisodePlan,
+    source_keys: &HashSet<String>,
+) -> Result<(), String> {
+    let episode_path = conn
+        .query_row(
+            "SELECT path FROM episodes WHERE path = ?1",
+            params![plan.new_path_string],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(path) = episode_path {
+        if !source_keys.contains(&windows_path_key(&path)) {
+            return Err(format!("Destination already belongs to another episode: {path}"));
+        }
+    }
+
+    let unmatched_path = conn
+        .query_row(
+            "SELECT path FROM unmatched_files WHERE path = ?1",
+            params![plan.new_path_string],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(path) = unmatched_path {
+        if !source_keys.contains(&windows_path_key(&path)) {
+            return Err(format!("Destination already belongs to another unmatched file: {path}"));
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1862,8 +1890,36 @@ fn rollback_episode_rename_destinations(temp_moves: &[EpisodeTempMove]) {
 
 fn persist_episode_renames(conn: &mut Connection, plans: &[RenameEpisodePlan]) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let temp_db_paths = plans
+        .iter()
+        .enumerate()
+        .map(|(index, plan)| {
+            format!(
+                "__anime_player_rename_temp__:{}:{index}:{}",
+                std::process::id(),
+                plan.old_path_string
+            )
+        })
+        .collect::<Vec<_>>();
 
-    for plan in plans {
+    for (plan, temp_db_path) in plans.iter().zip(temp_db_paths.iter()) {
+        tx.execute(
+            "UPDATE episodes
+             SET path = ?1
+             WHERE path = ?2",
+            params![temp_db_path, plan.old_path_string],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE unmatched_files
+             SET path = ?1
+             WHERE path = ?2",
+            params![temp_db_path, plan.old_path_string],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    for (plan, temp_db_path) in plans.iter().zip(temp_db_paths.iter()) {
         let metadata = fs::metadata(&plan.new_path)
             .map_err(|e| format!("Failed to read renamed file metadata ({}): {e}", plan.new_path_string))?;
         let file_name = plan
@@ -1878,7 +1934,7 @@ fn persist_episode_renames(conn: &mut Connection, plans: &[RenameEpisodePlan]) -
             .and_then(|extension| extension.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let relative_path = renamed_relative_path(&plan.new_path, plan.root_folder.as_deref(), &plan.new_path_string);
+        let relative_path = renamed_relative_path(&plan.new_path, &plan.root_folder, &plan.new_path_string);
 
         tx.execute(
             "UPDATE episodes
@@ -1888,15 +1944,26 @@ fn persist_episode_renames(conn: &mut Connection, plans: &[RenameEpisodePlan]) -
                  file_type = ?4,
                  size = ?5,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?6",
+             WHERE path = ?6",
             params![
                 plan.new_path_string,
                 relative_path,
                 file_name,
                 file_type,
                 metadata.len() as i64,
-                plan.episode_id
+                temp_db_path
             ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        tx.execute(
+            "UPDATE unmatched_files
+             SET path = ?1,
+                 relative_path = ?2,
+                 file_name = ?3,
+                 detected_at = CURRENT_TIMESTAMP
+             WHERE path = ?4",
+            params![plan.new_path_string, relative_path, file_name, temp_db_path],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1931,11 +1998,9 @@ fn unique_rename_temp_path(source: &Path, index: usize) -> Result<PathBuf, Strin
     ))
 }
 
-fn renamed_relative_path(path: &Path, root_folder: Option<&Path>, fallback: &str) -> String {
-    if let Some(root_folder) = root_folder {
-        if let Ok(relative) = path.strip_prefix(root_folder) {
-            return relative.to_string_lossy().replace('\\', "/");
-        }
+fn renamed_relative_path(path: &Path, root_folder: &Path, fallback: &str) -> String {
+    if let Ok(relative) = path.strip_prefix(root_folder) {
+        return relative.to_string_lossy().replace('\\', "/");
     }
 
     fallback.replace('\\', "/")

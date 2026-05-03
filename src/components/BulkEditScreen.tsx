@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AnimeSummary, Category, Episode, LibraryState, RenameEpisodeFileRequest } from "../types";
+import type { AnimeSummary, Category, Episode, LibraryState, RenameFileRequest, VideoFile } from "../types";
 import { AnimeCardGrid } from "./AnimeGrid";
 import { CustomDropdown } from "./CustomDropdown";
 
@@ -8,7 +8,6 @@ const REGEX_DEBOUNCE_MS = 1200;
 type BulkEditTab = "category" | "rename";
 
 type RenamePreviewRow = {
-  episodeId: number;
   oldPath: string;
   newPath: string;
 };
@@ -26,18 +25,20 @@ export function BulkEditScreen(props: {
   busy: boolean;
   onOpenAnime: (anime: AnimeSummary) => void;
   onListEpisodes: (animeId: number) => Promise<Episode[]>;
+  onListRootVideoFiles: () => Promise<VideoFile[]>;
   onMoveAnime: (animeIds: number[], categoryId: number) => void;
-  onValidateEpisodeRenames: (renames: RenameEpisodeFileRequest[]) => Promise<void>;
-  onRenameEpisodeFiles: (renames: RenameEpisodeFileRequest[]) => void;
+  onValidateRenames: (renames: RenameFileRequest[]) => Promise<void>;
+  onRenameFiles: (renames: RenameFileRequest[]) => void;
 }) {
   const {
     library,
     busy,
     onOpenAnime,
     onListEpisodes,
+    onListRootVideoFiles,
     onMoveAnime,
-    onValidateEpisodeRenames,
-    onRenameEpisodeFiles,
+    onValidateRenames,
+    onRenameFiles,
   } = props;
   const [activeTab, setActiveTab] = useState<BulkEditTab>("category");
   const [sourceCategoryId, setSourceCategoryId] = useState(ALL_CATEGORIES_ID);
@@ -51,7 +52,7 @@ export function BulkEditScreen(props: {
   const [renameRegexInput, setRenameRegexInput] = useState("");
   const [debouncedRenameRegexInput, setDebouncedRenameRegexInput] = useState("");
   const [renameReplacementInput, setRenameReplacementInput] = useState("");
-  const [renameEpisodes, setRenameEpisodes] = useState<Episode[]>([]);
+  const [renameFiles, setRenameFiles] = useState<VideoFile[]>([]);
   const [loadingRenameEpisodes, setLoadingRenameEpisodes] = useState(false);
   const [renamePathError, setRenamePathError] = useState<string | null>(null);
   const [renameBackendError, setRenameBackendError] = useState<string | null>(null);
@@ -188,13 +189,13 @@ export function BulkEditScreen(props: {
 
     void (async () => {
       try {
-        const episodeGroups = await Promise.all(library.anime.map((anime) => onListEpisodes(anime.id)));
+        const files = await onListRootVideoFiles();
         if (cancelled) return;
-        setRenameEpisodes(episodeGroups.flat());
+        setRenameFiles(files);
       } catch (error) {
         if (cancelled) return;
-        setRenamePathError(error instanceof Error ? error.message : "Failed to load episode paths.");
-        setRenameEpisodes([]);
+        setRenamePathError(error instanceof Error ? error.message : "Failed to load root video files.");
+        setRenameFiles([]);
       } finally {
         if (!cancelled) setLoadingRenameEpisodes(false);
       }
@@ -203,7 +204,7 @@ export function BulkEditScreen(props: {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, library.anime, onListEpisodes]);
+  }, [activeTab, library.root_folders, onListRootVideoFiles]);
 
   const renamePreview = useMemo(() => {
     const pattern = debouncedRenameRegexInput;
@@ -221,15 +222,15 @@ export function BulkEditScreen(props: {
       };
     }
 
-    const rows = renameEpisodes.flatMap((episode) => {
+    const rows = renameFiles.flatMap((file) => {
       regex.lastIndex = 0;
-      const newPath = episode.path.replace(regex, renameReplacementInput);
-      if (newPath === episode.path) return [];
-      return [{ episodeId: episode.id, oldPath: episode.path, newPath }];
+      const newPath = file.path.replace(regex, renameReplacementInput);
+      if (newPath === file.path) return [];
+      return [{ oldPath: file.path, newPath }];
     });
 
     return { rows, error: null as string | null };
-  }, [debouncedRenameRegexInput, renameEpisodes, renameReplacementInput]);
+  }, [debouncedRenameRegexInput, renameFiles, renameReplacementInput]);
 
   const renameCollisionError = useMemo(() => {
     if (renamePreview.rows.length === 0) return null;
@@ -249,22 +250,21 @@ export function BulkEditScreen(props: {
     }
 
     const affectedSources = new Set(renamePreview.rows.map((row) => windowsPathKey(row.oldPath)));
-    const knownEpisodePaths = new Map(renameEpisodes.map((episode) => [windowsPathKey(episode.path), episode.path]));
+    const knownFilePaths = new Map(renameFiles.map((file) => [windowsPathKey(file.path), file.path]));
     for (const row of renamePreview.rows) {
       const destinationKey = windowsPathKey(row.newPath);
-      const existingEpisodePath = knownEpisodePaths.get(destinationKey);
-      if (existingEpisodePath && !affectedSources.has(destinationKey)) {
-        return `Destination already belongs to another episode: ${existingEpisodePath}`;
+      const existingFilePath = knownFilePaths.get(destinationKey);
+      if (existingFilePath && !affectedSources.has(destinationKey)) {
+        return `Destination already belongs to another root video file: ${existingFilePath}`;
       }
     }
 
     return null;
-  }, [renameEpisodes, renamePreview.rows]);
+  }, [renameFiles, renamePreview.rows]);
 
   const renameRequests = useMemo(
     () =>
       renamePreview.rows.map((row) => ({
-        episode_id: row.episodeId,
         old_path: row.oldPath,
         new_path: row.newPath,
       })),
@@ -284,7 +284,7 @@ export function BulkEditScreen(props: {
 
     void (async () => {
       try {
-        await onValidateEpisodeRenames(renameRequests);
+        await onValidateRenames(renameRequests);
       } catch (error) {
         if (!cancelled) {
           setRenameBackendError(error instanceof Error ? error.message : "Rename validation failed.");
@@ -297,13 +297,13 @@ export function BulkEditScreen(props: {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, onValidateEpisodeRenames, renameCollisionError, renamePreview.error, renameRequests]);
+  }, [activeTab, onValidateRenames, renameCollisionError, renamePreview.error, renameRequests]);
 
   const handleRenameFiles = () => {
     if (renameRequests.length === 0) return;
     const confirmed = window.confirm(`Rename ${renameRequests.length} file${renameRequests.length === 1 ? "" : "s"}?`);
     if (!confirmed) return;
-    onRenameEpisodeFiles(renameRequests);
+    onRenameFiles(renameRequests);
   };
 
   const idleAllLibrary = sourceCategoryId === ALL_CATEGORIES_ID && !debouncedRegexInput;
@@ -472,7 +472,7 @@ export function BulkEditScreen(props: {
           ) : (
             <div className="bulk-rename-preview" aria-label="Affected episode file renames">
               {renamePreview.rows.map((row) => (
-                <div className="bulk-rename-preview-row" key={`${row.episodeId}:${row.oldPath}`}>
+                <div className="bulk-rename-preview-row" key={row.oldPath}>
                   <span>{row.oldPath}</span>
                   <strong>-&gt;</strong>
                   <span>{row.newPath}</span>

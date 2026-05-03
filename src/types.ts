@@ -3,6 +3,13 @@ export type RootFolder = {
   path: string;
 };
 
+export type VideoFile = {
+  path: string;
+  name: string;
+  relative_path: string;
+  size: number;
+};
+
 export type RegexRule = {
   id: number;
   name: string;
@@ -127,13 +134,12 @@ export type DeleteAnimeFilesSummary = {
   permanent_delete_used: boolean;
 };
 
-export type RenameEpisodeFileRequest = {
-  episode_id: number;
+export type RenameFileRequest = {
   old_path: string;
   new_path: string;
 };
 
-export type RenameEpisodeFilesSummary = {
+export type RenameFilesSummary = {
   files_renamed: number;
 };
 

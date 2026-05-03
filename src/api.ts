@@ -16,10 +16,11 @@ import type {
   ProgressOverrideSummary,
   RegexRule,
   RegexRuleInput,
-  RenameEpisodeFileRequest,
-  RenameEpisodeFilesSummary,
+  RenameFileRequest,
+  RenameFilesSummary,
   RootFolder,
   ScanSummary,
+  VideoFile,
 } from "./types";
 
 export function getLibraryState(): Promise<LibraryState> {
@@ -78,16 +79,20 @@ export function listEpisodes(animeId: number): Promise<Episode[]> {
   return invoke("list_episodes", { animeId });
 }
 
+export function listRootVideoFiles(): Promise<VideoFile[]> {
+  return invoke("list_root_video_files");
+}
+
 export function deleteAnimeFiles(animeId: number): Promise<DeleteAnimeFilesSummary> {
   return invoke("delete_anime_files", { animeId });
 }
 
-export function validateEpisodeFileRenames(renames: RenameEpisodeFileRequest[]): Promise<void> {
-  return invoke("validate_episode_file_renames", { renames });
+export function validateFileRenames(renames: RenameFileRequest[]): Promise<void> {
+  return invoke("validate_file_renames", { renames });
 }
 
-export function renameEpisodeFiles(renames: RenameEpisodeFileRequest[]): Promise<RenameEpisodeFilesSummary> {
-  return invoke("rename_episode_files", { renames });
+export function renameFiles(renames: RenameFileRequest[]): Promise<RenameFilesSummary> {
+  return invoke("rename_files", { renames });
 }
 
 export function openAnimeEpisodeFolder(animeId: number): Promise<void> {
