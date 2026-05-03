@@ -569,7 +569,6 @@ function App() {
         const state = await reloadLibrary();
         const updated = state.anime.find((anime) => anime.id === selectedAnime.id);
         if (updated) setSelectedAnime(updated);
-        return "Anime moved.";
       });
     },
     [reloadLibrary, runAction, selectedAnime],
@@ -710,7 +709,6 @@ function App() {
           const updated = state.anime.find((anime) => anime.id === animeId);
           if (updated) setSelectedAnime(updated);
         }
-        return "Anime linked to AniList.";
       });
     },
     [applyLocalAnilistProgress, refreshAnimePageData, reloadLibrary, runAction],
