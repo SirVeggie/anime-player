@@ -61,6 +61,33 @@
   font-size: 15px;
 }
 
+.bulk-edit-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bulk-edit-tab {
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.bulk-edit-tab:hover {
+  color: var(--text-color);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.bulk-edit-tab--active {
+  color: var(--text-color);
+  border-bottom-color: var(--progress-color);
+  background: rgba(88, 166, 255, 0.1);
+}
+
 .bulk-edit-panel {
   display: flex;
   flex-direction: column;
@@ -71,6 +98,10 @@
   display: grid;
   grid-template-columns: minmax(160px, 0.7fr) minmax(220px, 1.4fr) minmax(160px, 0.7fr);
   gap: 10px;
+}
+
+.bulk-edit-grid--rename {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .bulk-edit-panel .muted,
@@ -90,6 +121,45 @@
 
 .bulk-edit-panel .settings-actions.bulk-edit-settings-actions > button {
   margin-left: auto;
+}
+
+.bulk-rename-empty {
+  margin: 0;
+}
+
+.bulk-rename-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(48vh, 520px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.bulk-rename-preview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: Consolas, "Roboto Mono", monospace;
+  font-size: 12px;
+}
+
+.bulk-rename-preview-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bulk-rename-preview-row strong {
+  color: var(--text-muted);
+  font-family: Roboto, system-ui, sans-serif;
+  font-weight: 500;
 }
 
 .stacked-field .custom-select {

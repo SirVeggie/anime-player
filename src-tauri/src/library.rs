@@ -155,11 +155,33 @@ pub struct DeleteAnimeFilesSummary {
     permanent_delete_used: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct RenameEpisodeFileRequest {
+    episode_id: i64,
+    old_path: String,
+    new_path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenameEpisodeFilesSummary {
+    files_renamed: i64,
+}
+
 #[derive(Debug)]
 struct DeletableEpisode {
     id: i64,
     path: String,
     size: i64,
+}
+
+#[derive(Debug)]
+struct RenameEpisodePlan {
+    episode_id: i64,
+    old_path: PathBuf,
+    old_path_string: String,
+    new_path: PathBuf,
+    new_path_string: String,
+    root_folder: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -559,6 +581,37 @@ pub fn delete_anime_files(
         cover_deleted,
         cover_failed,
         permanent_delete_used,
+    })
+}
+
+#[tauri::command]
+pub fn validate_episode_file_renames(
+    db: State<'_, AppDatabase>,
+    renames: Vec<RenameEpisodeFileRequest>,
+) -> Result<(), String> {
+    db.with_conn(|conn| build_rename_episode_plan(conn, &renames).map(|_| ()))
+}
+
+#[tauri::command]
+pub fn rename_episode_files(
+    db: State<'_, AppDatabase>,
+    renames: Vec<RenameEpisodeFileRequest>,
+) -> Result<RenameEpisodeFilesSummary, String> {
+    let plans = db.with_conn(|conn| build_rename_episode_plan(conn, &renames))?;
+    let temp_moves = move_episode_sources_to_temps(&plans)?;
+
+    if let Err(error) = move_episode_temps_to_destinations(&temp_moves) {
+        rollback_episode_renames(&temp_moves);
+        return Err(error);
+    }
+
+    if let Err(error) = db.with_conn(|conn| persist_episode_renames(conn, &plans)) {
+        rollback_episode_rename_destinations(&temp_moves);
+        return Err(error);
+    }
+
+    Ok(RenameEpisodeFilesSummary {
+        files_renamed: plans.len() as i64,
     })
 }
 
@@ -1622,6 +1675,274 @@ fn upsert_episode(
     )
     .map_err(|e| e.to_string())?;
     Ok(changed > 0)
+}
+
+fn build_rename_episode_plan(
+    conn: &Connection,
+    renames: &[RenameEpisodeFileRequest],
+) -> Result<Vec<RenameEpisodePlan>, String> {
+    if renames.is_empty() {
+        return Err("No files were selected for renaming.".to_string());
+    }
+
+    let mut seen_episode_ids = HashSet::new();
+    let mut source_keys = HashSet::new();
+    let mut destination_keys = HashSet::new();
+    let mut plans = Vec::with_capacity(renames.len());
+
+    for request in renames {
+        if !seen_episode_ids.insert(request.episode_id) {
+            return Err(format!(
+                "Episode {} appears more than once in the rename request.",
+                request.episode_id
+            ));
+        }
+        if request.old_path == request.new_path {
+            return Err(format!("Rename request does not change the path: {}", request.old_path));
+        }
+
+        let row = conn
+            .query_row(
+                "SELECT e.path, e.missing, r.path
+                 FROM episodes e
+                 LEFT JOIN root_folders r ON r.id = e.root_folder_id
+                 WHERE e.id = ?1",
+                params![request.episode_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((current_path, missing, root_folder)) = row else {
+            return Err(format!("Episode {} no longer exists.", request.episode_id));
+        };
+        if missing != 0 {
+            return Err(format!("Episode {} is currently marked missing.", request.episode_id));
+        }
+        if current_path != request.old_path {
+            return Err(format!(
+                "Episode path changed before rename. Expected {}, found {}.",
+                request.old_path, current_path
+            ));
+        }
+
+        let old_path = PathBuf::from(&request.old_path);
+        let new_path = PathBuf::from(&request.new_path);
+        if !old_path.is_absolute() {
+            return Err(format!("Source path is not absolute: {}", request.old_path));
+        }
+        if !new_path.is_absolute() {
+            return Err(format!("Destination path is not absolute: {}", request.new_path));
+        }
+
+        let old_key = windows_path_key(&request.old_path);
+        let new_key = windows_path_key(&request.new_path);
+        if old_key == new_key && request.old_path != request.new_path {
+            return Err(format!(
+                "Case-only renames are not supported in bulk mode: {}",
+                request.old_path
+            ));
+        }
+        if !source_keys.insert(old_key) {
+            return Err(format!("Duplicate source path in rename request: {}", request.old_path));
+        }
+        if !destination_keys.insert(new_key) {
+            return Err(format!(
+                "Multiple files would be renamed to the same destination: {}",
+                request.new_path
+            ));
+        }
+
+        let source_metadata = fs::metadata(&old_path)
+            .map_err(|e| format!("Source file is not available ({}): {e}", request.old_path))?;
+        if !source_metadata.is_file() {
+            return Err(format!("Source path is not a file: {}", request.old_path));
+        }
+
+        let Some(destination_parent) = new_path.parent() else {
+            return Err(format!("Destination has no parent folder: {}", request.new_path));
+        };
+        if !destination_parent.exists() {
+            return Err(format!(
+                "Destination parent folder does not exist: {}",
+                destination_parent.to_string_lossy()
+            ));
+        }
+        if new_path.is_dir() {
+            return Err(format!("Destination path is a folder: {}", request.new_path));
+        }
+
+        plans.push(RenameEpisodePlan {
+            episode_id: request.episode_id,
+            old_path,
+            old_path_string: request.old_path.clone(),
+            new_path,
+            new_path_string: request.new_path.clone(),
+            root_folder: root_folder.map(PathBuf::from),
+        });
+    }
+
+    for plan in &plans {
+        if plan.new_path.exists() && !source_keys.contains(&windows_path_key(&plan.new_path_string)) {
+            return Err(format!(
+                "Destination already exists outside the rename set: {}",
+                plan.new_path_string
+            ));
+        }
+    }
+
+    Ok(plans)
+}
+
+#[derive(Debug)]
+struct EpisodeTempMove {
+    old_path: PathBuf,
+    temp_path: PathBuf,
+    new_path: PathBuf,
+}
+
+fn move_episode_sources_to_temps(plans: &[RenameEpisodePlan]) -> Result<Vec<EpisodeTempMove>, String> {
+    let mut temp_moves = Vec::with_capacity(plans.len());
+
+    for (index, plan) in plans.iter().enumerate() {
+        let temp_path = unique_rename_temp_path(&plan.old_path, index)?;
+        if let Err(error) = fs::rename(&plan.old_path, &temp_path) {
+            rollback_episode_renames(&temp_moves);
+            return Err(format!(
+                "Failed to move {} to temporary rename path: {error}",
+                plan.old_path_string
+            ));
+        }
+
+        temp_moves.push(EpisodeTempMove {
+            old_path: plan.old_path.clone(),
+            temp_path,
+            new_path: plan.new_path.clone(),
+        });
+    }
+
+    Ok(temp_moves)
+}
+
+fn move_episode_temps_to_destinations(temp_moves: &[EpisodeTempMove]) -> Result<(), String> {
+    for temp_move in temp_moves {
+        if let Err(error) = fs::rename(&temp_move.temp_path, &temp_move.new_path) {
+            return Err(format!(
+                "Failed to move temporary rename path to {}: {error}",
+                temp_move.new_path.to_string_lossy()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn rollback_episode_renames(temp_moves: &[EpisodeTempMove]) {
+    for temp_move in temp_moves.iter().rev() {
+        if temp_move.temp_path.exists() {
+            let _ = fs::rename(&temp_move.temp_path, &temp_move.old_path);
+        } else if temp_move.new_path.exists() {
+            let _ = fs::rename(&temp_move.new_path, &temp_move.old_path);
+        }
+    }
+}
+
+fn rollback_episode_rename_destinations(temp_moves: &[EpisodeTempMove]) {
+    for temp_move in temp_moves.iter().rev() {
+        if temp_move.new_path.exists() {
+            let _ = fs::rename(&temp_move.new_path, &temp_move.old_path);
+        }
+    }
+}
+
+fn persist_episode_renames(conn: &mut Connection, plans: &[RenameEpisodePlan]) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    for plan in plans {
+        let metadata = fs::metadata(&plan.new_path)
+            .map_err(|e| format!("Failed to read renamed file metadata ({}): {e}", plan.new_path_string))?;
+        let file_name = plan
+            .new_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let file_type = plan
+            .new_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let relative_path = renamed_relative_path(&plan.new_path, plan.root_folder.as_deref(), &plan.new_path_string);
+
+        tx.execute(
+            "UPDATE episodes
+             SET path = ?1,
+                 relative_path = ?2,
+                 file_name = ?3,
+                 file_type = ?4,
+                 size = ?5,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?6",
+            params![
+                plan.new_path_string,
+                relative_path,
+                file_name,
+                file_type,
+                metadata.len() as i64,
+                plan.episode_id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    refresh_anime_latest_episode_at(conn)?;
+    Ok(())
+}
+
+fn unique_rename_temp_path(source: &Path, index: usize) -> Result<PathBuf, String> {
+    let parent = source
+        .parent()
+        .ok_or_else(|| format!("Source path has no parent folder: {}", source.to_string_lossy()))?;
+    let file_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("episode");
+
+    for attempt in 0..1000 {
+        let candidate = parent.join(format!(
+            ".anime-player-rename-{}-{index}-{attempt}-{file_name}",
+            std::process::id()
+        ));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!(
+        "Could not create a unique temporary rename path for {}",
+        source.to_string_lossy()
+    ))
+}
+
+fn renamed_relative_path(path: &Path, root_folder: Option<&Path>, fallback: &str) -> String {
+    if let Some(root_folder) = root_folder {
+        if let Ok(relative) = path.strip_prefix(root_folder) {
+            return relative.to_string_lossy().replace('\\', "/");
+        }
+    }
+
+    fallback.replace('\\', "/")
+}
+
+fn windows_path_key(path: &str) -> String {
+    path.replace('/', "\\").to_ascii_lowercase()
 }
 
 fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>, String> {

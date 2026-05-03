@@ -16,6 +16,8 @@ import type {
   ProgressOverrideSummary,
   RegexRule,
   RegexRuleInput,
+  RenameEpisodeFileRequest,
+  RenameEpisodeFilesSummary,
   RootFolder,
   ScanSummary,
 } from "./types";
@@ -78,6 +80,14 @@ export function listEpisodes(animeId: number): Promise<Episode[]> {
 
 export function deleteAnimeFiles(animeId: number): Promise<DeleteAnimeFilesSummary> {
   return invoke("delete_anime_files", { animeId });
+}
+
+export function validateEpisodeFileRenames(renames: RenameEpisodeFileRequest[]): Promise<void> {
+  return invoke("validate_episode_file_renames", { renames });
+}
+
+export function renameEpisodeFiles(renames: RenameEpisodeFileRequest[]): Promise<RenameEpisodeFilesSummary> {
+  return invoke("rename_episode_files", { renames });
 }
 
 export function openAnimeEpisodeFolder(animeId: number): Promise<void> {

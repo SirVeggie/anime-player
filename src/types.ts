@@ -127,6 +127,16 @@ export type DeleteAnimeFilesSummary = {
   permanent_delete_used: boolean;
 };
 
+export type RenameEpisodeFileRequest = {
+  episode_id: number;
+  old_path: string;
+  new_path: string;
+};
+
+export type RenameEpisodeFilesSummary = {
+  files_renamed: number;
+};
+
 export type AnilistAuthState = {
   client_id: string | null;
   viewer_id: number | null;

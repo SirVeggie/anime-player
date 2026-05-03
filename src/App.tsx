@@ -25,6 +25,7 @@ import {
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
   overrideAnimeProgress,
+  renameEpisodeFiles,
   removeRootFolder,
   rescanLibrary,
   searchAnilistAnime,
@@ -36,6 +37,7 @@ import {
   stopMpv,
   unlinkAnimeAnilist,
   updateRegexRule,
+  validateEpisodeFileRenames,
 } from "./api";
 import { AnimeGrid } from "./components/AnimeGrid";
 import { BulkEditScreen } from "./components/BulkEditScreen";
@@ -61,6 +63,7 @@ import type {
   LocalDataStats,
   RegexRule,
   RegexRuleInput,
+  RenameEpisodeFileRequest,
   RootFolder,
 } from "./types";
 import { APP_WINDOW_TITLE, errorMessage, formatSize, isTextInputTarget, shortenForOsTitle } from "./utils";
@@ -661,6 +664,25 @@ function App() {
     [reloadLibrary, runAction],
   );
 
+  const handleRenameEpisodeFiles = useCallback(
+    async (renames: RenameEpisodeFileRequest[]) => {
+      if (renames.length === 0) return;
+      await runAction(async () => {
+        const summary = await renameEpisodeFiles(renames);
+        const state = await reloadLibrary();
+        if (selectedAnimeIdRef.current !== null) {
+          const updated = state.anime.find((anime) => anime.id === selectedAnimeIdRef.current);
+          if (updated) {
+            setSelectedAnime(updated);
+            setEpisodes(await listEpisodes(updated.id));
+          }
+        }
+        return `Renamed ${summary.files_renamed} file${summary.files_renamed === 1 ? "" : "s"}.`;
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
   const handleSaveAnilistClientId = useCallback(
     async (clientId: string) => {
       await runAction(async () => {
@@ -1086,6 +1108,8 @@ function App() {
                 onOpenAnime={(anime) => void openAnime(anime, "bulkEdit")}
                 onListEpisodes={listEpisodes}
                 onMoveAnime={(animeIds, categoryId) => void handleBulkMoveAnime(animeIds, categoryId)}
+                onValidateEpisodeRenames={validateEpisodeFileRenames}
+                onRenameEpisodeFiles={(renames) => void handleRenameEpisodeFiles(renames)}
               />
             </div>
           ) : null}
