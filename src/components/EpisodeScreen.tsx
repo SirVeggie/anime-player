@@ -270,6 +270,25 @@ export function EpisodeScreen(props: {
     setAnimeSettingsError(null);
   }, [animeSettingsSaving]);
 
+  const stepTrackerOffsetDraft = useCallback(
+    (delta: number) => {
+      const parsedDraft = Number(trackerOffsetDraft);
+      const baseOffset =
+        trackerOffsetDraft.trim() && Number.isFinite(parsedDraft) ? parsedDraft : anime.tracker_offset;
+      setTrackerOffsetDraft(String(Math.round(baseOffset + delta)));
+    },
+    [anime.tracker_offset, trackerOffsetDraft],
+  );
+
+  const stepProgressOverrideDraft = useCallback(
+    (delta: number) => {
+      const parsedDraft = Number(progressOverrideDraft);
+      const baseProgress = progressOverrideDraft.trim() && Number.isFinite(parsedDraft) ? parsedDraft : 0;
+      setProgressOverrideDraft(String(Math.max(0, Math.round(baseProgress + delta))));
+    },
+    [progressOverrideDraft],
+  );
+
   const saveAnimeSettings = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
@@ -616,40 +635,77 @@ export function EpisodeScreen(props: {
                   Adjust per-anime tracker numbering and force local progress.
                 </p>
               </div>
-              <button type="button" onClick={closeAnimeSettings} disabled={animeSettingsSaving}>
-                Close
-              </button>
             </div>
             <form className="anime-settings-form" onSubmit={(e) => void saveAnimeSettings(e)}>
-              <label>
-                <span>Tracker offset</span>
-                <input
-                  type="number"
-                  step="1"
-                  value={trackerOffsetDraft}
-                  disabled={animeSettingsSaving}
-                  onChange={(e) => setTrackerOffsetDraft(e.currentTarget.value)}
-                />
-              </label>
-              <p className="muted">
-                Subtracts from parsed episode numbers for display and AniList sync. Example: offset 12 makes parsed
-                episode 14 become Episode 2.
-              </p>
-              <label>
-                <span>Override progress</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={progressOverrideDraft}
-                  placeholder="Leave blank to keep current progress"
-                  disabled={animeSettingsSaving}
-                  onChange={(e) => setProgressOverrideDraft(e.currentTarget.value)}
-                />
-              </label>
-              <p className="muted">
-                Forces all episodes up to this adjusted number to watched and resets every later episode to 0%.
-              </p>
+              <div className="anime-settings-field">
+                <label>
+                  <span>Tracker offset</span>
+                  <div className="score-stepper anime-settings-stepper">
+                    <input
+                      type="number"
+                      step="1"
+                      value={trackerOffsetDraft}
+                      disabled={animeSettingsSaving}
+                      onChange={(e) => setTrackerOffsetDraft(e.currentTarget.value)}
+                    />
+                    <div className="score-stepper-buttons">
+                      <button
+                        type="button"
+                        className="score-stepper-button score-stepper-button--up"
+                        aria-label="Increase tracker offset"
+                        disabled={animeSettingsSaving}
+                        onClick={() => stepTrackerOffsetDraft(1)}
+                      />
+                      <button
+                        type="button"
+                        className="score-stepper-button score-stepper-button--down"
+                        aria-label="Decrease tracker offset"
+                        disabled={animeSettingsSaving}
+                        onClick={() => stepTrackerOffsetDraft(-1)}
+                      />
+                    </div>
+                  </div>
+                </label>
+                <p className="muted">
+                  Subtracts from parsed episode numbers for display and AniList sync. Example: offset 12 makes parsed
+                  episode 14 become Episode 2.
+                </p>
+              </div>
+              <div className="anime-settings-field">
+                <label>
+                  <span>Override progress</span>
+                  <div className="score-stepper anime-settings-stepper">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={progressOverrideDraft}
+                      placeholder="Leave blank to keep current progress"
+                      disabled={animeSettingsSaving}
+                      onChange={(e) => setProgressOverrideDraft(e.currentTarget.value)}
+                    />
+                    <div className="score-stepper-buttons">
+                      <button
+                        type="button"
+                        className="score-stepper-button score-stepper-button--up"
+                        aria-label="Increase override progress"
+                        disabled={animeSettingsSaving}
+                        onClick={() => stepProgressOverrideDraft(1)}
+                      />
+                      <button
+                        type="button"
+                        className="score-stepper-button score-stepper-button--down"
+                        aria-label="Decrease override progress"
+                        disabled={animeSettingsSaving}
+                        onClick={() => stepProgressOverrideDraft(-1)}
+                      />
+                    </div>
+                  </div>
+                </label>
+                <p className="muted">
+                  Forces all episodes up to this adjusted number to watched and resets every later episode to 0%.
+                </p>
+              </div>
               {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}
               <div className="modal-actions">
                 <button type="button" onClick={closeAnimeSettings} disabled={animeSettingsSaving}>

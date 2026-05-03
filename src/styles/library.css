@@ -590,15 +590,31 @@
 .anime-settings-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 18px;
+}
+
+.anime-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .anime-settings-form label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 12px;
+  gap: 8px;
+  color: #cfe2ff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.anime-settings-stepper {
+  width: 100%;
+  margin-right: 0;
+}
+
+.anime-settings-stepper input {
+  font-weight: 400;
 }
 
 .anime-settings-form p {
