@@ -16,6 +16,7 @@ import type {
   ProgressOverrideSummary,
   RegexRule,
   RegexRuleInput,
+  RenameAnimeSummary,
   RenameFileRequest,
   RenameFilesSummary,
   RootFolder,
@@ -93,6 +94,10 @@ export function validateFileRenames(renames: RenameFileRequest[]): Promise<void>
 
 export function renameFiles(renames: RenameFileRequest[]): Promise<RenameFilesSummary> {
   return invoke("rename_files", { renames });
+}
+
+export function renameAnime(animeId: number, newTitle: string): Promise<RenameAnimeSummary> {
+  return invoke("rename_anime", { animeId, newTitle });
 }
 
 export function openAnimeEpisodeFolder(animeId: number): Promise<void> {

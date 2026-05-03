@@ -613,6 +613,10 @@
   margin-right: 0;
 }
 
+.anime-settings-field > label > input {
+  width: 100%;
+}
+
 .anime-settings-stepper input {
   font-weight: 400;
 }

@@ -135,10 +135,8 @@ pub fn match_rule_name_for_file_name(
     if named_rules.is_empty() {
         return Ok(None);
     }
-    let detection_only: Vec<DetectionRule> = named_rules
-        .iter()
-        .map(|(_, rule)| rule.clone())
-        .collect();
+    let detection_only: Vec<DetectionRule> =
+        named_rules.iter().map(|(_, rule)| rule.clone()).collect();
     let compiled = compile_rules(&detection_only)?;
     for ((name, _), rule) in named_rules.iter().zip(compiled.iter()) {
         if parse_episode_fields(file_name, rule).is_some() {
@@ -146,6 +144,48 @@ pub fn match_rule_name_for_file_name(
         }
     }
     Ok(None)
+}
+
+pub fn renamed_file_name_for_title(
+    file_name: &str,
+    rules: &[DetectionRule],
+    new_title: &str,
+) -> Result<Option<String>, String> {
+    let compiled = compile_rules(rules)?;
+    for rule in &compiled {
+        let Some(title_match) = find_title_match(file_name, rule) else {
+            continue;
+        };
+
+        let mut renamed = file_name.to_string();
+        renamed.replace_range(title_match.start()..title_match.end(), new_title);
+        return Ok(Some(renamed));
+    }
+
+    Ok(None)
+}
+
+pub fn title_key_for_file_name(
+    file_name: &str,
+    rules: &[DetectionRule],
+) -> Result<Option<String>, String> {
+    let compiled = compile_rules(rules)?;
+    for rule in &compiled {
+        let Some((title, _)) = parse_episode_fields(file_name, rule) else {
+            continue;
+        };
+        return Ok(Some(title_key(&title)));
+    }
+
+    Ok(None)
+}
+
+fn find_title_match<'a>(file_name: &'a str, rule: &CompiledRule) -> Option<regex::Match<'a>> {
+    if !rule.detection.is_match(file_name) {
+        return None;
+    }
+    let caps = rule.title.captures(file_name)?;
+    caps.name("title").or_else(|| caps.get(1))
 }
 
 fn parse_episode_fields(file_name: &str, rule: &CompiledRule) -> Option<(String, Option<f64>)> {

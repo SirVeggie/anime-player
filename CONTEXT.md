@@ -65,7 +65,8 @@ view components. Per-screen UI lives in `src/components/`:
   `add_root_folder`, `rescan_library`, `get_local_data_stats`,
   `clean_local_data`, `list_episodes`, `list_root_video_files`, `delete_anime_files`,
   `move_anime_to_category`, `set_default_category`, editable
-  `*_regex_rule` commands, `rename_files`, `save_episode_progress`, and the Windows-only
+  `*_regex_rule` commands, `rename_files`, `rename_anime`,
+  `save_episode_progress`, and the Windows-only
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
   command still exists for compatibility.
 - AniList integration is a first-slice metadata/linking feature. Settings
@@ -91,8 +92,12 @@ view components. Per-screen UI lives in `src/components/`:
   no local episode progress imports AniList progress by marking matching local
   episodes watched; linking an anime does the same watched-only import without
   clearing any later local progress. The episode-page anime settings popup also
-  has a force progress override that intentionally rewrites all local episode
-  progress for that anime, unlike the watched-only AniList import path.
+  has a filesystem-backed anime rename field plus a force progress override
+  that intentionally rewrites all local episode progress for that anime, unlike
+  the watched-only AniList import path. Anime rename updates the episode
+  filenames on disk and migrates the existing anime/episode database rows in
+  place so categories, progress, tracker offset, and AniList links stay attached
+  to the same anime ID.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.
@@ -209,7 +214,7 @@ view components. Per-screen UI lives in `src/components/`:
   `move_anime_to_category`, `list_episodes`, `get_matching_detection_rule_name`
   (re-runs filename matching against enabled rules for the episode list; the
   episode page shows the resulting rule name without persisting it),
-  `save_episode_progress`, `get_local_data_stats`, `clean_local_data`,
+  `save_episode_progress`, `rename_anime`, `get_local_data_stats`, `clean_local_data`,
   and `rescan_library`. `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
   series is upserted once per scan instead of once per file. The upserts are

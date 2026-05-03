@@ -49,7 +49,12 @@ export function EpisodeScreen(props: {
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
   onSetAnilistScore: (animeId: number, score: number | null) => Promise<AnilistMediaStatus>;
-  onSaveAnimeSettings: (animeId: number, trackerOffset: number, progressOverride: number | null) => Promise<void>;
+  onSaveAnimeSettings: (
+    animeId: number,
+    title: string,
+    trackerOffset: number,
+    progressOverride: number | null,
+  ) => Promise<void>;
   anilistProgressUpdate: AnilistProgressUpdate | null;
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
@@ -85,6 +90,7 @@ export function EpisodeScreen(props: {
   const [linkSearchError, setLinkSearchError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [animeSettingsOpen, setAnimeSettingsOpen] = useState(false);
+  const [animeTitleDraft, setAnimeTitleDraft] = useState(anime.title);
   const [trackerOffsetDraft, setTrackerOffsetDraft] = useState(String(anime.tracker_offset));
   const [progressOverrideDraft, setProgressOverrideDraft] = useState("");
   const [animeSettingsSaving, setAnimeSettingsSaving] = useState(false);
@@ -111,6 +117,7 @@ export function EpisodeScreen(props: {
     setDeleteConfirmOpen(false);
     setAnimeSettingsOpen(false);
     setAnimeSettingsError(null);
+    setAnimeTitleDraft(anime.title);
     setTrackerOffsetDraft(String(anime.tracker_offset));
     setProgressOverrideDraft("");
   }, [anime.id, anime.title, anime.tracker_offset]);
@@ -258,11 +265,12 @@ export function EpisodeScreen(props: {
   }, [onDeleteAnime]);
 
   const openAnimeSettings = useCallback(() => {
+    setAnimeTitleDraft(anime.title);
     setTrackerOffsetDraft(String(anime.tracker_offset));
     setProgressOverrideDraft("");
     setAnimeSettingsError(null);
     setAnimeSettingsOpen(true);
-  }, [anime.tracker_offset]);
+  }, [anime.title, anime.tracker_offset]);
 
   const closeAnimeSettings = useCallback(() => {
     if (animeSettingsSaving) return;
@@ -292,9 +300,11 @@ export function EpisodeScreen(props: {
   const saveAnimeSettings = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
+      const title = animeTitleDraft.trim();
       let trackerOffset: number;
       let progressOverride: number | null = null;
       try {
+        if (!title) throw new Error("Anime title is required.");
         trackerOffset = parseIntegerDraft(trackerOffsetDraft, "Tracker offset");
         if (progressOverrideDraft.trim()) {
           progressOverride = parseIntegerDraft(progressOverrideDraft, "Override progress");
@@ -308,7 +318,7 @@ export function EpisodeScreen(props: {
       setAnimeSettingsSaving(true);
       setAnimeSettingsError(null);
       try {
-        await onSaveAnimeSettings(anime.id, trackerOffset, progressOverride);
+        await onSaveAnimeSettings(anime.id, title, trackerOffset, progressOverride);
         setAnimeSettingsOpen(false);
         setProgressOverrideDraft("");
       } catch (error) {
@@ -317,7 +327,7 @@ export function EpisodeScreen(props: {
         setAnimeSettingsSaving(false);
       }
     },
-    [anime.id, onSaveAnimeSettings, progressOverrideDraft, trackerOffsetDraft],
+    [anime.id, animeTitleDraft, onSaveAnimeSettings, progressOverrideDraft, trackerOffsetDraft],
   );
 
   const saveScore = useCallback(
@@ -637,6 +647,20 @@ export function EpisodeScreen(props: {
               </div>
             </div>
             <form className="anime-settings-form" onSubmit={(e) => void saveAnimeSettings(e)}>
+              <div className="anime-settings-field">
+                <label>
+                  <span>Anime title</span>
+                  <input
+                    type="text"
+                    value={animeTitleDraft}
+                    disabled={animeSettingsSaving}
+                    onChange={(e) => setAnimeTitleDraft(e.currentTarget.value)}
+                  />
+                </label>
+                <p className="muted">
+                  Renames the episode files on disk and keeps this anime's saved progress, category, and AniList link.
+                </p>
+              </div>
               <div className="anime-settings-field">
                 <label>
                   <span>Tracker offset</span>

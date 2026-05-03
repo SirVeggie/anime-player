@@ -26,6 +26,7 @@ import {
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
   overrideAnimeProgress,
+  renameAnime,
   renameFiles,
   removeRootFolder,
   rescanLibrary,
@@ -723,7 +724,15 @@ function App() {
   }, []);
 
   const handleSaveAnimeSettings = useCallback(
-    async (animeId: number, trackerOffset: number, progressOverride: number | null) => {
+    async (animeId: number, title: string, trackerOffset: number, progressOverride: number | null) => {
+      const currentAnime = selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
+      if (currentAnime && title.trim() !== currentAnime.title) {
+        if (selectedEpisode?.anime_id === animeId) {
+          await stopMpv().catch(() => undefined);
+          setSelectedEpisode(null);
+        }
+        await renameAnime(animeId, title);
+      }
       await setAnimeTrackerOffset(animeId, trackerOffset);
       if (progressOverride !== null) {
         const result = await overrideAnimeProgress(animeId, progressOverride);
@@ -741,7 +750,7 @@ function App() {
       }
       await refreshAnimePageData(animeId);
     },
-    [library?.anime, refreshAnimePageData, selectedAnime],
+    [library?.anime, refreshAnimePageData, selectedAnime, selectedEpisode?.anime_id],
   );
 
   const handleAnilistProgressSynced = useCallback((animeId: number, result: AnilistProgressSyncResult) => {

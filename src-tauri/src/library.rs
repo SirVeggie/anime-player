@@ -166,6 +166,11 @@ pub struct RenameFilesSummary {
     files_renamed: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct RenameAnimeSummary {
+    files_renamed: i64,
+}
+
 #[derive(Debug)]
 struct DeletableEpisode {
     id: i64,
@@ -624,6 +629,33 @@ pub fn rename_files(
     }
 
     Ok(RenameFilesSummary {
+        files_renamed: plans.len() as i64,
+    })
+}
+
+#[tauri::command]
+pub fn rename_anime(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    new_title: String,
+) -> Result<RenameAnimeSummary, String> {
+    let new_title = normalize_anime_rename_title(&new_title)?;
+    let plans = db.with_conn(|conn| build_anime_rename_plan(conn, anime_id, &new_title))?;
+    let temp_moves = move_episode_sources_to_temps(&plans)?;
+
+    if let Err(error) = move_episode_temps_to_destinations(&temp_moves) {
+        rollback_episode_renames(&temp_moves);
+        return Err(error);
+    }
+
+    if let Err(error) =
+        db.with_conn(|conn| persist_anime_rename(conn, anime_id, &new_title, &plans))
+    {
+        rollback_episode_rename_destinations(&temp_moves);
+        return Err(error);
+    }
+
+    Ok(RenameAnimeSummary {
         files_renamed: plans.len() as i64,
     })
 }
@@ -1827,6 +1859,156 @@ fn ensure_rename_destination_not_in_database(
     Ok(())
 }
 
+fn normalize_anime_rename_title(title: &str) -> Result<String, String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("Anime title cannot be empty.".to_string());
+    }
+    if trimmed.chars().any(|c| {
+        c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+    }) {
+        return Err(
+            r#"Anime title cannot contain Windows filename characters: < > : " / \ | ? *"#
+                .to_string(),
+        );
+    }
+    Ok(trimmed.to_string())
+}
+
+fn build_anime_rename_plan(
+    conn: &Connection,
+    anime_id: i64,
+    new_title: &str,
+) -> Result<Vec<RenameEpisodePlan>, String> {
+    let (current_title, current_title_key) = conn
+        .query_row(
+            "SELECT title, title_key FROM anime WHERE id = ?1",
+            params![anime_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Anime does not exist: {anime_id}"))?;
+
+    let new_title_key = scanner::title_key(new_title);
+    if new_title_key.is_empty() {
+        return Err("Anime title cannot be empty.".to_string());
+    }
+
+    if current_title == new_title && current_title_key == new_title_key {
+        return Ok(Vec::new());
+    }
+
+    let existing_anime_id = conn
+        .query_row(
+            "SELECT id FROM anime WHERE title_key = ?1 AND id != ?2",
+            params![new_title_key, anime_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(existing_anime_id) = existing_anime_id {
+        return Err(format!(
+            "Another anime already uses the title \"{new_title}\" (id {existing_anime_id})."
+        ));
+    }
+
+    let roots = list_root_folders(conn)?;
+    if roots.is_empty() {
+        return Err("No root folders are configured.".to_string());
+    }
+    let rules = list_enabled_detection_rules(conn)?;
+    if rules.is_empty() {
+        return Err("No enabled anime detection rules are configured.".to_string());
+    }
+
+    let episodes = list_episodes_for_anime(conn, anime_id)?;
+    if episodes.is_empty() {
+        return Err("This anime has no available episode files to rename.".to_string());
+    }
+
+    let root_paths = roots
+        .into_iter()
+        .map(|root| PathBuf::from(root.path))
+        .collect::<Vec<_>>();
+    let mut plans = Vec::new();
+    let mut destination_keys = HashSet::new();
+
+    for episode in episodes {
+        let old_path = PathBuf::from(&episode.path);
+        if !old_path.is_absolute() {
+            return Err(format!("Episode path is not absolute: {}", episode.path));
+        }
+
+        let Some(root_folder) = root_paths
+            .iter()
+            .find(|root| old_path.starts_with(root))
+            .cloned()
+        else {
+            return Err(format!(
+                "Episode file is not inside a configured root folder: {}",
+                episode.path
+            ));
+        };
+
+        let new_file_name =
+            scanner::renamed_file_name_for_title(&episode.file_name, &rules, new_title)?
+                .ok_or_else(|| {
+                    format!(
+                        "Episode filename no longer matches an enabled detection rule: {}",
+                        episode.file_name
+                    )
+                })?;
+        let reparsed_title_key = scanner::title_key_for_file_name(&new_file_name, &rules)?
+            .ok_or_else(|| {
+                format!(
+                    "Renamed filename would not match an enabled detection rule: {new_file_name}"
+                )
+            })?;
+        if reparsed_title_key != new_title_key {
+            return Err(format!(
+                "Renamed filename would scan as a different anime title: {new_file_name}"
+            ));
+        }
+
+        let new_path = old_path.with_file_name(new_file_name);
+        let new_path_string = new_path.to_string_lossy().to_string();
+        if episode.path == new_path_string {
+            continue;
+        }
+        if !destination_keys.insert(windows_path_key(&new_path_string)) {
+            return Err(format!(
+                "Multiple episodes would be renamed to the same destination: {new_path_string}"
+            ));
+        }
+
+        plans.push(RenameEpisodePlan {
+            old_path,
+            old_path_string: episode.path,
+            new_path,
+            new_path_string,
+            root_folder,
+        });
+    }
+
+    let source_keys = plans
+        .iter()
+        .map(|plan| windows_path_key(&plan.old_path_string))
+        .collect::<HashSet<_>>();
+    for plan in &plans {
+        ensure_rename_destination_not_in_database(conn, plan, &source_keys)?;
+        if plan.new_path.exists() && !source_keys.contains(&windows_path_key(&plan.new_path_string))
+        {
+            return Err(format!(
+                "Destination already exists outside the rename set: {}",
+                plan.new_path_string
+            ));
+        }
+    }
+
+    Ok(plans)
+}
+
 #[derive(Debug)]
 struct EpisodeTempMove {
     old_path: PathBuf,
@@ -1966,6 +2148,98 @@ fn persist_episode_renames(conn: &mut Connection, plans: &[RenameEpisodePlan]) -
             params![plan.new_path_string, relative_path, file_name, temp_db_path],
         )
         .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    refresh_anime_latest_episode_at(conn)?;
+    Ok(())
+}
+
+fn persist_anime_rename(
+    conn: &mut Connection,
+    anime_id: i64,
+    new_title: &str,
+    plans: &[RenameEpisodePlan],
+) -> Result<(), String> {
+    let new_title_key = scanner::title_key(new_title);
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let temp_db_paths = plans
+        .iter()
+        .enumerate()
+        .map(|(index, plan)| {
+            format!(
+                "__anime_player_rename_temp__:{}:{index}:{}",
+                std::process::id(),
+                plan.old_path_string
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (plan, temp_db_path) in plans.iter().zip(temp_db_paths.iter()) {
+        tx.execute(
+            "UPDATE episodes
+             SET path = ?1
+             WHERE path = ?2",
+            params![temp_db_path, plan.old_path_string],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    for (plan, temp_db_path) in plans.iter().zip(temp_db_paths.iter()) {
+        let metadata = fs::metadata(&plan.new_path).map_err(|e| {
+            format!(
+                "Failed to read renamed file metadata ({}): {e}",
+                plan.new_path_string
+            )
+        })?;
+        let file_name = plan
+            .new_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let file_type = plan
+            .new_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let relative_path =
+            renamed_relative_path(&plan.new_path, &plan.root_folder, &plan.new_path_string);
+
+        tx.execute(
+            "UPDATE episodes
+             SET path = ?1,
+                 relative_path = ?2,
+                 file_name = ?3,
+                 file_type = ?4,
+                 size = ?5,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE path = ?6",
+            params![
+                plan.new_path_string,
+                relative_path,
+                file_name,
+                file_type,
+                metadata.len() as i64,
+                temp_db_path
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let changed = tx
+        .execute(
+            "UPDATE anime
+             SET title = ?1,
+                 title_key = ?2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?3",
+            params![new_title, new_title_key, anime_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("Anime does not exist: {anime_id}"));
     }
 
     tx.commit().map_err(|e| e.to_string())?;

@@ -143,6 +143,10 @@ export type RenameFilesSummary = {
   files_renamed: number;
 };
 
+export type RenameAnimeSummary = {
+  files_renamed: number;
+};
+
 export type AnilistAuthState = {
   client_id: string | null;
   viewer_id: number | null;
