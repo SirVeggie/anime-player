@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAnilistCoverImage, getFileThumbnail, getMatchingDetectionRuleName } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
-import { formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
+import { errorMessage, formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
-import { FolderOpenIcon } from "./Icons";
+import { FolderOpenIcon, SettingsIcon } from "./Icons";
 import { ViewHeader } from "./ViewHeader";
 
 type AnilistProgressUpdate = {
@@ -28,6 +28,14 @@ function mergeWithLatestProgress(
   return { ...status, progress };
 }
 
+function parseIntegerDraft(value: string, label: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${label} is required.`);
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed)) throw new Error(`${label} must be an integer.`);
+  return parsed;
+}
+
 export function EpisodeScreen(props: {
   anime: AnimeSummary;
   episodes: Episode[];
@@ -40,6 +48,7 @@ export function EpisodeScreen(props: {
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
   onSetAnilistScore: (animeId: number, score: number | null) => Promise<AnilistMediaStatus>;
+  onSaveAnimeSettings: (animeId: number, trackerOffset: number, progressOverride: number | null) => Promise<void>;
   anilistProgressUpdate: AnilistProgressUpdate | null;
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
@@ -57,6 +66,7 @@ export function EpisodeScreen(props: {
     onSearchAnilist,
     onGetAnilistStatus,
     onSetAnilistScore,
+    onSaveAnimeSettings,
     anilistProgressUpdate,
     onLinkAnilist,
     onUnlinkAnilist,
@@ -73,6 +83,11 @@ export function EpisodeScreen(props: {
   const [linkSearchBusy, setLinkSearchBusy] = useState(false);
   const [linkSearchError, setLinkSearchError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [animeSettingsOpen, setAnimeSettingsOpen] = useState(false);
+  const [trackerOffsetDraft, setTrackerOffsetDraft] = useState(String(anime.tracker_offset));
+  const [progressOverrideDraft, setProgressOverrideDraft] = useState("");
+  const [animeSettingsSaving, setAnimeSettingsSaving] = useState(false);
+  const [animeSettingsError, setAnimeSettingsError] = useState<string | null>(null);
   const [anilistStatus, setAnilistStatus] = useState<AnilistMediaStatus | null>(null);
   const [scoreDraft, setScoreDraft] = useState("");
   const [scoreSaving, setScoreSaving] = useState(false);
@@ -83,7 +98,9 @@ export function EpisodeScreen(props: {
   const scoreSaveRequestRef = useRef(0);
   const remainingCount = episodes.filter((episode) => !episode.watched).length;
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
-  const getRovingItemProps = useRovingListNavigation(episodes.length, { enabled: !linkSearchOpen && !deleteConfirmOpen });
+  const getRovingItemProps = useRovingListNavigation(episodes.length, {
+    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen,
+  });
 
   useEffect(() => {
     setLinkQuery(anime.title);
@@ -91,7 +108,11 @@ export function EpisodeScreen(props: {
     setLinkSearchOpen(false);
     setLinkSearchError(null);
     setDeleteConfirmOpen(false);
-  }, [anime.id, anime.title]);
+    setAnimeSettingsOpen(false);
+    setAnimeSettingsError(null);
+    setTrackerOffsetDraft(String(anime.tracker_offset));
+    setProgressOverrideDraft("");
+  }, [anime.id, anime.title, anime.tracker_offset]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +256,50 @@ export function EpisodeScreen(props: {
     onDeleteAnime();
   }, [onDeleteAnime]);
 
+  const openAnimeSettings = useCallback(() => {
+    setTrackerOffsetDraft(String(anime.tracker_offset));
+    setProgressOverrideDraft("");
+    setAnimeSettingsError(null);
+    setAnimeSettingsOpen(true);
+  }, [anime.tracker_offset]);
+
+  const closeAnimeSettings = useCallback(() => {
+    if (animeSettingsSaving) return;
+    setAnimeSettingsOpen(false);
+    setAnimeSettingsError(null);
+  }, [animeSettingsSaving]);
+
+  const saveAnimeSettings = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      let trackerOffset: number;
+      let progressOverride: number | null = null;
+      try {
+        trackerOffset = parseIntegerDraft(trackerOffsetDraft, "Tracker offset");
+        if (progressOverrideDraft.trim()) {
+          progressOverride = parseIntegerDraft(progressOverrideDraft, "Override progress");
+          if (progressOverride < 0) throw new Error("Override progress must be 0 or greater.");
+        }
+      } catch (error) {
+        setAnimeSettingsError(errorMessage(error));
+        return;
+      }
+
+      setAnimeSettingsSaving(true);
+      setAnimeSettingsError(null);
+      try {
+        await onSaveAnimeSettings(anime.id, trackerOffset, progressOverride);
+        setAnimeSettingsOpen(false);
+        setProgressOverrideDraft("");
+      } catch (error) {
+        setAnimeSettingsError(errorMessage(error));
+      } finally {
+        setAnimeSettingsSaving(false);
+      }
+    },
+    [anime.id, onSaveAnimeSettings, progressOverrideDraft, trackerOffsetDraft],
+  );
+
   const saveScore = useCallback(
     async (value: string) => {
       if (!anime.anilist_id) return;
@@ -329,6 +394,15 @@ export function EpisodeScreen(props: {
               title="Open episode folder"
             >
               <FolderOpenIcon />
+            </button>
+            <button
+              type="button"
+              className="header-icon-button"
+              onClick={openAnimeSettings}
+              aria-label="Open anime settings"
+              title="Anime settings"
+            >
+              <SettingsIcon />
             </button>
             {anime.anilist_site_url ? (
               <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
@@ -519,12 +593,82 @@ export function EpisodeScreen(props: {
         </div>
       ) : null}
 
+      {animeSettingsOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeAnimeSettings();
+          }}
+        >
+          <section
+            className="modal anime-settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="anime-settings-title"
+            aria-describedby="anime-settings-description"
+          >
+            <div className="modal-heading">
+              <div>
+                <h2 id="anime-settings-title">Anime Settings</h2>
+                <p className="muted" id="anime-settings-description">
+                  Adjust per-anime tracker numbering and force local progress.
+                </p>
+              </div>
+              <button type="button" onClick={closeAnimeSettings} disabled={animeSettingsSaving}>
+                Close
+              </button>
+            </div>
+            <form className="anime-settings-form" onSubmit={(e) => void saveAnimeSettings(e)}>
+              <label>
+                <span>Tracker offset</span>
+                <input
+                  type="number"
+                  step="1"
+                  value={trackerOffsetDraft}
+                  disabled={animeSettingsSaving}
+                  onChange={(e) => setTrackerOffsetDraft(e.currentTarget.value)}
+                />
+              </label>
+              <p className="muted">
+                Subtracts from parsed episode numbers for display and AniList sync. Example: offset 12 makes parsed
+                episode 14 become Episode 2.
+              </p>
+              <label>
+                <span>Override progress</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={progressOverrideDraft}
+                  placeholder="Leave blank to keep current progress"
+                  disabled={animeSettingsSaving}
+                  onChange={(e) => setProgressOverrideDraft(e.currentTarget.value)}
+                />
+              </label>
+              <p className="muted">
+                Forces all episodes up to this adjusted number to watched and resets every later episode to 0%.
+              </p>
+              {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}
+              <div className="modal-actions">
+                <button type="button" onClick={closeAnimeSettings} disabled={animeSettingsSaving}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={animeSettingsSaving}>
+                  {animeSettingsSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
       <section className="episode-list">
         {episodes.map((episode, index) => {
           const percent = episode.watched ? 100 : progressPercent(episode.position_seconds, episode.duration_seconds);
           const thumbnail = episodeThumbnails[episode.id];
           const episodeTitle = isEpisodeNumberKnown(episode.episode_number)
-            ? formatEpisodeNumber(episode.episode_number)
+            ? formatEpisodeNumber(episode.episode_number - anime.tracker_offset)
             : episode.file_name;
           return (
             <button

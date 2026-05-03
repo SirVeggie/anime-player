@@ -13,6 +13,7 @@ import type {
   LocalDataStats,
   MpvTrack,
   MpvVideoGeometry,
+  ProgressOverrideSummary,
   RegexRule,
   RegexRuleInput,
   RootFolder,
@@ -86,6 +87,14 @@ export function openAnimeEpisodeFolder(animeId: number): Promise<void> {
 /** Which enabled detection rule matches this anime's files (same logic as rescan; not persisted). */
 export function getMatchingDetectionRuleName(animeId: number): Promise<string | null> {
   return invoke("get_matching_detection_rule_name", { animeId });
+}
+
+export function setAnimeTrackerOffset(animeId: number, trackerOffset: number): Promise<void> {
+  return invoke("set_anime_tracker_offset", { animeId, trackerOffset });
+}
+
+export function overrideAnimeProgress(animeId: number, progress: number): Promise<ProgressOverrideSummary> {
+  return invoke("override_anime_progress", { animeId, progress });
 }
 
 export function getFileThumbnail(path: string, size: number): Promise<string | null> {
@@ -168,6 +177,10 @@ export function syncAnilistEpisodeProgress(episodeId: number): Promise<AnilistPr
 
 export function getAnilistMediaStatus(animeId: number): Promise<AnilistMediaStatus | null> {
   return invoke("get_anilist_media_status", { animeId });
+}
+
+export function setAnilistMediaProgress(animeId: number, progress: number): Promise<AnilistMediaStatus> {
+  return invoke("set_anilist_media_progress", { animeId, progress });
 }
 
 export function applyAnilistProgressToLocal(animeId: number): Promise<AnilistLocalProgressApplyResult | null> {

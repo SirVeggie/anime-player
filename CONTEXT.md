@@ -81,11 +81,15 @@ view components. Per-screen UI lives in `src/components/`:
   AniList, shows remote `Progress: current/total`, and has a debounced score
   input that writes to AniList. When a local progress save marks an episode
   watched (EOF or the near-end threshold used by hide/next), the player asks
-  Rust to sync AniList progress for the linked anime if the parsed local
-  episode number is ahead of the viewer's current AniList progress. Opening a
-  linked anime with no local episode progress imports AniList progress by
-  marking matching local episodes watched; linking an anime does the same
-  watched-only import without clearing any later local progress.
+  Rust to sync AniList progress for the linked anime if the adjusted local
+  episode number is ahead of the viewer's current AniList progress. Each anime
+  can store a `tracker_offset`; the episode page subtracts it from displayed
+  episode numbers and AniList progress sync/import. Opening a linked anime with
+  no local episode progress imports AniList progress by marking matching local
+  episodes watched; linking an anime does the same watched-only import without
+  clearing any later local progress. The episode-page anime settings popup also
+  has a force progress override that intentionally rewrites all local episode
+  progress for that anime, unlike the watched-only AniList import path.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.

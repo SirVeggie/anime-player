@@ -55,6 +55,7 @@ pub struct AnimeSummary {
     anilist_title: Option<String>,
     anilist_site_url: Option<String>,
     anilist_cover_path: Option<String>,
+    tracker_offset: i64,
     episode_count: i64,
     unwatched_count: i64,
     last_watched_at: Option<String>,
@@ -74,6 +75,7 @@ pub struct MissingAnimeSummary {
     anilist_title: Option<String>,
     anilist_site_url: Option<String>,
     anilist_cover_path: Option<String>,
+    tracker_offset: i64,
     episode_count: i64,
     unwatched_count: i64,
     missing_episode_count: i64,
@@ -118,6 +120,12 @@ pub struct ScanSummary {
     episodes_imported: i64,
     episodes_removed: i64,
     unmatched_files: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProgressOverrideSummary {
+    progress: i64,
+    updated_episodes: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -592,6 +600,83 @@ pub fn get_matching_detection_rule_name(
 }
 
 #[tauri::command]
+pub fn set_anime_tracker_offset(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    tracker_offset: i64,
+) -> Result<(), String> {
+    db.with_conn(|conn| {
+        conn.execute(
+            "UPDATE anime
+             SET tracker_offset = ?1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2",
+            params![tracker_offset, anime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn override_anime_progress(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    progress: i64,
+) -> Result<ProgressOverrideSummary, String> {
+    let progress = progress.max(0);
+    db.with_conn(|conn| {
+        let tracker_offset = conn
+            .query_row(
+                "SELECT tracker_offset FROM anime WHERE id = ?1",
+                params![anime_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let updated_episodes = conn
+            .execute(
+                "UPDATE episodes
+                 SET watched = CASE
+                         WHEN episode_number IS NOT NULL
+                          AND (CAST(episode_number AS INTEGER) - ?2) BETWEEN 1 AND ?3 THEN 1
+                         ELSE 0
+                     END,
+                     position_seconds = CASE
+                         WHEN episode_number IS NOT NULL
+                          AND (CAST(episode_number AS INTEGER) - ?2) BETWEEN 1 AND ?3
+                          AND duration_seconds > 0 THEN duration_seconds
+                         ELSE 0
+                     END,
+                     last_watched_at = CASE
+                         WHEN episode_number IS NOT NULL
+                          AND (CAST(episode_number AS INTEGER) - ?2) BETWEEN 1 AND ?3
+                         THEN CURRENT_TIMESTAMP
+                         ELSE NULL
+                     END,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE anime_id = ?1
+                   AND missing = 0",
+                params![anime_id, tracker_offset, progress],
+            )
+            .map(|count| count as i64)
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE anime
+             SET last_watched_at = CASE WHEN ?1 > 0 THEN CURRENT_TIMESTAMP ELSE NULL END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2",
+            params![progress, anime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        refresh_anime_latest_episode_at(conn)?;
+        Ok(ProgressOverrideSummary {
+            progress,
+            updated_episodes,
+        })
+    })
+}
+
+#[tauri::command]
 pub fn save_episode_progress(
     db: State<'_, AppDatabase>,
     episode_id: i64,
@@ -954,6 +1039,7 @@ fn list_anime(
                 a.anilist_title,
                 a.anilist_site_url,
                 a.anilist_cover_path,
+                a.tracker_offset,
                 COUNT(e.id) AS episode_count,
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
                 a.last_watched_at,
@@ -997,12 +1083,13 @@ fn list_anime(
             anilist_title: row.get(4)?,
             anilist_site_url: row.get(5)?,
             anilist_cover_path: row.get(6)?,
-            episode_count: row.get(7)?,
-            unwatched_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
-            last_watched_at: row.get(9)?,
-            created_at: row.get(10)?,
-            latest_episode_at: row.get(11)?,
-            first_episode_path: row.get(12)?,
+            tracker_offset: row.get(7)?,
+            episode_count: row.get(8)?,
+            unwatched_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
+            last_watched_at: row.get(10)?,
+            created_at: row.get(11)?,
+            latest_episode_at: row.get(12)?,
+            first_episode_path: row.get(13)?,
         })
     };
 
@@ -1026,6 +1113,7 @@ fn list_missing_anime(conn: &Connection) -> Result<Vec<MissingAnimeSummary>, Str
                     a.anilist_title,
                     a.anilist_site_url,
                     a.anilist_cover_path,
+                    a.tracker_offset,
                     SUM(CASE WHEN e.missing = 0 THEN 1 ELSE 0 END) AS available_count,
                     SUM(CASE WHEN e.missing = 0 AND e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
                     SUM(CASE WHEN e.missing != 0 THEN 1 ELSE 0 END) AS missing_count,
@@ -1054,14 +1142,15 @@ fn list_missing_anime(conn: &Connection) -> Result<Vec<MissingAnimeSummary>, Str
                 anilist_title: row.get(4)?,
                 anilist_site_url: row.get(5)?,
                 anilist_cover_path: row.get(6)?,
-                episode_count: row.get::<_, Option<i64>>(7)?.unwrap_or(0),
-                unwatched_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
-                missing_episode_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
-                total_episode_count: row.get(10)?,
-                last_watched_at: row.get(11)?,
-                created_at: row.get(12)?,
-                latest_episode_at: row.get(13)?,
-                first_episode_path: row.get(14)?,
+                tracker_offset: row.get(7)?,
+                episode_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
+                unwatched_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
+                missing_episode_count: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
+                total_episode_count: row.get(11)?,
+                last_watched_at: row.get(12)?,
+                created_at: row.get(13)?,
+                latest_episode_at: row.get(14)?,
+                first_episode_path: row.get(15)?,
             })
         })
         .map_err(|e| e.to_string())?;

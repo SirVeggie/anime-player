@@ -291,6 +291,24 @@ pub async fn get_anilist_media_status(
 }
 
 #[tauri::command]
+pub async fn set_anilist_media_progress(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    progress: i64,
+) -> Result<AnilistMediaStatus, String> {
+    let (token, anilist_id) = auth_and_media_id_for_anime(&db, anime_id)?
+        .ok_or("Anime is not linked to AniList or AniList is not logged in.")?;
+    let progress = progress.max(0);
+    let saved_progress = save_remote_progress(&token, anilist_id, progress).await?;
+    db.with_conn(|conn| cache_anilist_progress(conn, anime_id, saved_progress))?;
+    Ok(AnilistMediaStatus {
+        progress: Some(saved_progress),
+        episodes: None,
+        score: None,
+    })
+}
+
+#[tauri::command]
 pub async fn apply_anilist_progress_to_local(
     db: State<'_, AppDatabase>,
     anime_id: i64,
@@ -308,6 +326,13 @@ pub async fn apply_anilist_progress_to_local(
     }
 
     let updated_episodes = db.with_conn(|conn| {
+        let tracker_offset = conn
+            .query_row(
+                "SELECT tracker_offset FROM anime WHERE id = ?1",
+                params![anime_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE episodes
              SET watched = 1,
@@ -318,12 +343,12 @@ pub async fn apply_anilist_progress_to_local(
                  updated_at = CURRENT_TIMESTAMP
              WHERE anime_id = ?1
                AND episode_number >= 1
-               AND episode_number < ?2
+               AND (CAST(episode_number AS INTEGER) - ?2) BETWEEN 1 AND ?3
                AND (
                    watched = 0
                    OR (duration_seconds > 0 AND position_seconds < duration_seconds)
                )",
-            params![anime_id, progress + 1],
+            params![anime_id, tracker_offset, progress],
         )
         .map(|count| count as i64)
         .map_err(|e| e.to_string())
@@ -412,7 +437,7 @@ fn progress_target_for_episode(
     episode_id: i64,
 ) -> Result<Option<AnilistProgressTarget>, String> {
     conn.query_row(
-        "SELECT e.anime_id, a.anilist_id, e.episode_number
+        "SELECT e.anime_id, a.anilist_id, a.tracker_offset, e.episode_number
          FROM episodes e
          JOIN anime a ON a.id = e.anime_id
          WHERE e.id = ?1",
@@ -421,16 +446,17 @@ fn progress_target_for_episode(
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<f64>>(3)?,
             ))
         },
     )
     .optional()
     .map_err(|e| e.to_string())
     .map(|row| {
-        row.and_then(|(anime_id, anilist_id, episode_number)| {
+        row.and_then(|(anime_id, anilist_id, tracker_offset, episode_number)| {
             let anilist_id = anilist_id?;
-            let progress = episode_number?.floor() as i64;
+            let progress = episode_number?.floor() as i64 - tracker_offset;
             (progress > 0).then_some(AnilistProgressTarget {
                 anime_id,
                 anilist_id,

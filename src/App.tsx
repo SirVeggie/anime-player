@@ -24,11 +24,14 @@ import {
   logoutAnilist,
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
+  overrideAnimeProgress,
   removeRootFolder,
   rescanLibrary,
   searchAnilistAnime,
+  setAnimeTrackerOffset,
   setDefaultCategory,
   setAnilistClientId,
+  setAnilistMediaProgress,
   setAnilistMediaScore,
   stopMpv,
   unlinkAnimeAnilist,
@@ -383,6 +386,9 @@ function App() {
       const [state, nextEpisodes] = await Promise.all([reloadLibrary(), listEpisodes(animeId)]);
       if (selectedAnimeIdRef.current === animeId) {
         setEpisodes(nextEpisodes);
+        setSelectedEpisode((current) =>
+          current?.anime_id === animeId ? (nextEpisodes.find((episode) => episode.id === current.id) ?? current) : current,
+        );
         const updated = state.anime.find((anime) => anime.id === animeId);
         if (updated) setSelectedAnime(updated);
       }
@@ -690,6 +696,27 @@ function App() {
   const handleSetAnilistScore = useCallback((animeId: number, score: number | null): Promise<AnilistMediaStatus> => {
     return setAnilistMediaScore(animeId, score);
   }, []);
+
+  const handleSaveAnimeSettings = useCallback(
+    async (animeId: number, trackerOffset: number, progressOverride: number | null) => {
+      await setAnimeTrackerOffset(animeId, trackerOffset);
+      if (progressOverride !== null) {
+        const result = await overrideAnimeProgress(animeId, progressOverride);
+        const linkedAnime =
+          selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
+        if (linkedAnime?.anilist_id) {
+          const status = await setAnilistMediaProgress(animeId, result.progress);
+          setAnilistProgressUpdate({
+            animeId,
+            progress: status.progress ?? result.progress,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      await refreshAnimePageData(animeId);
+    },
+    [library?.anime, refreshAnimePageData, selectedAnime],
+  );
 
   const handleAnilistProgressSynced = useCallback((animeId: number, result: AnilistProgressSyncResult) => {
     const progress = result.remote_progress ?? result.target_progress;
@@ -1078,6 +1105,7 @@ function App() {
               onSearchAnilist={handleSearchAnilist}
               onGetAnilistStatus={handleGetAnilistStatus}
               onSetAnilistScore={handleSetAnilistScore}
+              onSaveAnimeSettings={handleSaveAnimeSettings}
               anilistProgressUpdate={anilistProgressUpdate}
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}

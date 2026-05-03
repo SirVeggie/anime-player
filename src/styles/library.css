@@ -583,6 +583,29 @@
   width: min(520px, 100%);
 }
 
+.anime-settings-modal {
+  width: min(480px, 100%);
+}
+
+.anime-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.anime-settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.anime-settings-form p {
+  margin: 0;
+  line-height: 1.45;
+}
+
 .delete-confirm-warning {
   margin: 0 0 18px;
   color: var(--text-color);

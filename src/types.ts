@@ -35,6 +35,7 @@ export type AnimeSummary = {
   anilist_title: string | null;
   anilist_site_url: string | null;
   anilist_cover_path: string | null;
+  tracker_offset: number;
   episode_count: number;
   unwatched_count: number;
   last_watched_at: string | null;
@@ -95,6 +96,11 @@ export type ScanSummary = {
   episodes_imported: number;
   episodes_removed: number;
   unmatched_files: number;
+};
+
+export type ProgressOverrideSummary = {
+  progress: number;
+  updated_episodes: number;
 };
 
 export type LocalDataStats = {
