@@ -84,10 +84,10 @@ export function BulkEditScreen(props: {
   }, [library.anime, sourceCategoryId]);
 
   useEffect(() => {
-    const trimmedRegex = debouncedRegexInput.trim();
+    const pattern = debouncedRegexInput;
     setPathError(null);
 
-    if (!trimmedRegex) {
+    if (!pattern) {
       setRegexError(null);
       setMatchingPaths(false);
       // "All categories" with no regex = no scope; require a category filter or a regex to select anime.
@@ -99,7 +99,7 @@ export function BulkEditScreen(props: {
 
     let regex: RegExp;
     try {
-      regex = new RegExp(trimmedRegex, "i");
+      regex = new RegExp(pattern, "i");
     } catch (error) {
       setRegexError(error instanceof Error ? error.message : "Invalid regex.");
       setMatchingPaths(false);
@@ -206,14 +206,14 @@ export function BulkEditScreen(props: {
   }, [activeTab, library.anime, onListEpisodes]);
 
   const renamePreview = useMemo(() => {
-    const trimmedRegex = debouncedRenameRegexInput.trim();
-    if (!trimmedRegex) {
+    const pattern = debouncedRenameRegexInput;
+    if (!pattern) {
       return { rows: [] as RenamePreviewRow[], error: null as string | null };
     }
 
     let regex: RegExp;
     try {
-      regex = new RegExp(trimmedRegex, "gi");
+      regex = new RegExp(pattern, "gi");
     } catch (error) {
       return {
         rows: [] as RenamePreviewRow[],
@@ -306,7 +306,7 @@ export function BulkEditScreen(props: {
     onRenameEpisodeFiles(renameRequests);
   };
 
-  const idleAllLibrary = sourceCategoryId === ALL_CATEGORIES_ID && !debouncedRegexInput.trim();
+  const idleAllLibrary = sourceCategoryId === ALL_CATEGORIES_ID && !debouncedRegexInput;
   const renameDisabled =
     busy ||
     loadingRenameEpisodes ||
@@ -464,7 +464,7 @@ export function BulkEditScreen(props: {
             <div className="empty empty--wide bulk-rename-empty">
               <h2>No affected episodes</h2>
               <p className="muted">
-                {debouncedRenameRegexInput.trim()
+                {debouncedRenameRegexInput
                   ? "Adjust the regex or replacement to preview filepath changes."
                   : "Enter a regex to preview filepath replacements."}
               </p>
