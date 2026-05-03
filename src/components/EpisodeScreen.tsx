@@ -5,6 +5,7 @@ import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, E
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
+import { FolderOpenIcon } from "./Icons";
 import { ViewHeader } from "./ViewHeader";
 
 type AnilistProgressUpdate = {
@@ -34,6 +35,7 @@ export function EpisodeScreen(props: {
   onBack: () => void;
   onPlay: (episode: Episode) => void;
   onMoveAnime: (categoryId: number) => void;
+  onOpenEpisodeFolder: () => void;
   onDeleteAnime: () => void;
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
@@ -50,6 +52,7 @@ export function EpisodeScreen(props: {
     onBack,
     onPlay,
     onMoveAnime,
+    onOpenEpisodeFolder,
     onDeleteAnime,
     onSearchAnilist,
     onGetAnilistStatus,
@@ -326,6 +329,16 @@ export function EpisodeScreen(props: {
                 Link AniList
               </button>
             )}
+            <button
+              type="button"
+              className="header-icon-button"
+              onClick={onOpenEpisodeFolder}
+              disabled={episodes.length === 0}
+              aria-label="Open episode folder"
+              title="Open episode folder"
+            >
+              <FolderOpenIcon />
+            </button>
             <button type="button" className="button-danger" onClick={() => setDeleteConfirmOpen(true)}>
               Delete Anime
             </button>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -77,6 +77,23 @@ const appWindow = getCurrentWindow();
 
 function hasEpisodeProgress(episode: Episode): boolean {
   return episode.watched || episode.position_seconds > 0;
+}
+
+function parentFolderPath(path: string): string | null {
+  const trimmed = path.trim().replace(/[\\/]+$/, "");
+  const index = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
+  if (index <= 0) return null;
+  return trimmed.slice(0, index);
+}
+
+function shortestEpisodeFolder(episodes: Episode[]): string | null {
+  const folders = episodes.map((episode) => parentFolderPath(episode.path)).filter((folder): folder is string => Boolean(folder));
+  if (folders.length === 0) return null;
+  return folders.reduce((shortest, folder) => {
+    if (folder.length < shortest.length) return folder;
+    if (folder.length === shortest.length && folder.localeCompare(shortest) < 0) return folder;
+    return shortest;
+  });
 }
 
 function App() {
@@ -557,6 +574,19 @@ function App() {
     [reloadLibrary, runAction, selectedAnime],
   );
 
+  const handleOpenEpisodeFolder = useCallback(async () => {
+    const folder = shortestEpisodeFolder(episodes);
+    if (!folder) {
+      showToast("error", "No episode folder is available.");
+      return;
+    }
+    try {
+      await openPath(folder);
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [episodes, showToast]);
+
   const handleDeleteSelectedAnimeFiles = useCallback(async () => {
     if (!selectedAnime) return;
     if (episodes.length === 0) {
@@ -1016,6 +1046,7 @@ function App() {
               onBack={() => navigateToView(episodeReturnView, "restore")}
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
+              onOpenEpisodeFolder={() => void handleOpenEpisodeFolder()}
               onDeleteAnime={() => void handleDeleteSelectedAnimeFiles()}
               onSearchAnilist={handleSearchAnilist}
               onGetAnilistStatus={handleGetAnilistStatus}

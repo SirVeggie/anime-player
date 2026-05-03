@@ -53,3 +53,11 @@ export function RescanIcon() {
     </svg>
   );
 }
+
+export function FolderOpenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M3.5 6.75A2.25 2.25 0 0 1 5.75 4.5h4.3c.6 0 1.17.24 1.59.66l1.09 1.09h5.52a2.25 2.25 0 0 1 2.25 2.25v1H5.16a2.25 2.25 0 0 0-2.2 1.77L2 15.66V6.75h1.5zm1.66 4.25H21.2l-1.47 6.65A2.25 2.25 0 0 1 17.53 19.5H4.76a2.25 2.25 0 0 1-2.2-2.73l1.14-5.04A1.5 1.5 0 0 1 5.16 11z" />
+    </svg>
+  );
+}

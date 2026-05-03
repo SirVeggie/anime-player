@@ -349,6 +349,19 @@ button:focus-visible {
   background: var(--surface-3);
 }
 
+button.header-icon-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+button.header-icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
 button.button-danger,
 .view-actions button.button-danger {
   background: rgba(255, 107, 107, 0.14);
