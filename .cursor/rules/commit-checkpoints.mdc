@@ -9,6 +9,19 @@ This repo is set up so that **every logical agent change becomes its own
 git commit**. The commits are checkpoints: they let the user roll back,
 diff, or cherry-pick individual modifications without losing later work.
 
+## End-of-turn checklist
+
+Before sending a final response after editing files, stop and check:
+
+1. Did this turn make a user-visible, code, docs, config, or dependency
+   change?
+2. If yes, have the relevant checks passed?
+3. If yes, has that logical change been committed?
+
+Do not end the turn with completed, verified edits left uncommitted unless
+the user explicitly told you not to commit or the change is not ready to
+checkpoint. If you cannot commit, say why in the final response.
+
 ## When to commit
 
 Commit at the end of each *logical* unit of work, before yielding the

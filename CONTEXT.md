@@ -405,7 +405,9 @@ push, no rebase without an explicit request) lives in
 - The user prefers iterative changes with verification — run
   `cargo check` and `npx tsc --noEmit` after backend/frontend edits.
 - **Commit after every logical change** so each agent step is a
-  checkpoint the user can roll back to. See
+  checkpoint the user can roll back to. Before a final response after
+  verified edits, check whether the change has been committed; if not,
+  commit it or explain why it is not ready. See
   `.cursor/rules/commit-checkpoints.mdc` for the full convention.
 
 ## Build/test commands
