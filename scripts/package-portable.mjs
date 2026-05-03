@@ -75,7 +75,7 @@ async function packagePortable() {
 
   console.log(`Creating zip archive: ${destDirName}.zip...`);
   try {
-    execSync(`powershell -NoProfile -Command "Compress-Archive -Path '${destDir}' -DestinationPath '${zipPath}' -Force"`, { stdio: 'inherit' });
+    execSync(`powershell -NoProfile -Command "Compress-Archive -Path '${destDir}\\*' -DestinationPath '${zipPath}' -Force"`, { stdio: 'inherit' });
   } catch (err) {
     console.error('Failed to create zip archive:', err.message);
   }
