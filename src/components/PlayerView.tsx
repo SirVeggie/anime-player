@@ -222,7 +222,40 @@ export function PlayerView(props: {
   const handlingEofRef = useRef(false);
   const eventListenersReadyRef = useRef(false);
   const [eventListenersReadyVersion, setEventListenersReadyVersion] = useState(0);
-  const onErrorRef = useRef(onError);
+  // Set by handlePlaybackFinished's auto-advance branch so the [episode.id]
+  // reset effect skips clearing videoCompositorRevealed: an EOF -> next-file
+  // transition stays on the previous frame instead of flashing through the
+  // black load-fade. Manual prev/next via loadSibling intentionally leaves
+  // the flag false so it still gets the load-fade.
+  const seamlessAdvanceRef = useRef(false);
+  // Tracks the previous `visible` so the visible-effect only unpauses on a
+  // real false -> true transition (returning to the player), not on every
+  // re-run from unrelated state changes.
+  const wasVisibleRef = useRef(false);
+
+  // App passes inline-arrow handlers that change identity every render
+  // (`onError`, `onClose`, etc.). If the listener-setup useEffect depends on
+  // them directly it tears down + reattaches mpv listeners on every App
+  // render — which (a) bumps eventListenersReadyVersion, retriggering the
+  // visible-effect's mpv_set_pause(false) and undoing user pauses, and
+  // (b) leaves a window where the one-shot mpv://file-loaded event can be
+  // dropped, leaving videoGeometry null and the fit-window button disabled.
+  // Mirroring the latest props into a ref lets the callbacks below stay
+  // referentially stable without going stale.
+  const propsRef = useRef({
+    onError,
+    onClose,
+    onProgressSaved,
+    onSelectEpisode,
+    onAnilistProgressSynced,
+  });
+  propsRef.current = {
+    onError,
+    onClose,
+    onProgressSaved,
+    onSelectEpisode,
+    onAnilistProgressSynced,
+  };
 
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
   const canPrev = selectedIndex > 0;
@@ -241,9 +274,13 @@ export function PlayerView(props: {
     onPausedStateChange?.(paused);
   }, [onPausedStateChange, paused]);
 
-  useEffect(() => {
-    onErrorRef.current = onError;
-  }, [onError]);
+  // Synchronous render-time refs so handlePlaybackFinished/loadSibling can
+  // read the latest values without depending on `playlist` or `selectedIndex`
+  // (and re-creating, which would churn the listener-setup useEffect).
+  const playlistRef = useRef(playlist);
+  playlistRef.current = playlist;
+  const selectedIndexRef = useRef(selectedIndex);
+  selectedIndexRef.current = selectedIndex;
 
   const clearControlsHideTimer = useCallback(() => {
     if (controlsHideTimerRef.current !== null) {
@@ -301,54 +338,56 @@ export function PlayerView(props: {
     return () => root.removeEventListener("pointerleave", onPointerLeaveWindow);
   }, [clearControlsHideTimer, controlsPinned, visible]);
 
-  const persistProgress = useCallback(
-    async (forceWatched = false) => {
-      const current = playbackRef.current;
-      const watched =
-        forceWatched ||
-        (current.duration > 0 &&
-          current.position / current.duration >= NEAR_END_PROGRESS_RATIO);
-      const saved = await saveEpisodeProgress(
-        current.episode.id,
-        current.position,
-        current.duration,
-        watched,
-      );
-      onProgressSaved(saved);
-      if (watched) {
-        void syncAnilistEpisodeProgress(saved.id)
-          .then((result) => onAnilistProgressSynced?.(saved.anime_id, result))
-          .catch((err) => onError(errorMessage(err)));
-      }
-      return saved;
-    },
-    [onAnilistProgressSynced, onError, onProgressSaved],
-  );
+  const persistProgress = useCallback(async (forceWatched = false) => {
+    const current = playbackRef.current;
+    const watched =
+      forceWatched ||
+      (current.duration > 0 &&
+        current.position / current.duration >= NEAR_END_PROGRESS_RATIO);
+    const saved = await saveEpisodeProgress(
+      current.episode.id,
+      current.position,
+      current.duration,
+      watched,
+    );
+    propsRef.current.onProgressSaved(saved);
+    if (watched) {
+      void syncAnilistEpisodeProgress(saved.id)
+        .then((result) => propsRef.current.onAnilistProgressSynced?.(saved.anime_id, result))
+        .catch((err) => propsRef.current.onError(errorMessage(err)));
+    }
+    return saved;
+  }, []);
 
   const refreshTracks = useCallback(async () => {
     try {
       setTracks(await getMpvTracks());
     } catch (e) {
-      onError(errorMessage(e));
+      propsRef.current.onError(errorMessage(e));
     }
-  }, [onError]);
+  }, []);
 
   const refreshVideoGeometry = useCallback(async () => {
     try {
       setVideoGeometry(await getMpvVideoGeometry());
     } catch (e) {
-      onError(errorMessage(e));
+      propsRef.current.onError(errorMessage(e));
     }
-  }, [onError]);
+  }, []);
 
   const handlePlaybackFinished = useCallback(() => {
     if (handlingEofRef.current) return;
     handlingEofRef.current = true;
-    const next = playlist[selectedIndex + 1];
+    const next = playlistRef.current[selectedIndexRef.current + 1];
     void persistProgress(true)
-      .catch((err) => onError(errorMessage(err)))
+      .catch((err) => propsRef.current.onError(errorMessage(err)))
       .then(async () => {
         if (next) {
+          // Skip the load-fade between episodes — the previous episode's
+          // outro/credits already ended on a clean note, so flashing to
+          // black is more disruptive than just transitioning straight into
+          // the next file.
+          seamlessAdvanceRef.current = true;
           try {
             const saved = await saveEpisodeProgress(
               next.id,
@@ -356,26 +395,26 @@ export function PlayerView(props: {
               next.duration_seconds,
               false,
             );
-            onProgressSaved(saved);
-            onSelectEpisode(saved);
+            propsRef.current.onProgressSaved(saved);
+            propsRef.current.onSelectEpisode(saved);
           } catch (err) {
-            onError(errorMessage(err));
-            onSelectEpisode(next);
+            propsRef.current.onError(errorMessage(err));
+            propsRef.current.onSelectEpisode(next);
           }
           return;
         }
 
         void invoke("mpv_stop")
-          .catch((err) => onError(errorMessage(err)))
+          .catch((err) => propsRef.current.onError(errorMessage(err)))
           .finally(() => {
             loadedPathRef.current = null;
             setPosition(0);
             setDuration(0);
             setPaused(true);
-            onClose();
+            propsRef.current.onClose();
           });
       });
-  }, [onClose, onError, onProgressSaved, onSelectEpisode, persistProgress, playlist, selectedIndex]);
+  }, [persistProgress]);
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -420,7 +459,9 @@ export function PlayerView(props: {
             pendingResumeSecondsRef.current = null;
             if (seconds === null) return;
             window.setTimeout(() => {
-              void invoke("mpv_seek", { seconds }).catch((err) => onError(errorMessage(err)));
+              void invoke("mpv_seek", { seconds }).catch((err) =>
+                propsRef.current.onError(errorMessage(err)),
+              );
             }, 0);
           },
         ],
@@ -454,7 +495,11 @@ export function PlayerView(props: {
       eventListenersReadyRef.current = false;
       unlisteners.forEach((fn) => fn());
     };
-  }, [handlePlaybackFinished, onError, refreshTracks, refreshVideoGeometry]);
+    // The deps below are now all stable (refs / empty-dep useCallbacks), so
+    // this effect runs exactly once per mount. That avoids the listener
+    // detach/re-attach storm that used to drop file-loaded events and
+    // re-trigger the visible-effect's auto-unpause on every App render.
+  }, [handlePlaybackFinished, refreshTracks, refreshVideoGeometry]);
 
   // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
   // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
@@ -466,11 +511,25 @@ export function PlayerView(props: {
     setTracks([]);
     setVideoGeometry(null);
     setActiveTrackMenu(null);
-    setVideoCompositorRevealed(false);
+    if (seamlessAdvanceRef.current) {
+      // EOF auto-advance: keep videoCompositorRevealed=true so the
+      // .player-load-fade stays hidden across the file switch. The user
+      // sees the last frame of the previous episode (mpv keep-open) until
+      // the next file's first frame composes — much smoother than a black
+      // flash between back-to-back episodes.
+      seamlessAdvanceRef.current = false;
+    } else {
+      setVideoCompositorRevealed(false);
+    }
   }, [episode.id]);
 
   useEffect(() => {
     let cancelled = false;
+    // Only auto-unpause on a real visibility transition (false -> true).
+    // Without this, any spurious re-run of this effect with visible=true
+    // (e.g. a stale dep change) would resume playback the user just paused.
+    const becameVisible = visible && !wasVisibleRef.current;
+    wasVisibleRef.current = visible;
     (async () => {
       try {
         if (!eventListenersReadyRef.current) return;
@@ -489,13 +548,13 @@ export function PlayerView(props: {
         }
         if (cancelled) return;
         if (loadedPathRef.current === episode.path) {
-          if (visible) {
+          if (becameVisible) {
             try {
               await invoke("mpv_set_pause", { paused: false });
               setPaused(false);
               setVideoCompositorRevealed(true);
             } catch (e) {
-              if (!cancelled) onErrorRef.current(errorMessage(e));
+              if (!cancelled) propsRef.current.onError(errorMessage(e));
             }
           }
           return;
@@ -506,7 +565,7 @@ export function PlayerView(props: {
         await invoke("mpv_load", { path: episode.path });
         loadedPathRef.current = episode.path;
       } catch (e) {
-        if (!cancelled) onErrorRef.current(errorMessage(e));
+        if (!cancelled) propsRef.current.onError(errorMessage(e));
       }
     })();
     return () => {
