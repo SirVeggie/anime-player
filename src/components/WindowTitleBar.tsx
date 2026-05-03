@@ -1,5 +1,6 @@
 import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import appIconUrl from "../../src-tauri/icons/app-icon-source.svg?url";
 
 const appWindow = getCurrentWindow();
 
@@ -48,7 +49,10 @@ export function WindowTitleBar(props: { playerOpen: boolean; playerControlsChrom
       }`}
       onMouseDown={startDragOrMaximize}
     >
-      <div className="window-titlebar-title">Anime Player</div>
+      <div className="window-titlebar-title">
+        <img className="window-titlebar-icon" src={appIconUrl} alt="" aria-hidden />
+        <span>Anime Player</span>
+      </div>
       <div className="window-controls" onMouseDown={(e) => e.stopPropagation()}>
         <button type="button" className="window-control" onClick={() => void appWindow.minimize()} aria-label="Minimize" tabIndex={-1}>
           <svg viewBox="0 0 12 12" aria-hidden>

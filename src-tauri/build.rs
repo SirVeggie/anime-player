@@ -22,6 +22,8 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=mpv");
         println!("cargo:rerun-if-changed=libs/mpv/mpv.lib");
         println!("cargo:rerun-if-changed=libs/mpv/libmpv-2.dll");
+        println!("cargo:rerun-if-changed=icons/icon.ico");
+        println!("cargo:rerun-if-changed=icons/app-icon-source.svg");
 
         // Make libmpv-2.dll discoverable for `cargo run` / `tauri dev`. The
         // Rust binary lives in target/<profile>/, so we copy the DLL beside

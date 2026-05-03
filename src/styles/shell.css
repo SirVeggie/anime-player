@@ -68,6 +68,9 @@
 }
 
 .window-titlebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   padding-left: 12px;
   overflow: hidden;
@@ -76,6 +79,12 @@
   letter-spacing: 0.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.window-titlebar-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
 }
 
 .window-controls {
