@@ -1135,7 +1135,7 @@ fn list_anime(
     }
     sql.push_str(" GROUP BY a.id");
     if recent_only {
-        sql.push_str(" ORDER BY a.last_watched_at DESC LIMIT 10");
+        sql.push_str(" ORDER BY a.last_watched_at DESC LIMIT 12");
     } else {
         sql.push_str(" ORDER BY a.title COLLATE NOCASE");
     }
