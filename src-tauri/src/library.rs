@@ -136,6 +136,23 @@ pub struct LocalDataCleanupSummary {
     bytes_removed: u64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DeleteAnimeFilesSummary {
+    episodes_deleted: i64,
+    episodes_failed: i64,
+    bytes_deleted: u64,
+    cover_deleted: bool,
+    cover_failed: bool,
+    permanent_delete_used: bool,
+}
+
+#[derive(Debug)]
+struct DeletableEpisode {
+    id: i64,
+    path: String,
+    size: i64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RegexRuleInput {
     name: String,
@@ -426,6 +443,114 @@ pub fn move_anime_to_category(
 #[tauri::command]
 pub fn list_episodes(db: State<'_, AppDatabase>, anime_id: i64) -> Result<Vec<Episode>, String> {
     db.with_conn(|conn| list_episodes_for_anime(conn, anime_id))
+}
+
+#[tauri::command]
+pub fn delete_anime_files(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<DeleteAnimeFilesSummary, String> {
+    let (episodes, cover_path) = db.with_conn(|conn| {
+        let episodes = list_deletable_episodes_for_anime(conn, anime_id)?;
+        let cover_path = conn
+            .query_row(
+                "SELECT anilist_cover_path FROM anime WHERE id = ?1",
+                params![anime_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        Ok((episodes, cover_path))
+    })?;
+
+    let mut deleted_episode_ids = Vec::new();
+    let mut bytes_deleted = 0_u64;
+    let mut episodes_failed = 0_i64;
+    let mut permanent_delete_used = false;
+
+    for episode in episodes {
+        let path = PathBuf::from(&episode.path);
+        if !path.exists() {
+            deleted_episode_ids.push(episode.id);
+            continue;
+        }
+
+        let size = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or_else(|_| episode.size.max(0) as u64);
+        match move_path_to_trash_or_delete(&path) {
+            Ok(permanent) => {
+                deleted_episode_ids.push(episode.id);
+                bytes_deleted += size;
+                permanent_delete_used |= permanent;
+            }
+            Err(_) => {
+                episodes_failed += 1;
+            }
+        }
+    }
+
+    let mut cover_deleted = false;
+    let mut cover_failed = false;
+    let mut clear_cover_path = false;
+    if let Some(cover_path) = cover_path {
+        let path = PathBuf::from(&cover_path);
+        if path.exists() {
+            let size = fs::metadata(&path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            match move_path_to_trash_or_delete(&path) {
+                Ok(permanent) => {
+                    bytes_deleted += size;
+                    cover_deleted = true;
+                    clear_cover_path = true;
+                    permanent_delete_used |= permanent;
+                }
+                Err(_) => {
+                    cover_failed = true;
+                }
+            }
+        } else {
+            clear_cover_path = true;
+        }
+    }
+
+    db.with_conn(|conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for episode_id in &deleted_episode_ids {
+            tx.execute(
+                "UPDATE episodes
+                 SET missing = 1,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![episode_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if clear_cover_path {
+            tx.execute(
+                "UPDATE anime
+                 SET anilist_cover_path = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![anime_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        refresh_anime_latest_episode_at(conn)?;
+        Ok(())
+    })?;
+
+    Ok(DeleteAnimeFilesSummary {
+        episodes_deleted: deleted_episode_ids.len() as i64,
+        episodes_failed,
+        bytes_deleted,
+        cover_deleted,
+        cover_failed,
+        permanent_delete_used,
+    })
 }
 
 /// Resolves which enabled detection rule matches this anime's episode files, using the same
@@ -943,6 +1068,46 @@ fn list_episodes_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<Episo
         .query_map(params![anime_id], episode_from_row)
         .map_err(|e| e.to_string())?;
     collect_rows(rows)
+}
+
+fn list_deletable_episodes_for_anime(
+    conn: &Connection,
+    anime_id: i64,
+) -> Result<Vec<DeletableEpisode>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, path, size
+             FROM episodes
+             WHERE anime_id = ?1
+               AND missing = 0
+             ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![anime_id], |row| {
+            Ok(DeletableEpisode {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                size: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    collect_rows(rows)
+}
+
+fn move_path_to_trash_or_delete(path: &Path) -> Result<bool, String> {
+    match trash::delete(path) {
+        Ok(()) => Ok(false),
+        Err(trash_error) => {
+            fs::remove_file(path).map_err(|remove_error| {
+                format!(
+                    "failed to move {} to trash ({trash_error}) or delete it permanently ({remove_error})",
+                    path.display()
+                )
+            })?;
+            Ok(true)
+        }
+    }
 }
 
 fn get_episode(conn: &Connection, episode_id: i64) -> Result<Episode, String> {

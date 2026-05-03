@@ -11,6 +11,7 @@ import {
   completeAnilistLogin,
   createCategory,
   createRegexRule,
+  deleteAnimeFiles,
   deleteCategory,
   deleteRegexRule,
   getAnilistAuthState,
@@ -28,6 +29,7 @@ import {
   setDefaultCategory,
   setAnilistClientId,
   setAnilistMediaScore,
+  stopMpv,
   unlinkAnimeAnilist,
   updateRegexRule,
 } from "./api";
@@ -57,7 +59,7 @@ import type {
   RegexRuleInput,
   RootFolder,
 } from "./types";
-import { APP_WINDOW_TITLE, errorMessage, isTextInputTarget, shortenForOsTitle } from "./utils";
+import { APP_WINDOW_TITLE, errorMessage, formatSize, isTextInputTarget, shortenForOsTitle } from "./utils";
 import "./App.css";
 
 type View = "categories" | "anime" | "search" | "bulkEdit" | "missing" | "episodes" | "settings" | "player";
@@ -555,6 +557,59 @@ function App() {
     [reloadLibrary, runAction, selectedAnime],
   );
 
+  const handleDeleteSelectedAnimeFiles = useCallback(async () => {
+    if (!selectedAnime) return;
+    if (episodes.length === 0) {
+      showToast("error", "There are no visible episode files to delete.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete ${episodes.length} episode file${episodes.length === 1 ? "" : "s"} for "${selectedAnime.title}"?\n\nFiles will be moved to the trash when possible. The database entries stay until you run cleanup in Settings.`,
+    );
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      const deletingLoadedEpisode = selectedEpisode?.anime_id === selectedAnime.id;
+      if (deletingLoadedEpisode) {
+        await stopMpv().catch(() => undefined);
+        setSelectedEpisode(null);
+      }
+
+      const summary = await deleteAnimeFiles(selectedAnime.id);
+      await reloadLibrary();
+      await reloadLocalDataStats();
+      setEpisodes([]);
+      setSelectedAnime(null);
+      navigateToView(episodeReturnView, "restore");
+
+      const deleted = `${summary.episodes_deleted} episode file${summary.episodes_deleted === 1 ? "" : "s"}`;
+      const bytes = summary.bytes_deleted > 0 ? ` (${formatSize(summary.bytes_deleted)})` : "";
+      const cover = summary.cover_deleted ? " Cached cover removed." : "";
+      const coverFailure = summary.cover_failed ? " Cached cover could not be removed." : "";
+      const permanent = summary.permanent_delete_used ? " Some files could not be trashed and were deleted permanently." : "";
+      if (summary.episodes_failed > 0 || summary.cover_failed) {
+        const episodeFailure = summary.episodes_failed > 0 ? `; ${summary.episodes_failed} failed` : "";
+        showToast("error", `Deleted ${deleted}${bytes}${episodeFailure}.${cover}${coverFailure}${permanent}`);
+      } else {
+        showToast("success", `Deleted ${deleted}${bytes}.${cover}${permanent}`);
+      }
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    episodeReturnView,
+    episodes.length,
+    navigateToView,
+    reloadLibrary,
+    reloadLocalDataStats,
+    selectedAnime,
+    selectedEpisode?.anime_id,
+    showToast,
+  ]);
+
   const handleBulkMoveAnime = useCallback(
     async (animeIds: number[], categoryId: number) => {
       if (animeIds.length === 0) return;
@@ -965,6 +1020,7 @@ function App() {
               onBack={() => navigateToView(episodeReturnView, "restore")}
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
+              onDeleteAnime={() => void handleDeleteSelectedAnimeFiles()}
               onSearchAnilist={handleSearchAnilist}
               onGetAnilistStatus={handleGetAnilistStatus}
               onSetAnilistScore={handleSetAnilistScore}

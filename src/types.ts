@@ -112,6 +112,15 @@ export type LocalDataCleanupSummary = {
   bytes_removed: number;
 };
 
+export type DeleteAnimeFilesSummary = {
+  episodes_deleted: number;
+  episodes_failed: number;
+  bytes_deleted: number;
+  cover_deleted: boolean;
+  cover_failed: boolean;
+  permanent_delete_used: boolean;
+};
+
 export type AnilistAuthState = {
   client_id: string | null;
   viewer_id: number | null;

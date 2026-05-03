@@ -60,7 +60,7 @@ view components. Per-screen UI lives in `src/components/`:
   mirrors the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,
   `add_root_folder`, `rescan_library`, `get_local_data_stats`,
-  `clean_local_data`, `list_episodes`,
+  `clean_local_data`, `list_episodes`, `delete_anime_files`,
   `move_anime_to_category`, `set_default_category`, editable
   `*_regex_rule` commands, `save_episode_progress`, and the Windows-only
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
@@ -217,7 +217,10 @@ view components. Per-screen UI lives in `src/components/`:
   `missing/total` counts. Settings shows database and saved AniList cover sizes via
   `get_local_data_stats`; the explicit `clean_local_data` action prunes stale
   episodes/unmatched rows, removes anime with no episodes, vacuums SQLite, and
-  deletes unreferenced saved covers.
+  deletes unreferenced saved covers. The episode page's `delete_anime_files`
+  command deletes/trashes the currently visible episode files for an anime,
+  marks those episode rows missing, and removes that anime's cached AniList
+  cover path/file while leaving the database rows for Settings cleanup.
   `save_episode_progress` stores `position_seconds`
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode

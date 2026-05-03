@@ -37,7 +37,7 @@ Episode selection page features
 - [x] ~~Add slight tint to already watched episodes~~
 - [x] ~~Show thumbnail also on this page (if available)~~
 - [ ] Delete episode
-- [ ] Delete anime (aka delete all episodes and database entries for that anime)
+- [x] ~~Delete anime files from the episode page, mark rows missing, and leave database cleanup to Settings~~
 - [ ] Unset watched status on episode
 
 ## Video Player

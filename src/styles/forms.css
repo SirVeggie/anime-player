@@ -349,6 +349,19 @@ button:focus-visible {
   background: var(--surface-3);
 }
 
+button.button-danger,
+.view-actions button.button-danger {
+  background: rgba(255, 107, 107, 0.14);
+  border-color: rgba(255, 107, 107, 0.38);
+  color: #ffb3b3;
+}
+
+button.button-danger:hover:not(:disabled),
+.view-actions button.button-danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.22);
+  filter: none;
+}
+
 button.back-button {
   background: transparent;
 }

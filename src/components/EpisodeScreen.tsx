@@ -34,6 +34,7 @@ export function EpisodeScreen(props: {
   onBack: () => void;
   onPlay: (episode: Episode) => void;
   onMoveAnime: (categoryId: number) => void;
+  onDeleteAnime: () => void;
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
   onSetAnilistScore: (animeId: number, score: number | null) => Promise<AnilistMediaStatus>;
@@ -49,6 +50,7 @@ export function EpisodeScreen(props: {
     onBack,
     onPlay,
     onMoveAnime,
+    onDeleteAnime,
     onSearchAnilist,
     onGetAnilistStatus,
     onSetAnilistScore,
@@ -308,6 +310,9 @@ export function EpisodeScreen(props: {
               value={anime.category_id}
               onChange={onMoveAnime}
             />
+            <button type="button" className="button-danger" onClick={onDeleteAnime}>
+              Delete Anime
+            </button>
             {anime.anilist_site_url ? (
               <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
                 Unlink

@@ -6,6 +6,7 @@ import type {
   AnilistProgressSyncResult,
   AnilistSearchResult,
   Category,
+  DeleteAnimeFilesSummary,
   Episode,
   LibraryState,
   LocalDataCleanupSummary,
@@ -74,6 +75,10 @@ export function listEpisodes(animeId: number): Promise<Episode[]> {
   return invoke("list_episodes", { animeId });
 }
 
+export function deleteAnimeFiles(animeId: number): Promise<DeleteAnimeFilesSummary> {
+  return invoke("delete_anime_files", { animeId });
+}
+
 /** Which enabled detection rule matches this anime's files (same logic as rescan; not persisted). */
 export function getMatchingDetectionRuleName(animeId: number): Promise<string | null> {
   return invoke("get_matching_detection_rule_name", { animeId });
@@ -97,6 +102,10 @@ export function selectMpvSubtitleTrack(trackId: number | null): Promise<void> {
 
 export function getMpvVideoGeometry(): Promise<MpvVideoGeometry | null> {
   return invoke("mpv_get_video_geometry");
+}
+
+export function stopMpv(): Promise<void> {
+  return invoke("mpv_stop");
 }
 
 export function saveEpisodeProgress(
