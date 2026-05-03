@@ -153,6 +153,7 @@
 
 .bulk-rename-preview-row span {
   min-width: 0;
+  white-space: break-spaces;
   overflow-wrap: anywhere;
 }
 
