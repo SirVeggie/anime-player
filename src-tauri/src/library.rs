@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::db::{refresh_anime_latest_episode_at, AppDatabase};
 use crate::scanner::{self, DetectionRule};
@@ -553,6 +554,21 @@ pub fn delete_anime_files(
     })
 }
 
+#[tauri::command]
+pub fn open_anime_episode_folder(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<(), String> {
+    let folder = db.with_conn(|conn| shortest_episode_folder_for_anime(conn, anime_id))?;
+    let Some(folder) = folder else {
+        return Err("No episode folder is available.".to_string());
+    };
+    app.opener()
+        .open_path(folder.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// Resolves which enabled detection rule matches this anime's episode files, using the same
 /// rule order and filename logic as a rescan — computed on demand, not stored in the DB.
 #[tauri::command]
@@ -1093,6 +1109,44 @@ fn list_deletable_episodes_for_anime(
         })
         .map_err(|e| e.to_string())?;
     collect_rows(rows)
+}
+
+fn shortest_episode_folder_for_anime(
+    conn: &Connection,
+    anime_id: i64,
+) -> Result<Option<PathBuf>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT path
+             FROM episodes
+             WHERE anime_id = ?1
+               AND missing = 0",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![anime_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+
+    let mut shortest: Option<PathBuf> = None;
+    for row in rows {
+        let path = PathBuf::from(row.map_err(|e| e.to_string())?);
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        let parent = parent.to_path_buf();
+        let replace = shortest.as_ref().is_none_or(|current| {
+            let parent_len = parent.as_os_str().len();
+            let current_len = current.as_os_str().len();
+            parent_len < current_len
+                || (parent_len == current_len
+                    && parent.to_string_lossy() < current.to_string_lossy())
+        });
+        if replace {
+            shortest = Some(parent);
+        }
+    }
+
+    Ok(shortest)
 }
 
 fn move_path_to_trash_or_delete(path: &Path) -> Result<bool, String> {
