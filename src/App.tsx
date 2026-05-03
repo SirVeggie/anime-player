@@ -73,6 +73,7 @@ type ScrollRestoration = "top" | "restore";
 type AnilistProgressUpdate = {
   animeId: number;
   progress: number;
+  forceReplace?: boolean;
   updatedAt: number;
 };
 
@@ -709,6 +710,7 @@ function App() {
           setAnilistProgressUpdate({
             animeId,
             progress: status.progress ?? result.progress,
+            forceReplace: true,
             updatedAt: Date.now(),
           });
         }

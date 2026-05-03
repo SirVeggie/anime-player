@@ -11,6 +11,7 @@ import { ViewHeader } from "./ViewHeader";
 type AnilistProgressUpdate = {
   animeId: number;
   progress: number;
+  forceReplace?: boolean;
   updatedAt: number;
 };
 
@@ -169,7 +170,7 @@ export function EpisodeScreen(props: {
     if (!anilistProgressUpdate || anilistProgressUpdate.animeId !== anime.id) return;
     setAnilistStatus((current) => ({
       progress:
-        current?.progress == null
+        anilistProgressUpdate.forceReplace || current?.progress == null
           ? anilistProgressUpdate.progress
           : Math.max(current.progress, anilistProgressUpdate.progress),
       episodes: current?.episodes ?? null,
