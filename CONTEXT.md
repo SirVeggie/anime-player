@@ -30,38 +30,33 @@ view components. Per-screen UI lives in `src/components/`:
 `ToastStack.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
 `EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
 
-- Visual design follows the local reference project
-  (`reference/working-tauri-mpv-example-project` → Soia): `data-theme="dark"`,
-  Roboto, near-black shell (`#0f0f0f`), blue seek accent (`#58a6ff`), and a
-  bottom player chrome that matches Soia’s gradient + custom seek bar +
-  transparent icon transport buttons. The sidebar and **idle / pending**
-  player pane share **`--ui-bg`** with **`backdrop-filter` blur** so the
-  desktop shows through slightly frosted; during **`.player--playback`** blur
-  is disabled so mpv stays sharp.
-- Two-pane layout: 280px sidebar (Library, Search, Bulk Edit, Settings, rescan,
-  stats) + main content pane. Category navigation lives on the library page rather
-  than in the sidebar. Bulk Edit can filter anime by source category and by a
-  case-insensitive regex matched against full episode paths, then move the
-  affected anime to another category. Its filename replacer tab scans all video
-  files under configured root folders, so malformed files that are not yet
-  detected as episodes can be renamed and then imported by the follow-up rescan.
-  A **Missing** sidebar page appears only when the
-  database has episodes that the latest scan could not currently match; normal
-  library/search/episode views hide those missing rows so rule mistakes are
-  obvious without deleting saved metadata. The anime grid header includes a sort dropdown
-  (alphabetical, most recent episode, last watched, episode/remaining counts);
-  the choice is persisted in `localStorage` under `animePlayer.animeGridSort`.
-  **Most recent** sorts by `anime.latest_episode_at` descending (shows with
-  the freshest episode activity first). That field is **stored on `anime`**
-  and recomputed after every library rescan as `MAX(episodes.updated_at)`
-  per show (`db::refresh_anime_latest_episode_at`). On each app start, if at
-  least one root folder is configured, the app runs `rescan_library` once
-  (after the initial `get_library_state`) so the library and this timestamp
-  stay current without a manual rescan.
-- The MVP file list has been replaced by a SQLite-backed local library UI:
-  category screen, anime grid, episode list, settings, and player view.
-  `src/api.ts` contains the Tauri command bindings and `src/types.ts`
-  mirrors the serialized Rust DTOs.
+- The library/settings UI is an original dark design. Only the video player
+  chrome intentionally follows the local Soia reference project
+  (`reference/working-tauri-mpv-example-project`): the bottom controls gradient,
+  custom seek bar, and transparent icon transport buttons. During playback, the
+  player surface stays transparent where mpv should show through; opaque CSS
+  layers are only used for idle/pending states and transition covers.
+- App layout is a narrow icon sidebar (`--sidebar-width`, currently 56px) plus
+  a centered main content pane. The sidebar owns top-level navigation and quick
+  actions; category navigation lives on the library page. A **Missing** sidebar
+  page appears only when the database has episodes that the latest scan could
+  not currently match. Normal library/search/episode views hide missing rows so
+  rule mistakes are obvious without deleting saved metadata.
+- Bulk Edit can filter anime by source category and by a case-insensitive regex
+  matched against full episode paths, then move the affected anime to another
+  category. Its filename replacer tab scans all video files under configured
+  root folders, so malformed files that are not yet detected as episodes can be
+  renamed and then imported by the follow-up rescan.
+- The anime grid header includes a sort dropdown (alphabetical, most recent
+  episode, last watched, episode/remaining counts); the choice is persisted in
+  `localStorage` under `animePlayer.animeGridSort`. **Most recent** sorts by
+  `anime.latest_episode_at` descending. That field is stored on `anime` and
+  recomputed after every library rescan as `MAX(episodes.updated_at)` per show
+  (`db::refresh_anime_latest_episode_at`). On each app start, if at least one
+  root folder is configured, the app runs `rescan_library` once after the
+  initial `get_library_state` so the library and this timestamp stay current.
+- `src/api.ts` contains the Tauri command bindings and `src/types.ts` mirrors
+  the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,
   `add_root_folder`, `rescan_library`, `get_local_data_stats`,
   `clean_local_data`, `list_episodes`, `list_root_video_files`, `delete_anime_files`,
@@ -95,9 +90,8 @@ view components. Per-screen UI lives in `src/components/`:
   override for intentionally rewriting all local episode progress, and
   filesystem-backed anime rename keeps categories, progress, tracker offset,
   and AniList links attached to the same anime ID while renaming files on disk.
-- Page-level status/error banners have been replaced with transient
-  toast notifications rendered by `src/App.tsx`; toasts slide in from
-  above and dismiss automatically.
+- Transient toast notifications are rendered by `src/App.tsx` for operation
+  status and errors.
 - The app window is frameless (`decorations: false`) and draws its own
   React title bar in `src/App.tsx`. The title bar owns dragging,
   double-click maximize, and minimize / maximize / close controls. While
@@ -300,8 +294,7 @@ view components. Per-screen UI lives in `src/components/`:
 - The main window has **`transparent: true`**. Combined with libmpv's
   `vo=gpu-next` (DirectComposition swap-chain) under the same HWND,
   this is what makes the video composite cleanly with the WebView2
-  surface in the same DWM tree. See the design-decision section below
-  for why this works now when an earlier transparent attempt failed.
+  surface in the same DWM tree.
 - The main window also has **`decorations: false`** so Windows does not
   draw the native title bar or 1px frame; the frontend supplies the
   custom title bar and window controls.
@@ -314,11 +307,11 @@ view components. Per-screen UI lives in `src/components/`:
   the AniList `anime-player://anilist-auth` OAuth callback.
 - Window: `productName = "Anime Player"`, 1280x800 default, min 800x600.
 
-## Critical design decision: in-process libmpv via FFI
+## Video architecture: in-process libmpv via FFI
 
-The non-obvious part of the project. **mpv is loaded as a DLL in the
-Tauri process, not spawned as a subprocess; its rendering target is the
-Tauri main HWND itself.**
+mpv is loaded from `libmpv-2.dll` inside the Tauri process. It is not spawned as
+`mpv.exe`; `MpvHandle::new` creates the libmpv context, sets
+`wid=<TauriHWND>` before `mpv_initialize`, and targets the Tauri main HWND.
 
 - WebView2 renders via **DirectComposition**. So does modern mpv when
   using `vo=gpu-next` / `gpu-context=d3d11`. Both create DComp visuals
@@ -332,14 +325,13 @@ Tauri main HWND itself.**
   fine), and mpv's swap-chain composes alongside it. Anywhere CSS is
   transparent (the `.player` pane), the user sees mpv's pixels.
 - Because libmpv runs in-process, **audio output belongs to the Tauri
-  PID** — external audio mixers and per-window scripts treat the player
-  as a single application. This was the user's primary motivation for
-  the migration.
-- The video must be confined to the right pane. mpv's canvas is the
-  full HWND, so we set `video-margin-ratio-left = sidebar_px /
-  window_width` to leave the left strip empty; the opaque sidebar
-  visually covers it. The frontend re-issues `mpv_set_layout` on every
-  window resize.
+  PID** and external audio mixers / per-window scripts treat the player
+  as one application.
+- When the library UI is visible, mpv's full-HWND canvas is confined with
+  `video-margin-ratio-left = sidebar_px / window_width`. The frontend registers
+  the current sidebar width once, and native `WindowEvent::Resized` /
+  `ScaleFactorChanged` handling in `lib.rs` re-applies the margin during window
+  changes without a JS IPC round-trip per resize event.
 - libmpv input is fully wired (`input-default-bindings=yes`,
   `input-vo-keyboard=yes`) so Space pause, ←/→ seek, F fullscreen,
   J subs, # audio tracks all work inside the player area. We disabled
@@ -355,36 +347,14 @@ suspects are:
 - The HWND being torn down before `MpvHandle::drop` — the
   `CloseRequested` hook in `lib.rs` exists specifically to avoid that.
 
-### Why a popup window was the previous answer (and isn't anymore)
-
-Before this migration, mpv ran as `mpv.exe --wid=<popup_hwnd>` in an
-owned `WS_POPUP` top-level window over the player div, driven by a
-JSON IPC named pipe. It worked, but:
-
-1. The popup is a separate HWND, so window movers / per-window audio
-   mixers treated the video as a different app from the rest of the UI.
-2. mpv.exe is a separate PID, so audio mixers couldn't tag it with the
-   parent app's settings.
-3. Drawing custom HTML controls *over* the video required keeping the
-   WebView2 surface on top of a separate top-level HWND, which is hard.
-
-The popup workaround existed because we had also tried `transparent:
-true` + a `WS_CHILD` GDI host (commit 8b16dfe, reverted in fe8991a) and
-mpv's pixels never reached final composition: GDI children of a
-DComp-only window have nowhere to paint. The fix wasn't to give up on
-transparency — it was to skip the GDI host entirely and let libmpv's
-own DComp swap-chain be the surface, which only works if mpv is
-in-process so we can pass the Tauri HWND directly to it. That's what
-this migration is.
-
 ## Version control
 
-The repo is a git repository on branch `main` with no remote. Every
-logical agent change is committed as its own checkpoint so the user
-can roll back individual steps. The full convention (when to commit,
-what to stage, message style, what *not* to do — no `--amend`, no
-push, no rebase without an explicit request) lives in
-`.cursor/rules/commit-checkpoints.mdc`.
+The repo is a git repository on branch `main` with an `origin` remote. Every
+logical agent change is committed locally as its own checkpoint so the user can
+roll back individual steps. Agents should **never push** unless the user
+explicitly requests it. The full convention (when to commit, what to stage,
+message style, what *not* to do — no `--amend`, no push, no rebase without an
+explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
 
 ## Files to know
 
