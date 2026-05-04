@@ -587,10 +587,14 @@
   width: min(480px, 100%);
 }
 
+.anime-settings-modal input::placeholder {
+  color: revert;
+}
+
 .anime-settings-form {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
 }
 
 .anime-settings-field {
@@ -626,8 +630,6 @@
 .anime-settings-path-row input {
   flex: 1;
   min-width: 0;
-  /* Match `.anime-settings-stepper input`: label uses font-weight 600; inputs should not inherit it. */
-  font-weight: 400;
 }
 
 .anime-settings-stepper input {

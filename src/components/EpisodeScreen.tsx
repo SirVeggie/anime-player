@@ -722,7 +722,7 @@ export function EpisodeScreen(props: {
               <div>
                 <h2 id="anime-settings-title">Title Settings</h2>
                 <p className="muted" id="anime-settings-description">
-                  Adjust per-title tracker numbering and local progress.
+                  Adjust various per-title settings.
                 </p>
               </div>
             </div>
@@ -738,7 +738,7 @@ export function EpisodeScreen(props: {
                   />
                 </label>
                 <p className="muted">
-                  Renames the episode files on disk and keeps this title's saved progress, category, and AniList link.
+                  Renames the episode files on disk and keeps settings intact.
                 </p>
               </div>
               <div className="anime-settings-field">
@@ -748,7 +748,7 @@ export function EpisodeScreen(props: {
                     <input
                       type="text"
                       value={customThumbnailDraft}
-                      placeholder="Absolute image path"
+                      placeholder="Image path"
                       disabled={animeSettingsSaving}
                       onChange={(e) => setCustomThumbnailDraft(e.currentTarget.value)}
                     />
@@ -791,8 +791,7 @@ export function EpisodeScreen(props: {
                   </div>
                 </label>
                 <p className="muted">
-                  Subtracts from parsed episode numbers for display and AniList sync. Example: offset 12 makes parsed
-                  episode 14 become Episode 2.
+                  Adjust episode values, mainly for AniList compatibility.
                 </p>
               </div>
               <div className="anime-settings-field">
@@ -804,7 +803,7 @@ export function EpisodeScreen(props: {
                       min="0"
                       step="1"
                       value={progressOverrideDraft}
-                      placeholder="Leave blank to keep current progress"
+                      placeholder="Episode number as an integer, or blank"
                       disabled={animeSettingsSaving}
                       onChange={(e) => setProgressOverrideDraft(e.currentTarget.value)}
                     />
@@ -827,7 +826,7 @@ export function EpisodeScreen(props: {
                   </div>
                 </label>
                 <p className="muted">
-                  Forces all episodes up to this adjusted number to watched and resets every later episode to 0%.
+                  Manually override local and AniList progress.
                 </p>
               </div>
               {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}
