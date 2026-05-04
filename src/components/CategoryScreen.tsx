@@ -40,7 +40,7 @@ export function CategoryScreen(props: {
     <>
       <ViewHeader
         title="Library"
-        subtitle="Browse your videos by category, or continue where you left off."
+        subtitle="Browse videos by category, or continue where you left off."
       />
 
       {library.root_folders.length === 0 ? (
@@ -54,18 +54,23 @@ export function CategoryScreen(props: {
       ) : null}
 
       <section className="category-grid">
-        {library.categories.map((category, index) => (
-          <button
-            type="button"
-            className="category-card"
-            key={category.id}
-            onClick={() => onOpenCategory(category.id)}
-            {...getRovingItemProps(index)}
-          >
-            <span className="category-name">{category.name}</span>
-            <span className="category-count">{animeByCategory.get(category.id) ?? 0} titles</span>
-          </button>
-        ))}
+        {library.categories.map((category, index) => {
+          const count = animeByCategory.get(category.id) ?? 0;
+          return (
+            <button
+              type="button"
+              className="category-card"
+              key={category.id}
+              onClick={() => onOpenCategory(category.id)}
+              {...getRovingItemProps(index)}
+            >
+              <span className="category-name">{category.name}</span>
+              <span className="category-count">
+                {count} title{count === 1 ? "" : "s"}
+              </span>
+            </button>
+          );
+        })}
       </section>
 
       {library.recent_anime.length > 0 ? (
