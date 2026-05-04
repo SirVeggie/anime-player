@@ -89,7 +89,7 @@ export function CategoryScreen(props: {
                   ) : null}
                   <div className="continue-card-body">
                     <strong>{anime.title}</strong>
-                    <span>{anime.episode_count} episodes</span>
+                    <span>{anime.episode_count} episode{anime.episode_count === 1 ? "" : "s"}</span>
                   </div>
                 </button>
               );
