@@ -23,7 +23,7 @@ async function runLimited<T>(items: T[], limit: number, worker: (item: T) => Pro
  * shell thumbnail from the first local episode (same ordering as the episode list).
  */
 export async function resolveAnimePosterUrl(anime: AnimeSummary): Promise<string | null> {
-  if (anime.anilist_cover_path) {
+  if (anime.anilist_cover_path || anime.anilist_id) {
     try {
       const cover = await getAnilistCoverImage(anime.id);
       if (cover) return cover;
@@ -51,7 +51,7 @@ export async function loadAnimePosterUrls(
   shouldContinue: () => boolean,
 ): Promise<void> {
   const resolved = new Set<number>();
-  const anilistCandidates = anime.filter((item) => item.anilist_cover_path);
+  const anilistCandidates = anime.filter((item) => item.anilist_cover_path || item.anilist_id);
 
   await runLimited(anilistCandidates, ANILIST_COVER_CONCURRENCY, async (item) => {
     if (!shouldContinue()) return;

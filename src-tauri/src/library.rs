@@ -583,7 +583,7 @@ pub fn delete_anime_files(
     let mut cover_failed = false;
     let mut clear_cover_path = false;
     if let Some(cover_path) = cover_path {
-        let path = PathBuf::from(&cover_path);
+        let path = data_file_path(&db, &cover_path);
         if path.exists() {
             let size = fs::metadata(&path)
                 .map(|metadata| metadata.len())
@@ -1663,7 +1663,7 @@ fn delete_unreferenced_thumbnails(db: &AppDatabase) -> Result<(usize, u64), Stri
         return Ok((0, 0));
     }
 
-    let referenced_paths = db.with_conn(list_referenced_thumbnail_paths)?;
+    let referenced_paths = db.with_conn(|conn| list_referenced_thumbnail_paths(conn, data_dir))?;
     let mut removed_count = 0_usize;
     let mut removed_bytes = 0_u64;
     for file in list_files_recursive(&cover_dir)? {
@@ -1680,19 +1680,55 @@ fn delete_unreferenced_thumbnails(db: &AppDatabase) -> Result<(usize, u64), Stri
     Ok((removed_count, removed_bytes))
 }
 
-fn list_referenced_thumbnail_paths(conn: &mut Connection) -> Result<HashSet<PathBuf>, String> {
+fn data_file_path(db: &AppDatabase, stored_path: &str) -> PathBuf {
+    let path = PathBuf::from(stored_path);
+    if path.is_absolute() {
+        path
+    } else if let Some(data_dir) = db.path().parent() {
+        data_dir.join(path)
+    } else {
+        path
+    }
+}
+
+fn list_referenced_thumbnail_paths(
+    conn: &mut Connection,
+    data_dir: &Path,
+) -> Result<HashSet<PathBuf>, String> {
     let mut stmt = conn
-        .prepare("SELECT anilist_cover_path FROM anime WHERE anilist_cover_path IS NOT NULL")
+        .prepare("SELECT anilist_cover_path, anilist_id FROM anime WHERE anilist_cover_path IS NOT NULL OR anilist_id IS NOT NULL")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+            ))
+        })
         .map_err(|e| e.to_string())?;
-    let paths = rows
+    let rows = rows
         .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
+        .map_err(|e| e.to_string())?;
+    let mut paths = HashSet::new();
+    for (stored_path, anilist_id) in rows {
+        if let Some(stored_path) = stored_path {
+            let path = PathBuf::from(stored_path);
+            paths.insert(if path.is_absolute() {
+                path
+            } else {
+                data_dir.join(path)
+            });
+        }
+        if let Some(anilist_id) = anilist_id {
+            for extension in ["jpg", "png", "jpeg", "webp"] {
+                paths.insert(
+                    data_dir
+                        .join("anilist-covers")
+                        .join(format!("{anilist_id}.{extension}")),
+                );
+            }
+        }
+    }
     Ok(paths)
 }
 

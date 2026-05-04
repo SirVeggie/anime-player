@@ -75,8 +75,12 @@ view components. Per-screen UI lives in `src/components/`:
   Cached AniList cover art is preferred in grids, Continue Watching, and the
   episode header; when a title is unlinked or a cover cannot load, posters fall
   back to Windows shell thumbnails from `AnimeSummary.first_episode_path`.
-  Poster loading is phased so cached covers appear first and local thumbnail
-  extraction runs with limited concurrency.
+  AniList cover paths are stored relative to the portable `data` directory when
+  possible (`anilist-covers/<id>.<ext>`), so moving the app folder does not break
+  them. Poster loading is phased so cached covers appear first and local thumbnail
+  extraction runs with limited concurrency; linked titles with a missing/legacy
+  cover path can recover by checking `data/anilist-covers/<anilist_id>.*` and then
+  re-downloading the cover from AniList.
 - The AniList card opens the linked AniList page, shows remote
   `Progress: current/total`, and includes a debounced score input that writes
   back to AniList. Local watched progress syncs on EOF / near-end saves only

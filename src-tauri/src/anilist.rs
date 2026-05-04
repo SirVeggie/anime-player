@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
@@ -21,6 +21,7 @@ const TOKEN_KEY: &str = "anilist.access_token";
 const VIEWER_ID_KEY: &str = "anilist.viewer_id";
 const VIEWER_NAME_KEY: &str = "anilist.viewer_name";
 const MEDIA_STATUS_CACHE_TTL_SECONDS: i64 = 5 * 60;
+const ANILIST_COVER_DIR: &str = "anilist-covers";
 
 #[derive(Debug, Serialize)]
 pub struct AnilistAuthState {
@@ -147,6 +148,10 @@ pub async fn link_anime_anilist(
     } else {
         None
     };
+    let cover_path = cover_path
+        .as_deref()
+        .map(|path| cover_path_for_storage(&db, path))
+        .transpose()?;
 
     db.with_conn(|conn| {
         let changed = conn
@@ -162,13 +167,7 @@ pub async fn link_anime_anilist(
                      anilist_status_fetched_at = NULL,
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?5",
-                params![
-                    media.id,
-                    media.title,
-                    media.site_url,
-                    cover_path.map(|path| path.to_string_lossy().to_string()),
-                    anime_id
-                ],
+                params![media.id, media.title, media.site_url, cover_path, anime_id],
             )
             .map_err(|e| e.to_string())?;
         if changed == 0 {
@@ -201,34 +200,53 @@ pub fn unlink_anime_anilist(db: State<'_, AppDatabase>, anime_id: i64) -> Result
 }
 
 #[tauri::command]
-pub fn get_anilist_cover_image(
+pub async fn get_anilist_cover_image(
     db: State<'_, AppDatabase>,
     anime_id: i64,
 ) -> Result<Option<String>, String> {
-    let path = db.with_conn(|conn| {
+    let cover = db.with_conn(|conn| {
         conn.query_row(
-            "SELECT anilist_cover_path FROM anime WHERE id = ?1",
+            "SELECT anilist_cover_path, anilist_id FROM anime WHERE id = ?1",
             params![anime_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                ))
+            },
         )
         .optional()
-        .map(|path| path.flatten())
         .map_err(|e| e.to_string())
     })?;
 
-    let Some(path) = path else {
+    let Some((stored_path, anilist_id)) = cover else {
         return Ok(None);
     };
-    let bytes = fs::read(&path).map_err(|e| format!("failed to read AniList cover {path}: {e}"))?;
-    let mime = if path.to_ascii_lowercase().ends_with(".png") {
-        "image/png"
-    } else {
-        "image/jpeg"
-    };
-    Ok(Some(format!(
-        "data:{mime};base64,{}",
-        general_purpose::STANDARD.encode(bytes)
-    )))
+
+    if let Some(stored_path) = stored_path.as_deref() {
+        let path = stored_cover_path(&db, stored_path)?;
+        if path.exists() {
+            update_anilist_cover_path(&db, anime_id, &path)?;
+            return read_cover_data_url(&path).map(Some);
+        }
+    }
+
+    if let Some(anilist_id) = anilist_id {
+        if let Some(path) = existing_cover_for_anilist_id(&db, anilist_id)? {
+            update_anilist_cover_path(&db, anime_id, &path)?;
+            return read_cover_data_url(&path).map(Some);
+        }
+
+        let token = db.with_conn(|conn| get_setting(conn, TOKEN_KEY))?;
+        let media = get_anime(token.as_deref(), anilist_id).await?;
+        if let Some(url) = media.cover_image_url.as_deref() {
+            let path = download_cover(&db, media.id, url).await?;
+            update_anilist_cover_path(&db, anime_id, &path)?;
+            return read_cover_data_url(&path).map(Some);
+        }
+    }
+
+    Ok(None)
 }
 
 #[tauri::command]
@@ -792,6 +810,83 @@ async fn get_anime(token: Option<&str>, id: i64) -> Result<AnilistSearchResult, 
     Ok(data.media.into())
 }
 
+fn data_dir(db: &AppDatabase) -> Result<&Path, String> {
+    db.path()
+        .parent()
+        .ok_or("failed to resolve database data directory".to_string())
+}
+
+fn cover_dir(db: &AppDatabase) -> Result<PathBuf, String> {
+    Ok(data_dir(db)?.join(ANILIST_COVER_DIR))
+}
+
+fn stored_cover_path(db: &AppDatabase, stored_path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(stored_path);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(data_dir(db)?.join(path))
+    }
+}
+
+fn cover_path_for_storage(db: &AppDatabase, path: &Path) -> Result<String, String> {
+    let data_dir = data_dir(db)?;
+    let path = path
+        .strip_prefix(data_dir)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|_| path.to_path_buf());
+    Ok(path.to_string_lossy().replace('\\', "/"))
+}
+
+fn update_anilist_cover_path(db: &AppDatabase, anime_id: i64, path: &Path) -> Result<(), String> {
+    let stored_path = cover_path_for_storage(db, path)?;
+    db.with_conn(|conn| {
+        conn.execute(
+            "UPDATE anime
+             SET anilist_cover_path = ?1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2
+               AND anilist_cover_path IS NOT ?1",
+            params![stored_path, anime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+fn existing_cover_for_anilist_id(
+    db: &AppDatabase,
+    anilist_id: i64,
+) -> Result<Option<PathBuf>, String> {
+    let cover_dir = cover_dir(db)?;
+    for extension in ["jpg", "png", "jpeg", "webp"] {
+        let path = cover_dir.join(format!("{anilist_id}.{extension}"));
+        if path.exists() {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
+fn read_cover_data_url(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path)
+        .map_err(|e| format!("failed to read AniList cover {}: {e}", path.display()))?;
+    let mime = match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        _ => "image/jpeg",
+    };
+    Ok(format!(
+        "data:{mime};base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
 async fn graphql<T: DeserializeOwned>(
     token: Option<&str>,
     query: &str,
@@ -830,11 +925,7 @@ async fn download_cover(
     anilist_id: i64,
     cover_url: &str,
 ) -> Result<PathBuf, String> {
-    let cover_dir = db
-        .path()
-        .parent()
-        .ok_or("failed to resolve database data directory")?
-        .join("anilist-covers");
+    let cover_dir = cover_dir(db)?;
     fs::create_dir_all(&cover_dir)
         .map_err(|e| format!("failed to create AniList cover directory: {e}"))?;
 
