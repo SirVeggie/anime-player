@@ -985,7 +985,7 @@ export function PlayerView(props: {
                   onSelect={(trackId) => void selectSubtitleTrack(trackId)}
                   onDisable={() => void selectSubtitleTrack(null)}
                   onBrowse={() => void browseSubtitleFile()}
-                  browseLabel="Browse subtitle file..."
+                  browseLabel="Select file..."
                 />
                 <button
                   type="button"
