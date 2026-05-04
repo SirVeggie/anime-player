@@ -7,9 +7,10 @@ context that was already settled.
 ## What the project is
 
 A local **lossless anime video player** for Windows, built with **Tauri v2 +
-React + TypeScript**. The user types or browses to a folder; the app
-recursively lists all video files inside; clicking a file plays it via an
-embedded **libmpv** loaded in-process from `libmpv-2.dll`.
+React + TypeScript**. The app scans configured root folders into a
+SQLite-backed library, groups files into anime/episode views, tracks local
+progress, links titles to AniList, and plays video through **libmpv** loaded
+in-process from `libmpv-2.dll`.
 
 The user is on Windows (PowerShell). Rust 1.95 (stable, MSVC toolchain),
 Node 22, 7-Zip on PATH, and the local generated
@@ -69,36 +70,31 @@ view components. Per-screen UI lives in `src/components/`:
   `save_episode_progress`, and the Windows-only
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
   command still exists for compatibility.
-- AniList integration is a first-slice metadata/linking feature. Settings
-  shows a default AniList OAuth client ID (`40455`) that works for normal
-  users without custom setup, and opens the implicit OAuth flow with
-  `anime-player://anilist-auth` as the custom URI callback. `App.tsx`
-  listens for Tauri deep-link callbacks, validates/stores the token through
-  Rust, and exposes search/link/unlink/open controls on the anime episode
-  page. Linked anime prefer cached AniList cover art over placeholder
-  initials in the grid and episode header; if no cover is available (unlinked,
-  missing file, or load failure), the grid and Continue Watching use a
-  Windows shell thumbnail from the first local episode (`first_episode_path`
-  in `AnimeSummary`, same ordering as the episode list). Grid/Continue poster
-  loading is intentionally phased: cached AniList covers are loaded and shown
-  first, then local video thumbnail extraction runs with limited concurrency so
-  large categories do not flood the backend. The linked info card opens
-  AniList, shows remote `Progress: current/total`, and has a debounced score
-  input that writes to AniList. When a local progress save marks an episode
-  watched (EOF or the near-end threshold used by hide/next), the player asks
-  Rust to sync AniList progress for the linked anime if the adjusted local
-  episode number is ahead of the viewer's current AniList progress. Each anime
-  can store a `tracker_offset`; the episode page subtracts it from displayed
-  episode numbers and AniList progress sync/import. Opening a linked anime with
-  no local episode progress imports AniList progress by marking matching local
-  episodes watched; linking an anime does the same watched-only import without
-  clearing any later local progress. The episode-page anime settings popup also
-  has a filesystem-backed anime rename field plus a force progress override
-  that intentionally rewrites all local episode progress for that anime, unlike
-  the watched-only AniList import path. Anime rename updates the episode
-  filenames on disk and migrates the existing anime/episode database rows in
-  place so categories, progress, tracker offset, and AniList links stay attached
-  to the same anime ID.
+- AniList integration is a mature optional tracker layer. Settings exposes a
+  default OAuth client ID (`40455`) that works without custom setup, plus an
+  override field for users with their own AniList app. Login uses the implicit
+  OAuth flow with the `anime-player://anilist-auth` deep-link callback;
+  `App.tsx` handles the callback, validates/stores the token through Rust, and
+  refreshes auth state in the UI.
+- Linked anime have search/link/unlink/open controls on the episode page.
+  Cached AniList cover art is preferred in grids, Continue Watching, and the
+  episode header; when a title is unlinked or a cover cannot load, posters fall
+  back to Windows shell thumbnails from `AnimeSummary.first_episode_path`.
+  Poster loading is phased so cached covers appear first and local thumbnail
+  extraction runs with limited concurrency.
+- The AniList card opens the linked AniList page, shows remote
+  `Progress: current/total`, and includes a debounced score input that writes
+  back to AniList. Local watched progress syncs on EOF / near-end saves only
+  when the adjusted local episode number is ahead of the viewer's current
+  AniList progress. `tracker_offset` is per-title and is subtracted from parsed
+  episode numbers for display, AniList progress sync, and watched-progress
+  import.
+- AniList progress import is conservative: opening or linking a title can mark
+  matching local episodes watched from remote progress, but it does not clear
+  later local progress. The title settings popup also has a force progress
+  override for intentionally rewriting all local episode progress, and
+  filesystem-backed anime rename keeps categories, progress, tracker offset,
+  and AniList links attached to the same anime ID while renaming files on disk.
 - Page-level status/error banners have been replaced with transient
   toast notifications rendered by `src/App.tsx`; toasts slide in from
   above and dismiss automatically.
@@ -240,20 +236,18 @@ view components. Per-screen UI lives in `src/components/`:
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode
   threshold), it stores `position_seconds` at full duration (100%).
-- `anilist.rs` owns AniList GraphQL/OAuth work. It stores an optional
-  custom OAuth client ID, access token, and viewer metadata in `settings`, adds link
-  metadata on `anime` rows (`anilist_id`, title, site URL, cached cover
-  path), searches AniList via `https://graphql.anilist.co`, validates
-  login tokens with `Viewer`, and downloads covers under the portable
-  `data/anilist-covers/` directory. Linked media status (`progress`,
-  `episodes`, `score`) is cached on the `anime` row for five minutes so normal
-  navigation does not repeatedly hit AniList; app-originated score/progress
-  writes update that cache immediately. `sync_anilist_episode_progress` uses
-  the fresh cache when possible and only sends `SaveMediaListEntry` when the
-  finished local episode number is greater than the known remote progress.
-  `apply_anilist_progress_to_local` uses the same cached-or-fetched media
-  status to mark local episodes watched without changing unwatched rows.
-  Network requests are kept outside the SQLite mutex.
+- `anilist.rs` owns the AniList OAuth, GraphQL, cover-cache, and progress/score
+  sync layer. It stores an optional custom OAuth client ID, access token, and
+  viewer metadata in `settings`; stores link metadata on `anime` rows
+  (`anilist_id`, title, site URL, cached cover path); searches AniList through
+  `https://graphql.anilist.co`; validates login tokens with `Viewer`; and
+  downloads covers under the portable `data/anilist-covers/` directory. Linked
+  media status (`progress`, `episodes`, `score`) is cached on the `anime` row
+  for five minutes, and app-originated score/progress writes update that cache
+  immediately. Progress sync/import uses `tracker_offset`, only advances
+  AniList when local progress is ahead, and only marks local episodes watched
+  when importing remote progress. Network requests are kept outside the SQLite
+  mutex.
 - `mpv/mod.rs` re-exports `MpvHandle` plus typed mpv DTOs from the
   in-process libmpv module. All Win32 and FFI code is gated behind
   `#[cfg(windows)]`.
