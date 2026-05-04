@@ -617,6 +617,17 @@
   width: 100%;
 }
 
+.anime-settings-path-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.anime-settings-path-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 .anime-settings-stepper input {
   font-weight: 400;
 }

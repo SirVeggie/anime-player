@@ -117,6 +117,10 @@ export function setAnimeTrackerOffset(animeId: number, trackerOffset: number): P
   return invoke("set_anime_tracker_offset", { animeId, trackerOffset });
 }
 
+export function setAnimeCustomThumbnailPath(animeId: number, customThumbnailPath: string | null): Promise<void> {
+  return invoke("set_anime_custom_thumbnail_path", { animeId, customThumbnailPath });
+}
+
 export function overrideAnimeProgress(animeId: number, progress: number): Promise<ProgressOverrideSummary> {
   return invoke("override_anime_progress", { animeId, progress });
 }

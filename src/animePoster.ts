@@ -23,6 +23,14 @@ async function runLimited<T>(items: T[], limit: number, worker: (item: T) => Pro
  * shell thumbnail from the first local episode (same ordering as the episode list).
  */
 export async function resolveAnimePosterUrl(anime: AnimeSummary): Promise<string | null> {
+  if (anime.custom_thumbnail_path) {
+    try {
+      const custom = await getFileThumbnail(anime.custom_thumbnail_path, POSTER_THUMB_PX);
+      if (custom) return custom;
+    } catch {
+      /* fall through to AniList or episode thumbnail */
+    }
+  }
   if (anime.anilist_cover_path || anime.anilist_id) {
     try {
       const cover = await getAnilistCoverImage(anime.id);
@@ -51,7 +59,23 @@ export async function loadAnimePosterUrls(
   shouldContinue: () => boolean,
 ): Promise<void> {
   const resolved = new Set<number>();
-  const anilistCandidates = anime.filter((item) => item.anilist_cover_path || item.anilist_id);
+  const customCandidates = anime.filter((item) => item.custom_thumbnail_path);
+
+  await runLimited(customCandidates, FILE_THUMBNAIL_CONCURRENCY, async (item) => {
+    if (!shouldContinue() || !item.custom_thumbnail_path) return;
+    try {
+      const url = await getFileThumbnail(item.custom_thumbnail_path, POSTER_THUMB_PX);
+      if (!url || !shouldContinue()) return;
+      resolved.add(item.id);
+      onPoster(item.id, url);
+    } catch {
+      /* fall through to AniList and episode thumbnail phases */
+    }
+  });
+
+  if (!shouldContinue()) return;
+
+  const anilistCandidates = anime.filter((item) => !resolved.has(item.id) && (item.anilist_cover_path || item.anilist_id));
 
   await runLimited(anilistCandidates, ANILIST_COVER_CONCURRENCY, async (item) => {
     if (!shouldContinue()) return;

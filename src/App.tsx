@@ -32,6 +32,7 @@ import {
   removeRootFolder,
   rescanLibrary,
   searchAnilistAnime,
+  setAnimeCustomThumbnailPath,
   setAnimeTrackerOffset,
   setDefaultCategory,
   setAnilistClientId,
@@ -747,7 +748,13 @@ function App() {
   }, []);
 
   const handleSaveAnimeSettings = useCallback(
-    async (animeId: number, title: string, trackerOffset: number, progressOverride: number | null) => {
+    async (
+      animeId: number,
+      title: string,
+      trackerOffset: number,
+      progressOverride: number | null,
+      customThumbnailPath: string | null,
+    ) => {
       const currentAnime = selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
       if (currentAnime && title.trim() !== currentAnime.title) {
         if (selectedEpisode?.anime_id === animeId) {
@@ -757,6 +764,7 @@ function App() {
         await renameAnime(animeId, title);
       }
       await setAnimeTrackerOffset(animeId, trackerOffset);
+      await setAnimeCustomThumbnailPath(animeId, customThumbnailPath);
       if (progressOverride !== null) {
         const result = await overrideAnimeProgress(animeId, progressOverride);
         const linkedAnime =
@@ -774,6 +782,14 @@ function App() {
       await refreshAnimePageData(animeId);
     },
     [library?.anime, refreshAnimePageData, selectedAnime, selectedEpisode?.anime_id],
+  );
+
+  const handleClearAnimeCustomThumbnail = useCallback(
+    async (animeId: number) => {
+      await setAnimeCustomThumbnailPath(animeId, null);
+      await refreshAnimePageData(animeId);
+    },
+    [refreshAnimePageData],
   );
 
   const handleAnilistProgressSynced = useCallback((animeId: number, result: AnilistProgressSyncResult) => {
@@ -1167,6 +1183,7 @@ function App() {
               onGetAnilistStatus={handleGetAnilistStatus}
               onSetAnilistScore={handleSetAnilistScore}
               onSaveAnimeSettings={handleSaveAnimeSettings}
+              onClearAnimeCustomThumbnail={handleClearAnimeCustomThumbnail}
               anilistProgressUpdate={anilistProgressUpdate}
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}

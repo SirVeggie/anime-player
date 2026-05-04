@@ -55,6 +55,7 @@ pub struct AnimeSummary {
     anilist_title: Option<String>,
     anilist_site_url: Option<String>,
     anilist_cover_path: Option<String>,
+    custom_thumbnail_path: Option<String>,
     tracker_offset: i64,
     episode_count: i64,
     unwatched_count: i64,
@@ -75,6 +76,7 @@ pub struct MissingAnimeSummary {
     anilist_title: Option<String>,
     anilist_site_url: Option<String>,
     anilist_cover_path: Option<String>,
+    custom_thumbnail_path: Option<String>,
     tracker_offset: i64,
     episode_count: i64,
     unwatched_count: i64,
@@ -756,6 +758,33 @@ pub fn set_anime_tracker_offset(
 }
 
 #[tauri::command]
+pub fn set_anime_custom_thumbnail_path(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    custom_thumbnail_path: Option<String>,
+) -> Result<(), String> {
+    let normalized = custom_thumbnail_path.and_then(|path| {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    db.with_conn(|conn| {
+        conn.execute(
+            "UPDATE anime
+             SET custom_thumbnail_path = ?1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2",
+            params![normalized, anime_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
 pub fn override_anime_progress(
     db: State<'_, AppDatabase>,
     anime_id: i64,
@@ -1176,6 +1205,7 @@ fn list_anime(
                 a.anilist_title,
                 a.anilist_site_url,
                 a.anilist_cover_path,
+                a.custom_thumbnail_path,
                 a.tracker_offset,
                 COUNT(e.id) AS episode_count,
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
@@ -1220,13 +1250,14 @@ fn list_anime(
             anilist_title: row.get(4)?,
             anilist_site_url: row.get(5)?,
             anilist_cover_path: row.get(6)?,
-            tracker_offset: row.get(7)?,
-            episode_count: row.get(8)?,
-            unwatched_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
-            last_watched_at: row.get(10)?,
-            created_at: row.get(11)?,
-            latest_episode_at: row.get(12)?,
-            first_episode_path: row.get(13)?,
+            custom_thumbnail_path: row.get(7)?,
+            tracker_offset: row.get(8)?,
+            episode_count: row.get(9)?,
+            unwatched_count: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
+            last_watched_at: row.get(11)?,
+            created_at: row.get(12)?,
+            latest_episode_at: row.get(13)?,
+            first_episode_path: row.get(14)?,
         })
     };
 
@@ -1250,6 +1281,7 @@ fn list_missing_anime(conn: &Connection) -> Result<Vec<MissingAnimeSummary>, Str
                     a.anilist_title,
                     a.anilist_site_url,
                     a.anilist_cover_path,
+                    a.custom_thumbnail_path,
                     a.tracker_offset,
                     SUM(CASE WHEN e.missing = 0 THEN 1 ELSE 0 END) AS available_count,
                     SUM(CASE WHEN e.missing = 0 AND e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
@@ -1279,15 +1311,16 @@ fn list_missing_anime(conn: &Connection) -> Result<Vec<MissingAnimeSummary>, Str
                 anilist_title: row.get(4)?,
                 anilist_site_url: row.get(5)?,
                 anilist_cover_path: row.get(6)?,
-                tracker_offset: row.get(7)?,
-                episode_count: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
-                unwatched_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
-                missing_episode_count: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
-                total_episode_count: row.get(11)?,
-                last_watched_at: row.get(12)?,
-                created_at: row.get(13)?,
-                latest_episode_at: row.get(14)?,
-                first_episode_path: row.get(15)?,
+                custom_thumbnail_path: row.get(7)?,
+                tracker_offset: row.get(8)?,
+                episode_count: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
+                unwatched_count: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
+                missing_episode_count: row.get::<_, Option<i64>>(11)?.unwrap_or(0),
+                total_episode_count: row.get(12)?,
+                last_watched_at: row.get(13)?,
+                created_at: row.get(14)?,
+                latest_episode_at: row.get(15)?,
+                first_episode_path: row.get(16)?,
             })
         })
         .map_err(|e| e.to_string())?;

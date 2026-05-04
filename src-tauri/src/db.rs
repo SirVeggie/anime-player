@@ -44,10 +44,33 @@ impl AppDatabase {
     fn initialize(&self) -> Result<(), String> {
         self.with_conn(|conn| {
             conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+            ensure_schema_updates(conn)?;
             seed_defaults(conn)?;
             Ok(())
         })
     }
+}
+
+fn ensure_schema_updates(conn: &Connection) -> Result<(), String> {
+    if !table_has_column(conn, "anime", "custom_thumbnail_path")? {
+        conn.execute("ALTER TABLE anime ADD COLUMN custom_thumbnail_path TEXT", [])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = conn.prepare(&pragma).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?;
+    for name in rows {
+        if name.map_err(|e| e.to_string())? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn portable_data_dir() -> Result<PathBuf, String> {
@@ -172,6 +195,7 @@ CREATE TABLE IF NOT EXISTS anime (
   anilist_title TEXT,
   anilist_site_url TEXT,
   anilist_cover_path TEXT,
+  custom_thumbnail_path TEXT,
   anilist_cached_progress INTEGER,
   anilist_cached_episodes INTEGER,
   anilist_cached_score REAL,

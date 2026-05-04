@@ -42,6 +42,7 @@ export type AnimeSummary = {
   anilist_title: string | null;
   anilist_site_url: string | null;
   anilist_cover_path: string | null;
+  custom_thumbnail_path: string | null;
   tracker_offset: number;
   episode_count: number;
   unwatched_count: number;

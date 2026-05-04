@@ -72,9 +72,10 @@ view components. Per-screen UI lives in `src/components/`:
   `App.tsx` handles the callback, validates/stores the token through Rust, and
   refreshes auth state in the UI.
 - Linked anime have search/link/unlink/open controls on the episode page.
-  Cached AniList cover art is preferred in grids, Continue Watching, and the
-  episode header; when a title is unlinked or a cover cannot load, posters fall
-  back to Windows shell thumbnails from `AnimeSummary.first_episode_path`.
+  Title Settings also exposes an optional per-anime `custom_thumbnail_path`
+  (with browse/clear controls). Poster loading in grids and Continue Watching
+  prefers that custom thumbnail first, then cached AniList cover art, then
+  Windows shell thumbnails from `AnimeSummary.first_episode_path`.
   AniList cover paths are stored relative to the portable `data` directory when
   possible (`anilist-covers/<id>.<ext>`), so moving the app folder does not break
   them. Poster loading is phased so cached covers appear first and local thumbnail
@@ -230,6 +231,8 @@ view components. Per-screen UI lives in `src/components/`:
   command deletes/trashes the currently visible episode files for an anime,
   marks those episode rows missing, and removes that anime's cached AniList
   cover path/file while leaving the database rows for Settings cleanup.
+  `set_anime_custom_thumbnail_path` updates/clears the optional per-title
+  custom poster file path on `anime.custom_thumbnail_path`.
   `save_episode_progress` stores `position_seconds`
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode
