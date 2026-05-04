@@ -108,7 +108,7 @@ fn seed_defaults(conn: &Connection) -> Result<(), String> {
              1, 4),
             (5, 'Generic',
              '(?i)\\.(mp4|mkv|m4v|mov|avi|wmv|flv|webm|ts|m2ts|mts|ogv|ogm|vob|3gp|rm|rmvb|mpg|mpeg)$',
-             '(?P<title>[\\w\\s.-]+)\\.\\w+$',
+             '(?P<title>[\\w\\s.-,]+)\\.\\w+$',
              1, 0)",
         [],
     )

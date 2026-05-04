@@ -6,6 +6,8 @@ Running list of things to do / explore for the Anime Player app.
 
 - [ ] Support custom thumbnail files (image with same name as parsed anime title)
     - [ ] Rename feature also renames custom thumbnail
+- [ ] Combine detection regexes into one, we probably only need the second one?
+    - Could have separate regex for title and episode number, then wouldn't need duplicate rules if episode doesn't match
 
 Episode selection page features
 - [x] ~~Show anime title, current progress~~
