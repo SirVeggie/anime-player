@@ -1,6 +1,6 @@
 import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import appIconUrl from "../../src-tauri/icons/app-icon-source.svg?url";
+import appIconUrl from "../../src-tauri/icons/icon.png?url";
 
 const appWindow = getCurrentWindow();
 

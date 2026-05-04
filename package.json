@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "setup:mpv": "node scripts/download-mpv-libs.mjs",
+    "icon:setup": "node scripts/setup-icon.mjs",
     "update:mpv": "node scripts/update-mpv-libs.mjs",
     "package:portable": "node scripts/package-portable.mjs",
     "release": "npm run tauri build && npm run package:portable"

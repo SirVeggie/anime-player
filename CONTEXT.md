@@ -124,9 +124,8 @@ view components. Per-screen UI lives in `src/components/`:
   while paused (shortening uses `shortenForOsTitle` in `src/utils.ts`);
   otherwise the title is reset to `Anime Player`. This needs
   **`core:window:allow-set-title`** in the default capability file.
-  The title bar uses the generated app icon source at
-  `src-tauri/icons/app-icon-source.svg`, matching the Tauri-generated
-  executable icons.
+  The title bar uses the generated app icon at `src-tauri/icons/icon.png`,
+  matching the Tauri-generated executable icons.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
@@ -295,8 +294,8 @@ view components. Per-screen UI lives in `src/components/`:
 - `build.rs` adds `cargo:rustc-link-search=native=libs/mpv` and
   `cargo:rustc-link-lib=dylib=mpv`, then copies `libmpv-2.dll` next to
   the dev binary so `cargo run` / `tauri dev` can load it. It also
-  declares rerun triggers for `icons/icon.ico` and
-  `icons/app-icon-source.svg` so Windows executable resources are rebuilt
+  declares rerun triggers for `icons/icon.ico` and `icons/icon.png` so
+  Windows executable resources are rebuilt
   after icon changes.
 - For installer builds, `tauri.conf.json` `bundle.resources` ships
   `libs/mpv/libmpv-2.dll` next to the exe.
@@ -442,6 +441,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 # Download / refresh local libmpv
 npm run setup:mpv
+
+# Regenerate Tauri icons from a square SVG or PNG
+npm run icon:setup -- path\to\icon.svg
 
 # Run the app (compiles Rust, launches Vite, opens the window)
 npm run tauri dev
