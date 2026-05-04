@@ -22,6 +22,11 @@ Episode selection page features
     - Cross-fade or slight slide+fade on the main content when switching views.
     - Stretch goal: stagger grid items in (cards fade/slide in with a small delay between siblings) when entering a category or episode list.
 
+## Video Player
+
+- [ ] Show preview when hovering the scrubber
+- [ ] Continuously seek when dragging the scrubber handle (works great in mpv, here could have performance issues)
+
 ## Keybindings
 
 - [ ] Add keybind setting support (as a separate page)
