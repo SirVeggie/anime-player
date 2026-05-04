@@ -113,6 +113,10 @@ Player:
 
 libmpv keyboard input is also enabled in the player area, so standard mpv bindings may work in addition to the custom shortcuts above.
 
+## Acknowledgements
+
+Special thanks to [FengZeng/soia](https://github.com/FengZeng/soia) and its author for providing a very helpful reference while working through the Tauri + libmpv integration.
+
 ## Development Notes
 
 The frontend is React + TypeScript under `src/`. The backend is Rust/Tauri under `src-tauri/`. Playback is handled by libmpv loaded in the Tauri process and rendered into the main window via DirectComposition; see `CONTEXT.md` for the detailed architecture notes.
