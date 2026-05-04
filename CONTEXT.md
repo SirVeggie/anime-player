@@ -271,7 +271,8 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_seek(seconds)`, `mpv_seek_relative(delta)`,
   `mpv_set_layout(window_width, sidebar_px)`, `mpv_get_tracks()`,
   `mpv_select_audio_track(track_id)`,
-  `mpv_select_subtitle_track(track_id)`, `mpv_get_video_geometry()`,
+  `mpv_select_subtitle_track(track_id)`,
+  `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
   and `mpv_stop()`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context

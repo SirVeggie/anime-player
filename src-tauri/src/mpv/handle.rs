@@ -166,6 +166,10 @@ impl MpvHandle {
         self.command(&["set", "sid", &value])
     }
 
+    pub fn add_subtitle_file(&self, path: &str) -> Result<(), String> {
+        self.command(&["sub-add", path, "select"])
+    }
+
     pub fn video_geometry(&self) -> Result<Option<MpvVideoGeometry>, String> {
         let width = self
             .get_property_i64("video-out-params/dw")

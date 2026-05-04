@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
+  addMpvSubtitleFile,
   getMpvTracks,
   getMpvVideoGeometry,
   saveEpisodeProgress,
@@ -22,6 +24,13 @@ const appWindow = getCurrentWindow();
 
 function sidebarPxForVisibility(visible: boolean) {
   return visible ? PLAYER_SIDEBAR_PX : HIDDEN_PLAYER_SIDEBAR_PX;
+}
+
+function parentDirFromPath(path: string) {
+  const lastForwardSlash = path.lastIndexOf("/");
+  const lastBackSlash = path.lastIndexOf("\\");
+  const separatorIndex = Math.max(lastForwardSlash, lastBackSlash);
+  return separatorIndex >= 0 ? path.slice(0, separatorIndex) : null;
 }
 
 function SeekBar(props: {
@@ -643,6 +652,29 @@ export function PlayerView(props: {
     [onError, refreshTracks],
   );
 
+  const browseSubtitleFile = useCallback(async () => {
+    try {
+      const defaultPath = parentDirFromPath(episode.path);
+      const picked = await open({
+        directory: false,
+        multiple: false,
+        ...(defaultPath ? { defaultPath } : {}),
+        filters: [
+          {
+            name: "Subtitle files",
+            extensions: ["srt", "ass", "ssa", "sub", "vtt", "sup", "idx"],
+          },
+        ],
+      });
+      if (typeof picked !== "string" || !picked) return;
+      await addMpvSubtitleFile(picked);
+      await refreshTracks();
+      setActiveTrackMenu(null);
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  }, [episode.path, onError, refreshTracks]);
+
   const toggleFullscreen = useCallback(async () => {
     try {
       const next = !(await appWindow.isFullscreen());
@@ -952,6 +984,8 @@ export function PlayerView(props: {
                   onToggle={() => setActiveTrackMenu((current) => (current === "sub" ? null : "sub"))}
                   onSelect={(trackId) => void selectSubtitleTrack(trackId)}
                   onDisable={() => void selectSubtitleTrack(null)}
+                  onBrowse={() => void browseSubtitleFile()}
+                  browseLabel="Browse subtitle file..."
                 />
                 <button
                   type="button"
@@ -998,8 +1032,11 @@ function TrackMenu(props: {
   onToggle: () => void;
   onSelect: (trackId: number) => void;
   onDisable?: () => void;
+  onBrowse?: () => void;
+  browseLabel?: string;
 }) {
-  const { kind, label, tracks, selectedTrackId, open, onToggle, onSelect, onDisable } = props;
+  const { kind, label, tracks, selectedTrackId, open, onToggle, onSelect, onDisable, onBrowse, browseLabel } =
+    props;
   const emptyLabel = kind === "audio" ? "No audio tracks" : "No subtitles";
 
   return (
@@ -1028,6 +1065,11 @@ function TrackMenu(props: {
               {trackLabel(track)}
             </button>
           ))}
+          {onBrowse ? (
+            <button type="button" className="track-menu-option" onClick={onBrowse}>
+              {browseLabel ?? "Browse..."}
+            </button>
+          ) : null}
           {tracks.length === 0 ? <div className="track-menu-empty">{emptyLabel}</div> : null}
         </div>
       ) : null}

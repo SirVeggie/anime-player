@@ -141,6 +141,10 @@ export function selectMpvSubtitleTrack(trackId: number | null): Promise<void> {
   return invoke("mpv_select_subtitle_track", { trackId });
 }
 
+export function addMpvSubtitleFile(path: string): Promise<void> {
+  return invoke("mpv_add_subtitle_file", { path });
+}
+
 export function getMpvVideoGeometry(): Promise<MpvVideoGeometry | null> {
   return invoke("mpv_get_video_geometry");
 }

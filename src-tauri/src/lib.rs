@@ -141,6 +141,14 @@ fn mpv_select_subtitle_track(
 
 #[cfg(windows)]
 #[tauri::command]
+fn mpv_add_subtitle_file(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
+    m.add_subtitle_file(&path)
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn mpv_get_video_geometry(
     state: State<'_, AppState>,
 ) -> Result<Option<mpv::MpvVideoGeometry>, String> {
@@ -328,6 +336,7 @@ pub fn run() {
         mpv_get_tracks,
         mpv_select_audio_track,
         mpv_select_subtitle_track,
+        mpv_add_subtitle_file,
         mpv_get_video_geometry,
         mpv_seek,
         mpv_seek_relative,
