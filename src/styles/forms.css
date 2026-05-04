@@ -400,7 +400,9 @@ textarea {
   min-height: 58px;
 }
 
-input[type="text"]::placeholder {
+input[type="text"]::placeholder,
+input[type="number"]::placeholder,
+textarea::placeholder {
   color: var(--text-muted);
 }
 

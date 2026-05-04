@@ -626,6 +626,8 @@
 .anime-settings-path-row input {
   flex: 1;
   min-width: 0;
+  /* Match `.anime-settings-stepper input`: label uses font-weight 600; inputs should not inherit it. */
+  font-weight: 400;
 }
 
 .anime-settings-stepper input {
