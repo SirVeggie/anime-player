@@ -1,4 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { getAnilistCoverImage, getFileThumbnail, getMatchingDetectionRuleName } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
@@ -37,6 +38,41 @@ function parseIntegerDraft(value: string, label: string): number {
   return parsed;
 }
 
+/** Parent folder of a file path (Windows-style separators supported). */
+function parentFolderPath(filePath: string): string | null {
+  const normalized = filePath.replace(/\//g, "\\");
+  const sep = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+  if (sep <= 0) return null;
+  return normalized.slice(0, sep);
+}
+
+/**
+ * Matches `shortest_episode_folder_for_anime` in the Rust backend: choose the
+ * shortest common episode parent path so Browse opens the same folder as
+ * "Open episode folder".
+ */
+function shortestEpisodeParentFolder(episodes: Episode[], firstEpisodePath: string | null): string | undefined {
+  if (episodes.length > 0) {
+    let shortest: string | null = null;
+    for (const episode of episodes) {
+      const parent = parentFolderPath(episode.path);
+      if (!parent) continue;
+      if (
+        shortest === null ||
+        parent.length < shortest.length ||
+        (parent.length === shortest.length && parent.localeCompare(shortest) < 0)
+      ) {
+        shortest = parent;
+      }
+    }
+    if (shortest) return shortest;
+  }
+  if (firstEpisodePath) {
+    return parentFolderPath(firstEpisodePath) ?? undefined;
+  }
+  return undefined;
+}
+
 export function EpisodeScreen(props: {
   anime: AnimeSummary;
   episodes: Episode[];
@@ -54,7 +90,9 @@ export function EpisodeScreen(props: {
     title: string,
     trackerOffset: number,
     progressOverride: number | null,
+    customThumbnailPath: string | null,
   ) => Promise<void>;
+  onClearAnimeCustomThumbnail: (animeId: number) => Promise<void>;
   anilistProgressUpdate: AnilistProgressUpdate | null;
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
@@ -73,6 +111,7 @@ export function EpisodeScreen(props: {
     onGetAnilistStatus,
     onSetAnilistScore,
     onSaveAnimeSettings,
+    onClearAnimeCustomThumbnail,
     anilistProgressUpdate,
     onLinkAnilist,
     onUnlinkAnilist,
@@ -81,6 +120,10 @@ export function EpisodeScreen(props: {
   // Highlight whichever episode the Q hotkey would launch right now, so the
   // pill always points at the same target as the keybind.
   const quickPlayEpisodeId = useMemo(() => pickQuickPlayEpisode(episodes)?.id ?? null, [episodes]);
+  const thumbnailBrowseDefaultPath = useMemo(
+    () => shortestEpisodeParentFolder(episodes, anime.first_episode_path),
+    [anime.first_episode_path, episodes],
+  );
   const [episodeThumbnails, setEpisodeThumbnails] = useState<Record<number, string>>({});
   const [animeCover, setAnimeCover] = useState<string | null>(null);
   const [linkQuery, setLinkQuery] = useState(anime.title);
@@ -92,6 +135,7 @@ export function EpisodeScreen(props: {
   const [animeSettingsOpen, setAnimeSettingsOpen] = useState(false);
   const [animeTitleDraft, setAnimeTitleDraft] = useState(anime.title);
   const [trackerOffsetDraft, setTrackerOffsetDraft] = useState(String(anime.tracker_offset));
+  const [customThumbnailDraft, setCustomThumbnailDraft] = useState(anime.custom_thumbnail_path ?? "");
   const [progressOverrideDraft, setProgressOverrideDraft] = useState("");
   const [animeSettingsSaving, setAnimeSettingsSaving] = useState(false);
   const [animeSettingsError, setAnimeSettingsError] = useState<string | null>(null);
@@ -119,6 +163,7 @@ export function EpisodeScreen(props: {
     setAnimeSettingsError(null);
     setAnimeTitleDraft(anime.title);
     setTrackerOffsetDraft(String(anime.tracker_offset));
+    setCustomThumbnailDraft(anime.custom_thumbnail_path ?? "");
     setProgressOverrideDraft("");
   }, [anime.id, anime.title, anime.tracker_offset]);
 
@@ -267,10 +312,11 @@ export function EpisodeScreen(props: {
   const openAnimeSettings = useCallback(() => {
     setAnimeTitleDraft(anime.title);
     setTrackerOffsetDraft(String(anime.tracker_offset));
+    setCustomThumbnailDraft(anime.custom_thumbnail_path ?? "");
     setProgressOverrideDraft("");
     setAnimeSettingsError(null);
     setAnimeSettingsOpen(true);
-  }, [anime.title, anime.tracker_offset]);
+  }, [anime.custom_thumbnail_path, anime.title, anime.tracker_offset]);
 
   const closeAnimeSettings = useCallback(() => {
     if (animeSettingsSaving) return;
@@ -318,7 +364,8 @@ export function EpisodeScreen(props: {
       setAnimeSettingsSaving(true);
       setAnimeSettingsError(null);
       try {
-        await onSaveAnimeSettings(anime.id, title, trackerOffset, progressOverride);
+        const customThumbnailPath = customThumbnailDraft.trim() || null;
+        await onSaveAnimeSettings(anime.id, title, trackerOffset, progressOverride, customThumbnailPath);
         setAnimeSettingsOpen(false);
         setProgressOverrideDraft("");
       } catch (error) {
@@ -327,8 +374,41 @@ export function EpisodeScreen(props: {
         setAnimeSettingsSaving(false);
       }
     },
-    [anime.id, animeTitleDraft, onSaveAnimeSettings, progressOverrideDraft, trackerOffsetDraft],
+    [anime.id, animeTitleDraft, customThumbnailDraft, onSaveAnimeSettings, progressOverrideDraft, trackerOffsetDraft],
   );
+
+  const browseCustomThumbnail = useCallback(async () => {
+    if (animeSettingsSaving) return;
+    const picked = await open({
+      directory: false,
+      multiple: false,
+      ...(thumbnailBrowseDefaultPath ? { defaultPath: thumbnailBrowseDefaultPath } : {}),
+      filters: [
+        {
+          name: "Image files",
+          extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"],
+        },
+      ],
+    });
+    if (typeof picked === "string" && picked) {
+      setCustomThumbnailDraft(picked);
+      setAnimeSettingsError(null);
+    }
+  }, [animeSettingsSaving, thumbnailBrowseDefaultPath]);
+
+  const clearCustomThumbnail = useCallback(async () => {
+    if (animeSettingsSaving) return;
+    setAnimeSettingsSaving(true);
+    setAnimeSettingsError(null);
+    try {
+      await onClearAnimeCustomThumbnail(anime.id);
+      setCustomThumbnailDraft("");
+    } catch (error) {
+      setAnimeSettingsError(errorMessage(error));
+    } finally {
+      setAnimeSettingsSaving(false);
+    }
+  }, [anime.id, animeSettingsSaving, onClearAnimeCustomThumbnail]);
 
   const saveScore = useCallback(
     async (value: string) => {
@@ -642,7 +722,7 @@ export function EpisodeScreen(props: {
               <div>
                 <h2 id="anime-settings-title">Title Settings</h2>
                 <p className="muted" id="anime-settings-description">
-                  Adjust per-title tracker numbering and force local progress.
+                  Adjust per-title tracker numbering and local progress.
                 </p>
               </div>
             </div>
@@ -660,6 +740,26 @@ export function EpisodeScreen(props: {
                 <p className="muted">
                   Renames the episode files on disk and keeps this title's saved progress, category, and AniList link.
                 </p>
+              </div>
+              <div className="anime-settings-field">
+                <label>
+                  <span>Custom thumbnail</span>
+                  <div className="anime-settings-path-row">
+                    <input
+                      type="text"
+                      value={customThumbnailDraft}
+                      placeholder="Absolute image path"
+                      disabled={animeSettingsSaving}
+                      onChange={(e) => setCustomThumbnailDraft(e.currentTarget.value)}
+                    />
+                    <button type="button" disabled={animeSettingsSaving} onClick={() => void browseCustomThumbnail()}>
+                      Browse
+                    </button>
+                    <button type="button" disabled={animeSettingsSaving} onClick={() => void clearCustomThumbnail()}>
+                      Clear
+                    </button>
+                  </div>
+                </label>
               </div>
               <div className="anime-settings-field">
                 <label>
