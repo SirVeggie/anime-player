@@ -313,6 +313,8 @@ export function PlayerView(props: {
     scheduleControlsHide();
   }, [scheduleControlsHide, visible]);
 
+  const closeTrackMenu = useCallback(() => setActiveTrackMenu(null), []);
+
   useEffect(() => {
     if (visible) {
       setControlsVisible(true);
@@ -974,6 +976,7 @@ export function PlayerView(props: {
                   open={activeTrackMenu === "audio"}
                   onToggle={() => setActiveTrackMenu((current) => (current === "audio" ? null : "audio"))}
                   onSelect={(trackId) => void selectAudioTrack(trackId)}
+                  onDismiss={closeTrackMenu}
                 />
                 <TrackMenu
                   kind="sub"
@@ -986,6 +989,7 @@ export function PlayerView(props: {
                   onDisable={() => void selectSubtitleTrack(null)}
                   onBrowse={() => void browseSubtitleFile()}
                   browseLabel="Select file..."
+                  onDismiss={closeTrackMenu}
                 />
                 <button
                   type="button"
@@ -1034,13 +1038,37 @@ function TrackMenu(props: {
   onDisable?: () => void;
   onBrowse?: () => void;
   browseLabel?: string;
+  onDismiss?: () => void;
 }) {
-  const { kind, label, tracks, selectedTrackId, open, onToggle, onSelect, onDisable, onBrowse, browseLabel } =
-    props;
+  const {
+    kind,
+    label,
+    tracks,
+    selectedTrackId,
+    open,
+    onToggle,
+    onSelect,
+    onDisable,
+    onBrowse,
+    browseLabel,
+    onDismiss,
+  } = props;
   const emptyLabel = kind === "audio" ? "No audio tracks" : "No subtitles";
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || !onDismiss) return;
+    const onPointerDownCapture = (e: PointerEvent) => {
+      const root = rootRef.current;
+      if (!root || root.contains(e.target as Node)) return;
+      onDismiss();
+    };
+    document.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () => document.removeEventListener("pointerdown", onPointerDownCapture, true);
+  }, [open, onDismiss]);
 
   return (
-    <div className="track-menu">
+    <div ref={rootRef} className="track-menu">
       <button type="button" className="track-menu-trigger" onClick={onToggle}>
         {label}
       </button>
