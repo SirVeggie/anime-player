@@ -116,7 +116,8 @@ export function SettingsScreen(props: {
           ) : null}
         </form>
         <p className="muted">
-          Set the AniList app redirect URL to <code>anime-player://anilist-auth</code>.
+          The default client ID works for normal use, so you can press Login with AniList without changing it.
+          If you create your own AniList app, set its redirect URL to <code>anime-player://anilist-auth</code>.
         </p>
       </section>
 

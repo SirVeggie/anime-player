@@ -91,7 +91,7 @@ export function BulkEditScreen(props: {
     if (!pattern) {
       setRegexError(null);
       setMatchingPaths(false);
-      // "All categories" with no regex = no scope; require a category filter or a regex to select anime.
+      // "All categories" with no regex = no scope; require a category filter or a regex to select titles.
       setMatchingAnimeIds(
         sourceCategoryId === ALL_CATEGORIES_ID ? new Set() : new Set(candidateAnime.map((anime) => anime.id)),
       );
@@ -171,7 +171,7 @@ export function BulkEditScreen(props: {
   const handleApply = () => {
     if (animeToMove.length === 0) return;
     const confirmed = window.confirm(
-      `Move ${animeToMove.length} anime from ${sourceLabel} to "${targetLabel}"? This only changes anime categories.`,
+      `Move ${animeToMove.length} title${animeToMove.length === 1 ? "" : "s"} from ${sourceLabel} to "${targetLabel}"? This only changes title categories.`,
     );
     if (!confirmed) return;
     onMoveAnime(
@@ -357,7 +357,7 @@ export function BulkEditScreen(props: {
                   type="text"
                   value={regexInput}
                   onChange={(event) => setRegexInput(event.currentTarget.value)}
-                  placeholder="Anime\\Watching or \[SubsPlease\]"
+                  placeholder="Videos\\Watching or \[SubsPlease\]"
                   spellCheck={false}
                 />
               </label>
@@ -375,7 +375,7 @@ export function BulkEditScreen(props: {
 
             <p className="muted">
               The regex is matched case-insensitively against full episode file paths after a short pause in typing. If
-              any episode matches, its anime is included in the preview below.
+              any episode matches, its title is included in the preview below.
             </p>
 
             {regexError ? <p className="error">Invalid regex: {regexError}</p> : null}
@@ -384,7 +384,7 @@ export function BulkEditScreen(props: {
             <div className="settings-actions bulk-edit-settings-actions">
               {animeToMove.length > 0 ? (
                 <span className="muted">
-                  {animeToMove.length} anime will move to "{targetLabel}"
+                  {animeToMove.length} title{animeToMove.length === 1 ? "" : "s"} will move to "{targetLabel}"
                 </span>
               ) : null}
               <button type="button" onClick={handleApply} disabled={busy || matchingPaths || animeToMove.length === 0}>
@@ -400,7 +400,7 @@ export function BulkEditScreen(props: {
             </div>
           ) : matchingAnime.length === 0 ? (
             <div className="empty empty--wide">
-              <h2>No affected anime</h2>
+              <h2>No affected titles</h2>
               <p className="muted">
                 {idleAllLibrary
                   ? "Choose a specific category or type a path regex (after a short pause) to preview matches."

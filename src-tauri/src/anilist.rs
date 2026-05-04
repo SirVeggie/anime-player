@@ -16,6 +16,7 @@ const GRAPHQL_URL: &str = "https://graphql.anilist.co";
 const AUTHORIZE_URL: &str = "https://anilist.co/api/v2/oauth/authorize";
 const REDIRECT_URI: &str = "anime-player://anilist-auth";
 const CLIENT_ID_KEY: &str = "anilist.client_id";
+const DEFAULT_CLIENT_ID: &str = "40455";
 const TOKEN_KEY: &str = "anilist.access_token";
 const VIEWER_ID_KEY: &str = "anilist.viewer_id";
 const VIEWER_NAME_KEY: &str = "anilist.viewer_name";
@@ -87,7 +88,7 @@ pub fn set_anilist_client_id(
 #[tauri::command]
 pub fn get_anilist_login_url(db: State<'_, AppDatabase>) -> Result<String, String> {
     let client_id = db.with_conn(|conn| get_setting(conn, CLIENT_ID_KEY))?;
-    let client_id = client_id.ok_or("Set an AniList client ID before logging in.")?;
+    let client_id = client_id.unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string());
     let mut url = Url::parse(AUTHORIZE_URL).map_err(|e| e.to_string())?;
     url.query_pairs_mut()
         .append_pair("client_id", &client_id)
@@ -171,7 +172,7 @@ pub async fn link_anime_anilist(
             )
             .map_err(|e| e.to_string())?;
         if changed == 0 {
-            return Err(format!("Anime does not exist: {anime_id}"));
+            return Err(format!("Title does not exist: {anime_id}"));
         }
         Ok(())
     })
@@ -297,7 +298,7 @@ pub async fn set_anilist_media_progress(
     progress: i64,
 ) -> Result<AnilistMediaStatus, String> {
     let (token, anilist_id) = auth_and_media_id_for_anime(&db, anime_id)?
-        .ok_or("Anime is not linked to AniList or AniList is not logged in.")?;
+        .ok_or("Title is not linked to AniList or AniList is not logged in.")?;
     let progress = progress.max(0);
     let saved_progress = save_remote_progress(&token, anilist_id, progress).await?;
     db.with_conn(|conn| cache_anilist_progress(conn, anime_id, saved_progress))?;
@@ -367,7 +368,7 @@ pub async fn set_anilist_media_score(
     score: Option<f64>,
 ) -> Result<AnilistMediaStatus, String> {
     let (token, anilist_id) = auth_and_media_id_for_anime(&db, anime_id)?
-        .ok_or("Anime is not linked to AniList or AniList is not logged in.")?;
+        .ok_or("Title is not linked to AniList or AniList is not logged in.")?;
     let status = save_remote_score(&token, anilist_id, score).await?;
     db.with_conn(|conn| cache_anilist_media_status(conn, anime_id, &status))?;
     Ok(status)
@@ -393,7 +394,9 @@ fn access_token_from_callback(callback_url: &str) -> Result<String, String> {
 }
 
 fn auth_state(conn: &Connection) -> Result<AnilistAuthState, String> {
-    let client_id = get_setting(conn, CLIENT_ID_KEY)?;
+    let client_id = Some(
+        get_setting(conn, CLIENT_ID_KEY)?.unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string()),
+    );
     let viewer_id = get_setting(conn, VIEWER_ID_KEY)?.and_then(|value| value.parse().ok());
     let viewer_name = get_setting(conn, VIEWER_NAME_KEY)?;
     let authenticated = get_setting(conn, TOKEN_KEY)?.is_some();

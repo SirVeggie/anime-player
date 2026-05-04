@@ -88,12 +88,39 @@ fn seed_defaults(conn: &Connection) -> Result<(), String> {
     }
 
     conn.execute(
+        "UPDATE regex_rules
+         SET name = 'Fansub',
+             detection_regex = '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
+             title_regex = '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)',
+             priority = 10
+         WHERE id = 1 AND name = 'Fansub release filename'",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
         "INSERT OR IGNORE INTO regex_rules
             (id, name, detection_regex, title_regex, enabled, priority)
          VALUES
-            (1, 'Fansub release filename',
-             '(?i)^\\[[^\\]]+\\]\\s*.+\\s+-\\s+\\d+(?:\\.\\d+)?(?:v\\d+)?\\s*(?:\\([^)]+\\))?\\s*(?:\\[[a-f0-9]{8}\\])?\\.[^.]+$',
-             '^\\[[^\\]]+\\]\\s*(?P<title>.+?)\\s+-\\s*(?P<episode>\\d+(?:\\.\\d+)?)(?:v\\d+)?(?:\\s|\\(|\\[|\\.)',
+            (1, 'Fansub',
+             '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
+             '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)',
+             1, 10),
+            (2, 'Fansub (no ep)',
+             '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
+             '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)?',
+             1, 9),
+            (3, 'Simple',
+             '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
+             '^(?P<title>([\\w, ]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)',
+             1, 5),
+            (4, 'Simple (no ep)',
+             '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
+             '^(?P<title>([\\w, ]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)?',
+             1, 4),
+            (5, 'Generic',
+             '(?i)\\.(mp4|mkv|m4v|mov|avi|wmv|flv|webm|ts|m2ts|mts|ogv|ogm|vob|3gp|rm|rmvb|mpg|mpeg)$',
+             '(?P<title>[\\w\\s.-]+)\\.\\w+$',
              1, 0)",
         [],
     )

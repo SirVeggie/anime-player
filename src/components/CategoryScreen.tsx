@@ -40,13 +40,13 @@ export function CategoryScreen(props: {
     <>
       <ViewHeader
         title="Library"
-        subtitle="Browse your local anime by category, or continue where you left off."
+        subtitle="Browse your videos by category, or continue where you left off."
       />
 
       {library.root_folders.length === 0 ? (
         <div className="empty empty--wide">
           <h2>Add a root folder to begin</h2>
-          <p className="muted">The library scanner will group matching anime filenames into shows and episodes.</p>
+          <p className="muted">The library scanner will group matching video filenames into titles and episodes.</p>
           <button type="button" onClick={onOpenSettings}>
             Open settings
           </button>
@@ -63,7 +63,7 @@ export function CategoryScreen(props: {
             {...getRovingItemProps(index)}
           >
             <span className="category-name">{category.name}</span>
-            <span className="category-count">{animeByCategory.get(category.id) ?? 0} anime</span>
+            <span className="category-count">{animeByCategory.get(category.id) ?? 0} titles</span>
           </button>
         ))}
       </section>

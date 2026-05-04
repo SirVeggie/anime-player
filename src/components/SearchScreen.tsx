@@ -37,7 +37,7 @@ export function SearchScreen(props: {
 
   const subtitle = normalizedQuery
     ? `${matchingAnime.length} matching title${matchingAnime.length === 1 ? "" : "s"}.`
-    : "Search your local anime library.";
+    : "Search your local library.";
 
   return (
     <>
@@ -50,8 +50,8 @@ export function SearchScreen(props: {
             type="text"
             value={query}
             onChange={(event) => onQueryChange(event.currentTarget.value)}
-            placeholder="Search anime..."
-            aria-label="Search anime"
+            placeholder="Search titles..."
+            aria-label="Search titles"
           />
         </label>
       </form>

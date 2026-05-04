@@ -1,86 +1,125 @@
 # Anime Player
 
-A minimal local video player built with Tauri v2 + React + TypeScript. Point it at a folder, browse all video files inside it (recursively), and click any file to play it. Playback is provided by **libmpv** loaded in-process from `libmpv-2.dll` — there is no separate `mpv.exe` and no popup window.
+Anime Player is a Windows desktop app for browsing and playing a local video library. It scans root folders recursively, groups matching filenames into titles and episodes, tracks local watch progress, and plays files through in-process **libmpv** so the UI and video behave like one app window.
+
+![Home screen](assets/screenshots/homescreen.png)
+![Category view](assets/screenshots/category.png)
+![Episode view](assets/screenshots/episodes.png)
+![Player](assets/screenshots/player.png)
 
 ## Features
 
-- Type or browse a folder path; all video files inside (and inside its subfolders) are listed.
-- Click a file to play it instantly via in-process libmpv — true lossless decoding for any container/codec mpv supports (MKV with FLAC/Opus, HEVC, AV1, PGS/ASS subtitles, etc.).
-- The video composites with the rest of the UI inside a single window: window-mover scripts and per-window audio mixers see the player as one app.
-- Custom HTML controls bar (play/pause, scrubber, time) on top of the video, plus standard mpv keyboard shortcuts (Space pause, ←/→ seek, F fullscreen, M mute, etc.).
-- Quick filter to find a file in a large library.
-- Recognized extensions: `mkv`, `mp4`, `m4v`, `mov`, `avi`, `wmv`, `flv`, `webm`, `ts`, `m2ts`, `mts`, `ogv`, `ogm`, `vob`, `3gp`, `rm`, `rmvb`, `mpg`, `mpeg`.
+- Local library scanner with editable categories, missing-file diagnostics, and regex-based filename detection rules.
+- In-process libmpv playback for common containers/codecs including MKV, MP4, HEVC, AV1, FLAC/Opus audio, ASS subtitles, and more.
+- Custom player controls for play/pause, seeking, audio/subtitle track selection, aspect fit, fullscreen, and episode navigation.
+- Continue Watching, search, bulk category editing, bulk filename replacement, local progress tracking, and optional AniList linking/progress sync.
+- Portable local data beside the app executable in `data/anime-player.db`.
 
-## Prerequisites
+Supported video extensions: `mkv`, `mp4`, `m4v`, `mov`, `avi`, `wmv`, `flv`, `webm`, `ts`, `m2ts`, `mts`, `ogv`, `ogm`, `vob`, `3gp`, `rm`, `rmvb`, `mpg`, `mpeg`.
 
-You need the following installed:
+## Installation
 
-1. **Node.js 18+** (already detected: `npm` available).
-2. **Rust** (stable toolchain) – install from <https://rustup.rs>.
-3. **Microsoft Visual Studio C++ Build Tools** (Desktop development with C++ workload) – required by Tauri on Windows.
-4. **WebView2 Runtime** – preinstalled on Windows 11 / recent Windows 10 builds.
+Prerequisites:
 
-You do **not** need a separate `mpv.exe` install. `libmpv-2.dll` is downloaded into `src-tauri/libs/mpv/` and bundled with the installer.
+1. Node.js 18+.
+2. Rust stable from <https://rustup.rs>.
+3. Microsoft Visual Studio C++ Build Tools with the Desktop development with C++ workload.
+4. WebView2 Runtime, which is preinstalled on current Windows 10/11 installs.
+5. `7z` on PATH for the mpv setup script.
 
-See the official Tauri prerequisites: <https://tauri.app/start/prerequisites/>.
-
-## Install
+Install dependencies and download the local libmpv artifacts:
 
 ```powershell
 npm install
 npm run setup:mpv
 ```
 
-## Run (development)
+You do not need a separate `mpv.exe` install. The setup script downloads `libmpv-2.dll` and `mpv.lib` into `src-tauri/libs/mpv/`; these generated files are intentionally not committed.
+
+## Running
 
 ```powershell
 npm run tauri dev
 ```
 
-The first run will compile the Rust side, which takes a couple of minutes. Subsequent runs are fast. The build script copies `libmpv-2.dll` next to the dev binary automatically.
+The first Rust build can take a few minutes. Later dev runs are much faster.
 
-## Build (production)
+To build an installer:
 
 ```powershell
 npm run tauri build
 ```
 
-Outputs an installer/executable in `src-tauri/target/release/bundle/`. `libmpv-2.dll` is shipped alongside via `tauri.conf.json`'s `bundle.resources`.
-
-## Downloading / updating libmpv
-
-The generated `libmpv-2.dll` and `mpv.lib` come from `shinchiro/mpv-winbuild-cmake` releases. They are intentionally ignored by git, so run this after cloning or whenever you want to refresh them:
+To build and package the portable release folder/zip:
 
 ```powershell
-npm run setup:mpv
+npm run release
 ```
 
-This downloads the latest dev bundle, extracts `libmpv-2.dll` and `libmpv.dll.a` (renamed to `mpv.lib` for MSVC), and writes a `VERSION.txt` recording which release was installed. Requires `7z` on PATH (e.g. `scoop install 7zip`).
+## Basic Usage
 
-## Project layout
+1. Open Settings and add one or more root folders.
+2. Rescan the library.
+3. Open a category, pick a title, then choose an episode to play.
+4. Adjust categories, detection rules, bulk edits, and cleanup from Settings/Bulk Edit as needed.
 
-- `src/` – React + TypeScript frontend (Vite).
-  - `App.tsx` – folder input, file list, transparent player pane, custom controls.
-- `src-tauri/` – Rust backend.
-  - `src/lib.rs` – exposes `scan_videos` plus `mpv_*` commands.
-  - `src/mpv/` – in-process libmpv module: `ffi.rs` (FFI declarations), `handle.rs` (`MpvHandle` and lifecycle), `event_loop.rs` (property observers → `mpv://*` Tauri events).
-  - `libs/mpv/` – local generated `libmpv-2.dll` + `mpv.lib`.
-  - `build.rs` – tells Cargo to link against `mpv` and copies the DLL beside the dev binary.
-  - `tauri.conf.json` – sets `transparent: true` on the main window and ships `libmpv-2.dll` as a bundle resource.
-- `scripts/download-mpv-libs.mjs` – setup entry point for local libmpv artifacts.
-- `scripts/update-mpv-libs.mjs` – compatibility updater for the same artifacts.
+The default detection rules cover common fansub-style names, simple `Title - 01` names, and generic video filenames. Detection rules are evaluated by priority, highest first:
 
-## How playback works
+- `Fansub`, priority `10`
+- `Fansub (no ep)`, priority `9`
+- `Simple`, priority `5`
+- `Simple (no ep)`, priority `4`
+- `Generic`, priority `0`
 
-The Tauri main window has `"transparent": true`. On the first file selection the frontend calls `invoke("mpv_init", ...)`, which:
+## AniList
 
-1. `mpv_create()`s a libmpv context in the Tauri process.
-2. Sets the `wid` option to the Tauri main `HWND` (so libmpv embeds into our window) plus `vo=gpu-next`, `gpu-context=d3d11`, `hwdec=auto-safe`, `osc=no`.
-3. `mpv_initialize()`s the context. libmpv creates its own DirectComposition swap-chain under our HWND.
-4. Spawns a background thread that observes `time-pos`, `duration`, `pause`, `eof-reached` and republishes each property change as a Tauri event (`mpv://time-pos`, etc.).
+AniList support is optional. The app includes a default AniList OAuth client ID (`40455`), so most users can open Settings and press **Login with AniList** without changing anything.
 
-Because libmpv's swap-chain and WebView2's visual both compose under the same HWND in the same DWM tree, the video shows through anywhere the React UI is CSS-transparent (the `.player` pane). The sidebar paints opaquely on top. We confine the video to the right pane by setting `video-margin-ratio-left = sidebar_px / window_width`, which we re-issue on every window resize.
+If you want to use your own AniList API client, enter its client ID in Settings. Configure the AniList app redirect URL as:
 
-Loading another file is just `mpv_load(path)` (which fires `loadfile`). Switching to a custom controls UI was a primary motivator for this approach: drawing HTML over a transparent CSS region is much easier than drawing it over a separate top-level popup HWND.
+```text
+anime-player://anilist-auth
+```
 
-For the historical popup-window architecture and why the in-process libmpv approach replaced it, see `CONTEXT.md`.
+After login, you can link local titles to AniList entries, import watched progress, sync completed episodes, and adjust AniList scores from the title page.
+
+## Keybindings
+
+Global:
+
+- `F11`: Toggle app fullscreen, unless typing in a text field.
+- `Ctrl+F`: Open/focus Search.
+- `Esc`: Go back from category, search, bulk edit, missing, episode, or settings pages.
+- `Arrow keys`: Move focus through category/title card grids.
+
+Episode page:
+
+- `Q`: Quick play the current title. It resumes the most recently played episode, advances to the next unwatched episode if that one is watched, or starts the first unwatched episode.
+
+Player:
+
+- `Space`: Play/pause.
+- Right click: Play/pause.
+- `ArrowLeft` / `ArrowRight`: Seek backward/forward 5 seconds.
+- `Numpad4` / `Numpad6`: Seek backward/forward 28 seconds.
+- `Numpad7` / `Numpad9`: Seek backward/forward 85 seconds.
+- `Ctrl+ArrowLeft` / `Ctrl+ArrowRight`: Previous/next episode.
+- `F`: Toggle fullscreen.
+- `F11`: Toggle app fullscreen.
+- `C`: Toggle player controls.
+- `Q` or `Esc`: Leave the player and return to the episode list.
+- Double left click on the video: Toggle fullscreen.
+- Single left click and drag on the video: Drag the window.
+
+libmpv keyboard input is also enabled in the player area, so standard mpv bindings may work in addition to the custom shortcuts above.
+
+## Development Notes
+
+The frontend is React + TypeScript under `src/`. The backend is Rust/Tauri under `src-tauri/`. Playback is handled by libmpv loaded in the Tauri process and rendered into the main window via DirectComposition; see `CONTEXT.md` for the detailed architecture notes.
+
+Useful checks:
+
+```powershell
+npx tsc --noEmit
+cargo check --manifest-path src-tauri/Cargo.toml
+```

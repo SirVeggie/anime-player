@@ -304,7 +304,7 @@ export function EpisodeScreen(props: {
       let trackerOffset: number;
       let progressOverride: number | null = null;
       try {
-        if (!title) throw new Error("Anime title is required.");
+        if (!title) throw new Error("Title is required.");
         trackerOffset = parseIntegerDraft(trackerOffsetDraft, "Tracker offset");
         if (progressOverrideDraft.trim()) {
           progressOverride = parseIntegerDraft(progressOverrideDraft, "Override progress");
@@ -429,8 +429,8 @@ export function EpisodeScreen(props: {
               type="button"
               className="header-icon-button"
               onClick={openAnimeSettings}
-              aria-label="Open anime settings"
-              title="Anime settings"
+              aria-label="Open title settings"
+              title="Title settings"
             >
               <SettingsIcon />
             </button>
@@ -444,7 +444,7 @@ export function EpisodeScreen(props: {
               </button>
             )}
             <button type="button" className="button-danger" onClick={() => setDeleteConfirmOpen(true)}>
-              Delete Anime
+              Delete Files
             </button>
           </>
         }
@@ -601,7 +601,7 @@ export function EpisodeScreen(props: {
           >
             <div className="modal-heading">
               <div>
-                <h2 id="delete-anime-title">Delete Anime Files?</h2>
+                <h2 id="delete-anime-title">Delete Title Files?</h2>
                 <p className="muted" id="delete-anime-description">
                   This will delete {episodes.length} episode file{episodes.length === 1 ? "" : "s"} for "{anime.title}".
                 </p>
@@ -640,16 +640,16 @@ export function EpisodeScreen(props: {
           >
             <div className="modal-heading">
               <div>
-                <h2 id="anime-settings-title">Anime Settings</h2>
+                <h2 id="anime-settings-title">Title Settings</h2>
                 <p className="muted" id="anime-settings-description">
-                  Adjust per-anime tracker numbering and force local progress.
+                  Adjust per-title tracker numbering and force local progress.
                 </p>
               </div>
             </div>
             <form className="anime-settings-form" onSubmit={(e) => void saveAnimeSettings(e)}>
               <div className="anime-settings-field">
                 <label>
-                  <span>Anime title</span>
+                  <span>Title</span>
                   <input
                     type="text"
                     value={animeTitleDraft}
@@ -658,7 +658,7 @@ export function EpisodeScreen(props: {
                   />
                 </label>
                 <p className="muted">
-                  Renames the episode files on disk and keeps this anime's saved progress, category, and AniList link.
+                  Renames the episode files on disk and keeps this title's saved progress, category, and AniList link.
                 </p>
               </div>
               <div className="anime-settings-field">

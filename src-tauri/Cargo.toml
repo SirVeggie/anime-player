@@ -1,7 +1,7 @@
 [package]
 name = "anime-player"
 version = "0.1.0"
-description = "Local lossless anime video player"
+description = "Local lossless video library player"
 authors = ["you"]
 edition = "2021"
 

@@ -109,7 +109,7 @@ export function AnimeGrid(props: {
   return (
     <>
       <ViewHeader
-        title={category?.name ?? "Anime"}
+        title={category?.name ?? "Titles"}
         subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
         onBack={onBack}
         action={
@@ -125,8 +125,8 @@ export function AnimeGrid(props: {
       />
       {anime.length === 0 ? (
         <div className="empty empty--wide">
-          <h2>No anime found here yet</h2>
-          <p className="muted">Add root folders and rescan from settings, or move anime into this category later.</p>
+          <h2>No titles found here yet</h2>
+          <p className="muted">Add root folders and rescan from settings, or move titles into this category later.</p>
           <button type="button" onClick={onOpenSettings}>
             Open settings
           </button>

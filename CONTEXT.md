@@ -70,7 +70,8 @@ view components. Per-screen UI lives in `src/components/`:
   `get_file_thumbnail` Shell thumbnail helper. The legacy `scan_videos`
   command still exists for compatibility.
 - AniList integration is a first-slice metadata/linking feature. Settings
-  stores an AniList OAuth client ID and opens the implicit OAuth flow with
+  shows a default AniList OAuth client ID (`40455`) that works for normal
+  users without custom setup, and opens the implicit OAuth flow with
   `anime-player://anilist-auth` as the custom URI callback. `App.tsx`
   listens for Tauri deep-link callbacks, validates/stores the token through
   Rust, and exposes search/link/unlink/open controls on the anime episode
@@ -198,8 +199,8 @@ view components. Per-screen UI lives in `src/components/`:
 
 - `db.rs` opens a portable SQLite database at
   `<current-exe>/data/anime-player.db`, creates the first schema, and
-  seeds default categories (`Ongoing`, `Completed`, `Finished`) plus a
-  fansub-style regex rule. `AppDatabase::with_conn` exposes `&mut Connection`
+  seeds default categories (`Ongoing`, `Completed`, `Finished`) plus
+  fansub, simple-title, and generic video regex rules. `AppDatabase::with_conn` exposes `&mut Connection`
   so callers can start transactions (e.g. bulk rescan writes).
 - `scanner.rs` owns recursive video discovery, extension filtering, and
   regex-based anime title / episode extraction. When multiple enabled
@@ -239,8 +240,8 @@ view components. Per-screen UI lives in `src/components/`:
   as 0 when the reported position is under 60 seconds so brief opens do
   not leave a resume point; when `watched` is true (end-of-episode
   threshold), it stores `position_seconds` at full duration (100%).
-- `anilist.rs` owns AniList GraphQL/OAuth work. It stores the OAuth
-  client ID, access token, and viewer metadata in `settings`, adds link
+- `anilist.rs` owns AniList GraphQL/OAuth work. It stores an optional
+  custom OAuth client ID, access token, and viewer metadata in `settings`, adds link
   metadata on `anime` rows (`anilist_id`, title, site URL, cached cover
   path), searches AniList via `https://graphql.anilist.co`, validates
   login tokens with `Viewer`, and downloads covers under the portable

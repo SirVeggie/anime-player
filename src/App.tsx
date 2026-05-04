@@ -499,7 +499,7 @@ function App() {
       await reloadLibrary();
       await reloadLocalDataStats();
       const staleEpisodes = `${summary.stale_episodes_removed} stale episode${summary.stale_episodes_removed === 1 ? "" : "s"}`;
-      const emptyAnime = `${summary.empty_anime_removed} empty anime entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
+      const emptyAnime = `${summary.empty_anime_removed} empty title entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
       const thumbnails = `${summary.thumbnails_removed} unused thumbnail${summary.thumbnails_removed === 1 ? "" : "s"}`;
       return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, and ${thumbnails}.`;
     });
@@ -523,7 +523,7 @@ function App() {
         await deleteCategory(category.id);
         const state = await reloadLibrary();
         setSelectedCategoryId(state.categories[0]?.id ?? null);
-        return "Category deleted. Anime were moved to the default category.";
+        return "Category deleted. Titles were moved to the default category.";
       });
     },
     [reloadLibrary, runAction],
@@ -683,7 +683,7 @@ function App() {
           const updated = state.anime.find((anime) => anime.id === selectedAnimeIdRef.current);
           if (updated) setSelectedAnime(updated);
         }
-        return `Moved ${animeIds.length} anime to a new category.`;
+        return `Moved ${animeIds.length} title${animeIds.length === 1 ? "" : "s"} to a new category.`;
       });
     },
     [reloadLibrary, runAction],
@@ -714,7 +714,7 @@ function App() {
       await runAction(async () => {
         const state = await setAnilistClientId(clientId);
         setAnilistAuth(state);
-        return clientId.trim() ? "AniList client ID saved." : "AniList client ID cleared.";
+        return clientId.trim() ? "AniList client ID saved." : "AniList client ID reset to the default.";
       });
     },
     [runAction],
@@ -806,7 +806,7 @@ function App() {
         const state = await reloadLibrary();
         const updated = state.anime.find((anime) => anime.id === animeId);
         if (updated) setSelectedAnime(updated);
-        return "Anime unlinked from AniList.";
+        return "Title unlinked from AniList.";
       });
     },
     [reloadLibrary, runAction],
@@ -961,7 +961,7 @@ function App() {
       void appWindow.setTitle(APP_WINDOW_TITLE).catch(() => {});
       return;
     }
-    const raw = osTitleAnimeLabel ?? selectedEpisode?.file_name ?? "Anime";
+    const raw = osTitleAnimeLabel ?? selectedEpisode?.file_name ?? "Title";
     const short = shortenForOsTitle(raw);
     const prefix = playerPaused ? "Paused" : "Playing";
     void appWindow.setTitle(`${prefix} - ${short} - ${APP_WINDOW_TITLE}`).catch(() => {});
