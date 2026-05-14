@@ -378,7 +378,7 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
 - `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
-- `src/volumeCurve.ts` — volume constants and clamping for
+- `src/volume.ts` — volume constants and clamping for
   mpv's native 0–130 log scale.
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and

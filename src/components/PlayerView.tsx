@@ -16,7 +16,7 @@ import {
 } from "../api";
 import type { AnilistProgressSyncResult, Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
-import { HOTKEY_STEP, MAX_VOLUME, clampVolume } from "../volumeCurve";
+import { HOTKEY_STEP, MAX_VOLUME, clampVolume } from "../volume";
 
 const PLAYER_SIDEBAR_PX = 0;
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
