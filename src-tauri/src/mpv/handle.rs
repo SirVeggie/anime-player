@@ -197,6 +197,11 @@ impl MpvHandle {
         self.command(&["seek", &s, "relative"])
     }
 
+    pub fn set_volume(&self, volume: f64) -> Result<(), String> {
+        let v = format!("{volume}");
+        self.command(&["set", "volume", &v])
+    }
+
     pub fn stop(&self) -> Result<(), String> {
         self.command(&["stop"])
     }

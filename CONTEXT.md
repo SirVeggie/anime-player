@@ -160,20 +160,23 @@ view components. Per-screen UI lives in `src/components/`:
   margin, so native resize handling cannot reveal a stale video strip
   without unloading mpv.
 - A custom HTML controls bar (transport + scrubber + time + track menus
-  + aspect fit + fullscreen) drives mpv via `mpv_cycle_pause`,
-  `mpv_set_pause`, `mpv_seek`, `mpv_seek_relative`, track selection
-  commands, and reads state from `mpv://time-pos`, `mpv://duration`,
-  `mpv://pause`, `mpv://eof-reached`, `mpv://file-loaded`, and
-  `mpv://playback-restart` events. Controls fade out after pointer idle,
-  hide immediately when the pointer leaves the window (unless a seek or
-  track menu is active), and are revealed by mouse movement, active
-  menu/seek interaction, or **C** to toggle visibility.
+  + volume + aspect fit + fullscreen) drives mpv via `mpv_cycle_pause`,
+  `mpv_set_pause`, `mpv_seek`, `mpv_seek_relative`, `mpv_set_volume`,
+  track selection commands, and reads state from `mpv://time-pos`,
+  `mpv://duration`, `mpv://pause`, `mpv://eof-reached`,
+  `mpv://file-loaded`, and `mpv://playback-restart` events. Controls
+  fade out after pointer idle, hide immediately when the pointer leaves
+  the window (unless a seek, track menu, or volume popup is active), and
+  are revealed by mouse movement, active menu/seek interaction, or **C**
+  to toggle visibility.
 - The video pane uses Tauri `startDragging` (single left-click) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
   pause; **C** toggles player chrome visibility; Space and ArrowLeft/ArrowRight seek ±5s; Ctrl+ArrowLeft/ArrowRight
   loads the previous/next episode in the list when available; Numpad 4/6 seek ±28s and
-  Numpad 7/9 seek ±85s; **Q**, **Escape**, or the back
+  Numpad 7/9 seek ±85s; **W**/**S** adjust volume up/down by one
+  perceptual step (50-step logarithmic curve, see `src/volumeCurve.ts`);
+  mouse scroll wheel also adjusts volume; **Q**, **Escape**, or the back
   control returns to the episode list (without unloading mpv). On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the
@@ -273,7 +276,7 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_select_audio_track(track_id)`,
   `mpv_select_subtitle_track(track_id)`,
   `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
-  and `mpv_stop()`.
+  `mpv_set_volume(volume)`, and `mpv_stop()`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.
@@ -375,6 +378,8 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
 - `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
+- `src/volumeCurve.ts` — 50-step logarithmic volume curve
+  (steps <-> mpv volume).
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.

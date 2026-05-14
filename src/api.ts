@@ -145,6 +145,10 @@ export function addMpvSubtitleFile(path: string): Promise<void> {
   return invoke("mpv_add_subtitle_file", { path });
 }
 
+export function setMpvVolume(volume: number): Promise<void> {
+  return invoke("mpv_set_volume", { volume });
+}
+
 export function getMpvVideoGeometry(): Promise<MpvVideoGeometry | null> {
   return invoke("mpv_get_video_geometry");
 }

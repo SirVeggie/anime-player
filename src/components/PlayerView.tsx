@@ -11,10 +11,12 @@ import {
   saveEpisodeProgress,
   selectMpvAudioTrack,
   selectMpvSubtitleTrack,
+  setMpvVolume,
   syncAnilistEpisodeProgress,
 } from "../api";
 import type { AnilistProgressSyncResult, Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
+import { STEP_COUNT, clampSteps, stepsToVolume } from "../volumeCurve";
 
 const PLAYER_SIDEBAR_PX = 0;
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
@@ -223,6 +225,12 @@ export function PlayerView(props: {
   const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
+  const [volumeSteps, setVolumeSteps] = useState(STEP_COUNT);
+  const [volumePopupOpen, setVolumePopupOpen] = useState(false);
+  const [volumeOsdVisible, setVolumeOsdVisible] = useState(false);
+  const volumeHideTimerRef = useRef<number | null>(null);
+  const volumeOsdTimerRef = useRef<number | null>(null);
+  const volumeStepsRef = useRef(STEP_COUNT);
   const mpvReadyRef = useRef(false);
   const loadedPathRef = useRef<string | null>(null);
   const playbackRef = useRef({ episode, position, duration });
@@ -269,7 +277,7 @@ export function PlayerView(props: {
   const selectedIndex = playlist.findIndex((item) => item.id === episode.id);
   const canPrev = selectedIndex > 0;
   const canNext = selectedIndex >= 0 && selectedIndex < playlist.length - 1;
-  const controlsPinned = seekInteracting || activeTrackMenu !== null;
+  const controlsPinned = seekInteracting || activeTrackMenu !== null || volumePopupOpen;
   const audioTracks = tracks.filter((track) => track.kind === "audio");
   const subtitleTracks = tracks.filter((track) => track.kind === "sub");
   const selectedAudioTrack = audioTracks.find((track) => track.selected) ?? null;
@@ -706,6 +714,53 @@ export function PlayerView(props: {
     }
   }, [onError, videoGeometry]);
 
+  const applyVolume = useCallback(
+    (steps: number) => {
+      const clamped = clampSteps(steps);
+      setVolumeSteps(clamped);
+      volumeStepsRef.current = clamped;
+      void setMpvVolume(stepsToVolume(clamped)).catch((e) => onError(errorMessage(e)));
+    },
+    [onError],
+  );
+
+  const adjustVolumeWithOsd = useCallback(
+    (delta: number) => {
+      const next = clampSteps(volumeStepsRef.current + delta);
+      applyVolume(next);
+      setVolumeOsdVisible(true);
+      if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
+      volumeOsdTimerRef.current = window.setTimeout(() => {
+        setVolumeOsdVisible(false);
+        volumeOsdTimerRef.current = null;
+      }, 1200);
+    },
+    [applyVolume],
+  );
+
+  const openVolumePopup = useCallback(() => {
+    if (volumeHideTimerRef.current !== null) {
+      window.clearTimeout(volumeHideTimerRef.current);
+      volumeHideTimerRef.current = null;
+    }
+    setVolumePopupOpen(true);
+  }, []);
+
+  const scheduleVolumePopupHide = useCallback(() => {
+    if (volumeHideTimerRef.current !== null) window.clearTimeout(volumeHideTimerRef.current);
+    volumeHideTimerRef.current = window.setTimeout(() => {
+      setVolumePopupOpen(false);
+      volumeHideTimerRef.current = null;
+    }, 500);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (volumeHideTimerRef.current !== null) window.clearTimeout(volumeHideTimerRef.current);
+      if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
+    };
+  }, []);
+
   const hidePlayer = useCallback(async () => {
     try {
       await invoke("mpv_set_pause", { paused: true });
@@ -834,6 +889,18 @@ export function PlayerView(props: {
         );
         return;
       }
+      if (e.code === "KeyW") {
+        if (!visible) return;
+        e.preventDefault();
+        adjustVolumeWithOsd(1);
+        return;
+      }
+      if (e.code === "KeyS") {
+        if (!visible) return;
+        e.preventDefault();
+        adjustVolumeWithOsd(-1);
+        return;
+      }
       if (e.code === "KeyF") {
         e.preventDefault();
         void toggleFullscreen();
@@ -871,6 +938,7 @@ export function PlayerView(props: {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
+    adjustVolumeWithOsd,
     canNext,
     canPrev,
     clearControlsHideTimer,
@@ -883,7 +951,18 @@ export function PlayerView(props: {
     visible,
   ]);
 
+  useEffect(() => {
+    if (!visible) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      adjustVolumeWithOsd(e.deltaY < 0 ? 1 : -1);
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [adjustVolumeWithOsd, visible]);
+
   const safeDuration = duration > 0 ? duration : 0;
+  const volumePercent = Math.round((volumeSteps / STEP_COUNT) * 100);
 
   return (
     <section
@@ -906,6 +985,12 @@ export function PlayerView(props: {
             : "player-load-fade"
         }
       />
+      <div className={`volume-osd${volumeOsdVisible && !volumePopupOpen ? "" : " volume-osd--hidden"}`}>
+        <div className="volume-osd-bar">
+          <div className="volume-osd-fill" style={{ height: `${volumePercent}%` }} />
+        </div>
+        <span className="volume-osd-percent">{volumePercent}%</span>
+      </div>
       <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
         <ArrowLeftIcon />
       </button>
@@ -990,6 +1075,13 @@ export function PlayerView(props: {
                   onBrowse={() => void browseSubtitleFile()}
                   browseLabel="Select file..."
                   onDismiss={closeTrackMenu}
+                />
+                <VolumeControl
+                  steps={volumeSteps}
+                  popupOpen={volumePopupOpen}
+                  onApplyVolume={applyVolume}
+                  onOpenPopup={openVolumePopup}
+                  onScheduleHidePopup={scheduleVolumePopupHide}
                 />
                 <button
                   type="button"
@@ -1108,6 +1200,121 @@ function TrackMenu(props: {
 function trackLabel(track: MpvTrack) {
   const parts = [track.lang?.toUpperCase(), track.title].filter(Boolean);
   return parts.length > 0 ? parts.join(" - ") : `Track ${track.id}`;
+}
+
+function VolumeControl(props: {
+  steps: number;
+  popupOpen: boolean;
+  onApplyVolume: (steps: number) => void;
+  onOpenPopup: () => void;
+  onScheduleHidePopup: () => void;
+}) {
+  const { steps, popupOpen, onApplyVolume, onOpenPopup, onScheduleHidePopup } = props;
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const activePointerRef = useRef<number | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  const stepsFromClientY = (clientY: number) => {
+    const track = trackRef.current;
+    if (!track) return steps;
+    const rect = track.getBoundingClientRect();
+    const ratio = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    return clampSteps(Math.round(ratio * STEP_COUNT));
+  };
+
+  useEffect(() => () => dragCleanupRef.current?.(), []);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    draggingRef.current = true;
+    activePointerRef.current = e.pointerId;
+    trackRef.current?.setPointerCapture(e.pointerId);
+    onApplyVolume(stepsFromClientY(e.clientY));
+
+    const onMove = (ev: PointerEvent) => {
+      if (!draggingRef.current || ev.pointerId !== activePointerRef.current) return;
+      onApplyVolume(stepsFromClientY(ev.clientY));
+    };
+    const stopDrag = (ev?: PointerEvent) => {
+      if (ev && ev.pointerId !== activePointerRef.current) return;
+      if (ev && trackRef.current?.hasPointerCapture(ev.pointerId)) {
+        trackRef.current.releasePointerCapture(ev.pointerId);
+      }
+      draggingRef.current = false;
+      activePointerRef.current = null;
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== activePointerRef.current) return;
+      onApplyVolume(stepsFromClientY(ev.clientY));
+      stopDrag(ev);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", stopDrag);
+    dragCleanupRef.current = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", stopDrag);
+    };
+  };
+
+  const percent = Math.round((steps / STEP_COUNT) * 100);
+  const handleOffset = (1 - steps / STEP_COUNT) * 100;
+
+  const volumeIcon =
+    steps === 0 ? (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z" />
+      </svg>
+    ) : steps <= STEP_COUNT / 3 ? (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <path d="M7 9v6h4l5 5V4l-5 5H7z" />
+      </svg>
+    ) : steps <= (STEP_COUNT * 2) / 3 ? (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <path d="M18.5 12A4.5 4.5 0 0 0 16 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+      </svg>
+    );
+
+  return (
+    <div
+      className="volume-control"
+      onMouseEnter={onOpenPopup}
+      onMouseLeave={onScheduleHidePopup}
+    >
+      <button
+        type="button"
+        className="icon-button icon-button--player icon-button--lg"
+        title={`Volume ${percent}%`}
+      >
+        {volumeIcon}
+      </button>
+      {popupOpen ? (
+        <div className="volume-popup">
+          <div
+            ref={trackRef}
+            className="volume-slider-track"
+            onPointerDown={onPointerDown}
+          >
+            <div className="volume-slider-fill" style={{ height: `${percent}%` }} />
+            <div className="volume-slider-handle" style={{ top: `${handleOffset}%` }} />
+            <div className="volume-label" style={{ top: `${handleOffset}%` }}>
+              {percent}%
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ArrowLeftIcon() {

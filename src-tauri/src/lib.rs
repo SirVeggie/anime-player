@@ -222,6 +222,16 @@ fn handle_native_resize(app_handle: &tauri::AppHandle, physical_width: u32, scal
 
 #[cfg(windows)]
 #[tauri::command]
+fn mpv_set_volume(state: State<'_, AppState>, volume: f64) -> Result<(), String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        m.set_volume(volume)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn mpv_stop(state: State<'_, AppState>) -> Result<(), String> {
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
@@ -341,6 +351,7 @@ pub fn run() {
         mpv_seek,
         mpv_seek_relative,
         mpv_set_layout,
+        mpv_set_volume,
         mpv_stop,
     ]);
 
