@@ -16,7 +16,7 @@ import {
 } from "../api";
 import type { AnilistProgressSyncResult, Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
-import { STEP_COUNT, clampSteps, stepsToVolume } from "../volumeCurve";
+import { HOTKEY_STEP, MAX_VOLUME, clampVolume } from "../volumeCurve";
 
 const PLAYER_SIDEBAR_PX = 0;
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
@@ -225,12 +225,12 @@ export function PlayerView(props: {
   const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
-  const [volumeSteps, setVolumeSteps] = useState(STEP_COUNT);
+  const [volume, setVolume] = useState(100);
   const [volumePopupOpen, setVolumePopupOpen] = useState(false);
   const [volumeOsdVisible, setVolumeOsdVisible] = useState(false);
   const volumeHideTimerRef = useRef<number | null>(null);
   const volumeOsdTimerRef = useRef<number | null>(null);
-  const volumeStepsRef = useRef(STEP_COUNT);
+  const volumeRef = useRef(100);
   const mpvReadyRef = useRef(false);
   const loadedPathRef = useRef<string | null>(null);
   const playbackRef = useRef({ episode, position, duration });
@@ -715,19 +715,18 @@ export function PlayerView(props: {
   }, [onError, videoGeometry]);
 
   const applyVolume = useCallback(
-    (steps: number) => {
-      const clamped = clampSteps(steps);
-      setVolumeSteps(clamped);
-      volumeStepsRef.current = clamped;
-      void setMpvVolume(stepsToVolume(clamped)).catch((e) => onError(errorMessage(e)));
+    (next: number) => {
+      const clamped = clampVolume(next);
+      setVolume(clamped);
+      volumeRef.current = clamped;
+      void setMpvVolume(clamped).catch((e) => onError(errorMessage(e)));
     },
     [onError],
   );
 
   const adjustVolumeWithOsd = useCallback(
     (delta: number) => {
-      const next = clampSteps(volumeStepsRef.current + delta);
-      applyVolume(next);
+      applyVolume(volumeRef.current + delta);
       setVolumeOsdVisible(true);
       if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
       volumeOsdTimerRef.current = window.setTimeout(() => {
@@ -892,13 +891,13 @@ export function PlayerView(props: {
       if (e.code === "KeyW") {
         if (!visible) return;
         e.preventDefault();
-        adjustVolumeWithOsd(1);
+        adjustVolumeWithOsd(HOTKEY_STEP);
         return;
       }
       if (e.code === "KeyS") {
         if (!visible) return;
         e.preventDefault();
-        adjustVolumeWithOsd(-1);
+        adjustVolumeWithOsd(-HOTKEY_STEP);
         return;
       }
       if (e.code === "KeyF") {
@@ -955,14 +954,13 @@ export function PlayerView(props: {
     if (!visible) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      adjustVolumeWithOsd(e.deltaY < 0 ? 1 : -1);
+      adjustVolumeWithOsd(e.deltaY < 0 ? HOTKEY_STEP : -HOTKEY_STEP);
     };
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => window.removeEventListener("wheel", onWheel);
   }, [adjustVolumeWithOsd, visible]);
 
   const safeDuration = duration > 0 ? duration : 0;
-  const volumePercent = Math.round((volumeSteps / STEP_COUNT) * 100);
 
   return (
     <section
@@ -987,9 +985,9 @@ export function PlayerView(props: {
       />
       <div className={`volume-osd${volumeOsdVisible && !volumePopupOpen ? "" : " volume-osd--hidden"}`}>
         <div className="volume-osd-bar">
-          <div className="volume-osd-fill" style={{ height: `${volumePercent}%` }} />
+          <div className="volume-osd-fill" style={{ height: `${Math.min(100, (volume / MAX_VOLUME) * 100)}%` }} />
         </div>
-        <span className="volume-osd-percent">{volumePercent}%</span>
+        <span className="volume-osd-percent">{volume}%</span>
       </div>
       <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
         <ArrowLeftIcon />
@@ -1077,7 +1075,7 @@ export function PlayerView(props: {
                   onDismiss={closeTrackMenu}
                 />
                 <VolumeControl
-                  steps={volumeSteps}
+                  volume={volume}
                   popupOpen={volumePopupOpen}
                   onApplyVolume={applyVolume}
                   onOpenPopup={openVolumePopup}
@@ -1203,24 +1201,24 @@ function trackLabel(track: MpvTrack) {
 }
 
 function VolumeControl(props: {
-  steps: number;
+  volume: number;
   popupOpen: boolean;
-  onApplyVolume: (steps: number) => void;
+  onApplyVolume: (volume: number) => void;
   onOpenPopup: () => void;
   onScheduleHidePopup: () => void;
 }) {
-  const { steps, popupOpen, onApplyVolume, onOpenPopup, onScheduleHidePopup } = props;
+  const { volume, popupOpen, onApplyVolume, onOpenPopup, onScheduleHidePopup } = props;
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const activePointerRef = useRef<number | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
 
-  const stepsFromClientY = (clientY: number) => {
+  const volumeFromClientY = (clientY: number) => {
     const track = trackRef.current;
-    if (!track) return steps;
+    if (!track) return volume;
     const rect = track.getBoundingClientRect();
     const ratio = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-    return clampSteps(Math.round(ratio * STEP_COUNT));
+    return clampVolume(Math.round(ratio * MAX_VOLUME));
   };
 
   useEffect(() => () => dragCleanupRef.current?.(), []);
@@ -1231,11 +1229,11 @@ function VolumeControl(props: {
     draggingRef.current = true;
     activePointerRef.current = e.pointerId;
     trackRef.current?.setPointerCapture(e.pointerId);
-    onApplyVolume(stepsFromClientY(e.clientY));
+    onApplyVolume(volumeFromClientY(e.clientY));
 
     const onMove = (ev: PointerEvent) => {
       if (!draggingRef.current || ev.pointerId !== activePointerRef.current) return;
-      onApplyVolume(stepsFromClientY(ev.clientY));
+      onApplyVolume(volumeFromClientY(ev.clientY));
     };
     const stopDrag = (ev?: PointerEvent) => {
       if (ev && ev.pointerId !== activePointerRef.current) return;
@@ -1249,7 +1247,7 @@ function VolumeControl(props: {
     };
     const onUp = (ev: PointerEvent) => {
       if (ev.pointerId !== activePointerRef.current) return;
-      onApplyVolume(stepsFromClientY(ev.clientY));
+      onApplyVolume(volumeFromClientY(ev.clientY));
       stopDrag(ev);
     };
 
@@ -1263,19 +1261,19 @@ function VolumeControl(props: {
     };
   };
 
-  const percent = Math.round((steps / STEP_COUNT) * 100);
-  const handleOffset = (1 - steps / STEP_COUNT) * 100;
+  const fillPercent = Math.min(100, (volume / MAX_VOLUME) * 100);
+  const handleOffset = 100 - fillPercent;
 
   const volumeIcon =
-    steps === 0 ? (
+    volume === 0 ? (
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
         <path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z" />
       </svg>
-    ) : steps <= STEP_COUNT / 3 ? (
+    ) : volume <= 33 ? (
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
         <path d="M7 9v6h4l5 5V4l-5 5H7z" />
       </svg>
-    ) : steps <= (STEP_COUNT * 2) / 3 ? (
+    ) : volume <= 66 ? (
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
         <path d="M18.5 12A4.5 4.5 0 0 0 16 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" />
       </svg>
@@ -1294,7 +1292,7 @@ function VolumeControl(props: {
       <button
         type="button"
         className="icon-button icon-button--player icon-button--lg"
-        title={`Volume ${percent}%`}
+        title={`Volume ${volume}%`}
       >
         {volumeIcon}
       </button>
@@ -1305,10 +1303,10 @@ function VolumeControl(props: {
             className="volume-slider-track"
             onPointerDown={onPointerDown}
           >
-            <div className="volume-slider-fill" style={{ height: `${percent}%` }} />
+            <div className="volume-slider-fill" style={{ height: `${fillPercent}%` }} />
             <div className="volume-slider-handle" style={{ top: `${handleOffset}%` }} />
             <div className="volume-label" style={{ top: `${handleOffset}%` }}>
-              {percent}%
+              {volume}%
             </div>
           </div>
         </div>

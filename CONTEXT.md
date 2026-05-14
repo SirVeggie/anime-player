@@ -174,9 +174,9 @@ view components. Per-screen UI lives in `src/components/`:
   or **F11** app-wide); right-click toggles
   pause; **C** toggles player chrome visibility; Space and ArrowLeft/ArrowRight seek ±5s; Ctrl+ArrowLeft/ArrowRight
   loads the previous/next episode in the list when available; Numpad 4/6 seek ±28s and
-  Numpad 7/9 seek ±85s; **W**/**S** adjust volume up/down by one
-  perceptual step (50-step logarithmic curve, see `src/volumeCurve.ts`);
-  mouse scroll wheel also adjusts volume; **Q**, **Escape**, or the back
+  Numpad 7/9 seek ±85s; **W**/**S** adjust volume ±5 (mpv's native
+  0–130 log scale); mouse scroll wheel also adjusts volume ±5;
+  **Q**, **Escape**, or the back
   control returns to the episode list (without unloading mpv). On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the
@@ -378,8 +378,8 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
 - `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
-- `src/volumeCurve.ts` — 50-step logarithmic volume curve
-  (steps <-> mpv volume).
+- `src/volumeCurve.ts` — volume constants and clamping for
+  mpv's native 0–130 log scale.
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.
