@@ -16,7 +16,7 @@ import {
 } from "../api";
 import type { AnilistProgressSyncResult, Episode, MpvTrack, MpvVideoGeometry } from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
-import { HOTKEY_STEP, MAX_VOLUME, clampVolume } from "../volume";
+import { HOTKEY_STEP, MAX_VOLUME, clampVolume, loadVolume, saveVolume } from "../volume";
 
 const PLAYER_SIDEBAR_PX = 0;
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
@@ -225,12 +225,12 @@ export function PlayerView(props: {
   const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
-  const [volume, setVolume] = useState(100);
+  const [volume, setVolume] = useState(loadVolume);
   const [volumePopupOpen, setVolumePopupOpen] = useState(false);
   const [volumeOsdVisible, setVolumeOsdVisible] = useState(false);
   const volumeHideTimerRef = useRef<number | null>(null);
   const volumeOsdTimerRef = useRef<number | null>(null);
-  const volumeRef = useRef(100);
+  const volumeRef = useRef(volume);
   const mpvReadyRef = useRef(false);
   const loadedPathRef = useRef<string | null>(null);
   const playbackRef = useRef({ episode, position, duration });
@@ -559,6 +559,7 @@ export function PlayerView(props: {
             sidebarPx,
           });
           mpvReadyRef.current = true;
+          void setMpvVolume(volumeRef.current).catch(() => {});
         } else {
           await invoke("mpv_set_layout", {
             windowWidth: window.innerWidth,
@@ -719,6 +720,7 @@ export function PlayerView(props: {
       const clamped = clampVolume(next);
       setVolume(clamped);
       volumeRef.current = clamped;
+      saveVolume(clamped);
       void setMpvVolume(clamped).catch((e) => onError(errorMessage(e)));
     },
     [onError],
