@@ -13,6 +13,7 @@ const GRID_SORT_OPTIONS = [
   { value: 2, label: "Last watched" },
   { value: 3, label: "Total episodes" },
   { value: 4, label: "Remaining episodes" },
+  { value: 5, label: "Watch progress" },
 ] as const;
 
 function readStoredGridSort(): number {
@@ -20,7 +21,7 @@ function readStoredGridSort(): number {
     const raw = localStorage.getItem(GRID_SORT_STORAGE_KEY);
     if (raw === null) return 0;
     const n = Number.parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 0 || n > 4) return 0;
+    if (!Number.isFinite(n) || n < 0 || n > 5) return 0;
     return n;
   } catch {
     return 0;
@@ -75,6 +76,21 @@ function sortAnimeForGrid(anime: AnimeSummary[], sortValue: number): AnimeSummar
         cmp = b.unwatched_count - a.unwatched_count;
         if (cmp === 0) cmp = byTitle(a, b);
         break;
+      case 5: {
+        const aCompleted = a.unwatched_count === 0 && a.gap_episode_count === 0;
+        const bCompleted = b.unwatched_count === 0 && b.gap_episode_count === 0;
+        if (aCompleted !== bCompleted) {
+          cmp = aCompleted ? 1 : -1;
+        } else {
+          const aTotal = a.episode_count + a.gap_episode_count;
+          const bTotal = b.episode_count + b.gap_episode_count;
+          const aProgress = aTotal > 0 ? (a.episode_count - a.unwatched_count) / aTotal : 0;
+          const bProgress = bTotal > 0 ? (b.episode_count - b.unwatched_count) / bTotal : 0;
+          cmp = bProgress - aProgress;
+        }
+        if (cmp === 0) cmp = byTitle(a, b);
+        break;
+      }
       default:
         cmp = byTitle(a, b);
     }
