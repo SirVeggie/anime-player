@@ -990,7 +990,7 @@ export function PlayerView(props: {
         <div className="volume-osd-bar">
           <div className="volume-osd-fill" style={{ height: `${Math.min(100, (volume / MAX_VOLUME) * 100)}%` }} />
         </div>
-        <span className="volume-osd-percent">{volume}%</span>
+        <span className="volume-osd-percent">{volume}</span>
       </div>
       <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
         <ArrowLeftIcon />
@@ -1295,7 +1295,7 @@ function VolumeControl(props: {
       <button
         type="button"
         className="icon-button icon-button--player icon-button--lg"
-        title={`Volume ${volume}%`}
+        title={`Volume ${volume}`}
       >
         {volumeIcon}
       </button>
@@ -1310,7 +1310,7 @@ function VolumeControl(props: {
             <div className="volume-slider-fill" style={{ height: `${fillPercent}%` }} />
             <div className="volume-slider-handle" style={{ top: `${handleOffset}%` }} />
             <div className="volume-label" style={{ top: `${handleOffset}%` }}>
-              {volume}%
+              {volume}
             </div>
           </div>
         </div>
