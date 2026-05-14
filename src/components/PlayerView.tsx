@@ -726,7 +726,8 @@ export function PlayerView(props: {
 
   const adjustVolumeWithOsd = useCallback(
     (delta: number) => {
-      applyVolume(volumeRef.current + delta);
+      const snapped = Math.round(volumeRef.current / HOTKEY_STEP) * HOTKEY_STEP;
+      applyVolume(snapped + delta);
       setVolumeOsdVisible(true);
       if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
       volumeOsdTimerRef.current = window.setTimeout(() => {
@@ -1301,6 +1302,7 @@ function VolumeControl(props: {
           <div
             ref={trackRef}
             className="volume-slider-track"
+            style={{ height: `${MAX_VOLUME}px` }}
             onPointerDown={onPointerDown}
           >
             <div className="volume-slider-fill" style={{ height: `${fillPercent}%` }} />

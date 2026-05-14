@@ -390,7 +390,6 @@
 .volume-slider-track {
   position: relative;
   width: 4px;
-  height: 100px;
   background: rgba(255, 255, 255, 0.15);
   border-radius: 2px;
   cursor: pointer;
