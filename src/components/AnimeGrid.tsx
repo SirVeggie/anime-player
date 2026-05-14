@@ -184,7 +184,7 @@ export function AnimeCardGrid(props: {
                 {item.unwatched_count > 0
                   ? `${item.episode_count} eps - ${item.unwatched_count} remaining`
                   : item.gap_episode_count > 0
-                  ? `${item.episode_count} eps - ${item.gap_episode_count} missing`
+                  ? <>{item.episode_count} eps - <span className="stat-warning">{item.gap_episode_count} missing</span></>
                   : `${item.episode_count} eps`}
               </div>
             </div>
