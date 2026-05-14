@@ -59,6 +59,8 @@ pub struct AnimeSummary {
     tracker_offset: i64,
     episode_count: i64,
     unwatched_count: i64,
+    /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
+    gap_episode_count: i64,
     last_watched_at: Option<String>,
     created_at: String,
     /// Latest `episodes.updated_at` for this anime (refreshed on rescan); used for "Most recent" sort.
@@ -1209,6 +1211,16 @@ fn list_anime(
                 a.tracker_offset,
                 COUNT(e.id) AS episode_count,
                 SUM(CASE WHEN e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
+                MIN(CASE WHEN e.episode_number IS NOT NULL
+                         AND e.episode_number = CAST(e.episode_number AS INTEGER)
+                    THEN CAST(e.episode_number AS INTEGER) END) AS min_int_ep,
+                MAX(CASE WHEN e.episode_number IS NOT NULL
+                         AND e.episode_number = CAST(e.episode_number AS INTEGER)
+                    THEN CAST(e.episode_number AS INTEGER) END) AS max_int_ep,
+                COUNT(DISTINCT CASE WHEN e.episode_number IS NOT NULL
+                                     AND e.episode_number = CAST(e.episode_number AS INTEGER)
+                                THEN CAST(e.episode_number AS INTEGER) END) AS int_ep_count,
+                a.anilist_cached_episodes,
                 a.last_watched_at,
                 a.created_at,
                 a.latest_episode_at,
@@ -1242,6 +1254,21 @@ fn list_anime(
     }
 
     let map_row = |row: &rusqlite::Row<'_>| {
+        let tracker_offset: i64 = row.get(8)?;
+        let min_int_ep: Option<i64> = row.get(11)?;
+        let max_int_ep: Option<i64> = row.get(12)?;
+        let int_ep_count: i64 = row.get::<_, Option<i64>>(13)?.unwrap_or(0);
+        let anilist_cached_episodes: Option<i64> = row.get(14)?;
+        let gap_episode_count = match (min_int_ep, max_int_ep) {
+            (Some(lo), Some(hi)) => {
+                let effective_max = match anilist_cached_episodes {
+                    Some(ae) if ae > 0 => hi.max(ae + tracker_offset),
+                    _ => hi,
+                };
+                (effective_max - lo + 1) - int_ep_count
+            }
+            _ => 0,
+        };
         Ok(AnimeSummary {
             id: row.get(0)?,
             title: row.get(1)?,
@@ -1251,13 +1278,14 @@ fn list_anime(
             anilist_site_url: row.get(5)?,
             anilist_cover_path: row.get(6)?,
             custom_thumbnail_path: row.get(7)?,
-            tracker_offset: row.get(8)?,
+            tracker_offset,
             episode_count: row.get(9)?,
             unwatched_count: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
-            last_watched_at: row.get(11)?,
-            created_at: row.get(12)?,
-            latest_episode_at: row.get(13)?,
-            first_episode_path: row.get(14)?,
+            gap_episode_count,
+            last_watched_at: row.get(15)?,
+            created_at: row.get(16)?,
+            latest_episode_at: row.get(17)?,
+            first_episode_path: row.get(18)?,
         })
     };
 

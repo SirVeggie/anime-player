@@ -3,7 +3,7 @@ import { ArrowLeftIcon } from "./Icons";
 
 export function ViewHeader(props: {
   title: string;
-  subtitle: string;
+  subtitle: ReactNode;
   action?: ReactNode;
   onBack?: () => void;
 }) {

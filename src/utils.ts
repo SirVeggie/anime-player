@@ -1,4 +1,4 @@
-import type { AnilistAuthState } from "./types";
+import type { AnilistAuthState, Episode } from "./types";
 
 export function isAnilistConnected(auth: AnilistAuthState | null): boolean {
   return auth?.authenticated === true;
@@ -37,6 +37,35 @@ export function isEpisodeNumberKnown(value: number | null): value is number {
 export function formatEpisodeNumber(value: number | null): string {
   if (!isEpisodeNumberKnown(value)) return "Episode ?";
   return Number.isInteger(value) ? `Episode ${value}` : `Episode ${value.toFixed(1)}`;
+}
+
+/**
+ * Count integer episode numbers missing from the range [min_local .. effective_max].
+ * Decimal episode numbers are excluded. If `anilistTotalEpisodes` is set and positive,
+ * effective_max is extended to `anilistTotalEpisodes + trackerOffset`.
+ */
+export function computeGapEpisodeCount(
+  episodes: Episode[],
+  anilistTotalEpisodes: number | null | undefined,
+  trackerOffset: number,
+): number {
+  const intEpisodes = new Set<number>();
+  for (const ep of episodes) {
+    if (ep.episode_number !== null && Number.isInteger(ep.episode_number)) {
+      intEpisodes.add(ep.episode_number);
+    }
+  }
+  if (intEpisodes.size === 0) return 0;
+  let min = Number.MAX_SAFE_INTEGER;
+  let max = 0;
+  for (const n of intEpisodes) {
+    if (n < min) min = n;
+    if (n > max) max = n;
+  }
+  if (anilistTotalEpisodes != null && anilistTotalEpisodes > 0) {
+    max = Math.max(max, anilistTotalEpisodes + trackerOffset);
+  }
+  return max - min + 1 - intEpisodes.size;
 }
 
 export function progressPercent(position: number, duration: number): number {

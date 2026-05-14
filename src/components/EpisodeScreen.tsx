@@ -4,7 +4,7 @@ import { getAnilistCoverImage, getFileThumbnail, getMatchingDetectionRuleName } 
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
-import { errorMessage, formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
+import { computeGapEpisodeCount, errorMessage, formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
 import { FolderOpenIcon, SettingsIcon } from "./Icons";
 import { ViewHeader } from "./ViewHeader";
@@ -150,6 +150,7 @@ export function EpisodeScreen(props: {
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
   const remainingCount = episodes.filter((episode) => !episode.watched).length;
+  const gapCount = computeGapEpisodeCount(episodes, anilistStatus?.episodes, anime.tracker_offset);
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
   const getRovingItemProps = useRovingListNavigation(episodes.length, {
     enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen,
@@ -483,11 +484,13 @@ export function EpisodeScreen(props: {
     <>
       <ViewHeader
         title={anime.title}
-        subtitle={[
-          `${episodes.length} episode${episodes.length === 1 ? "" : "s"}`,
-          `${remainingCount} remaining`,
-          ...(detectionRuleName !== undefined && detectionRuleName !== null ? [detectionRuleName] : []),
-        ].join(" · ")}
+        subtitle={
+          <>
+            {episodes.length} episode{episodes.length === 1 ? "" : "s"} · {remainingCount} remaining
+            {gapCount > 0 ? <> · <span className="stat-warning">{gapCount} missing</span></> : null}
+            {detectionRuleName != null ? ` · ${detectionRuleName}` : null}
+          </>
+        }
         onBack={onBack}
         action={
           <>

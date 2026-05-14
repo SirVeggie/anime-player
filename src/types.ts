@@ -46,6 +46,7 @@ export type AnimeSummary = {
   tracker_offset: number;
   episode_count: number;
   unwatched_count: number;
+  gap_episode_count: number;
   last_watched_at: string | null;
   /** ISO-ish timestamp from DB when the anime row was first created */
   created_at: string;
