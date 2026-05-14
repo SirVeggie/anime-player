@@ -97,6 +97,7 @@ export function EpisodeScreen(props: {
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
   onOpenAnilist: (url: string) => void;
+  anilistConnected: boolean;
 }) {
   const {
     anime,
@@ -116,6 +117,7 @@ export function EpisodeScreen(props: {
     onLinkAnilist,
     onUnlinkAnilist,
     onOpenAnilist,
+    anilistConnected,
   } = props;
   // Highlight whichever episode the Q hotkey would launch right now, so the
   // pill always points at the same target as the keybind.
@@ -518,11 +520,11 @@ export function EpisodeScreen(props: {
               <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
                 Unlink
               </button>
-            ) : (
+            ) : anilistConnected ? (
               <button type="button" onClick={openLinkSearch}>
                 Link AniList
               </button>
-            )}
+            ) : null}
             <button type="button" className="button-danger" onClick={() => setDeleteConfirmOpen(true)}>
               Delete Files
             </button>

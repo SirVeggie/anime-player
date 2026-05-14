@@ -70,7 +70,7 @@ import type {
   RenameFileRequest,
   RootFolder,
 } from "./types";
-import { APP_WINDOW_TITLE, errorMessage, formatSize, isTextInputTarget, shortenForOsTitle } from "./utils";
+import { APP_WINDOW_TITLE, errorMessage, formatSize, isAnilistConnected, isTextInputTarget, shortenForOsTitle } from "./utils";
 import "./App.css";
 
 type View = "categories" | "anime" | "search" | "bulkEdit" | "missing" | "episodes" | "settings" | "player";
@@ -1188,6 +1188,7 @@ function App() {
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
+              anilistConnected={isAnilistConnected(anilistAuth)}
             />
           ) : null}
 

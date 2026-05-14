@@ -1,3 +1,9 @@
+import type { AnilistAuthState } from "./types";
+
+export function isAnilistConnected(auth: AnilistAuthState | null): boolean {
+  return auth?.authenticated === true;
+}
+
 export function formatSize(bytes: number): string {
   if (bytes <= 0) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
