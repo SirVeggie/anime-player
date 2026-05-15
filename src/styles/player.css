@@ -383,7 +383,7 @@
 
 .volume-popup {
   position: absolute;
-  bottom: calc(100% - 12px);
+  bottom: calc(100% - 16px);
   left: 50%;
   transform: translateX(-50%);
   padding: 12px 12px 32px 12px;
@@ -396,7 +396,7 @@
   touch-action: none;
   mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 95%);
 }
-
+  
 .volume-popup.is-dragging {
   cursor: grabbing;
 }
