@@ -1302,9 +1302,9 @@ function VolumeControl(props: {
     };
   };
 
-  const trackWidth = trackRef.current?.clientWidth ?? 0;
-  const fillPercent = Math.min(MAX_VOLUME, volume);
-  const handleOffset = MAX_VOLUME - fillPercent + trackWidth / 2;
+  const trackWidth = trackRef.current?.clientWidth ?? 6;
+  const fillOffset = Math.min(MAX_VOLUME + trackWidth, volume + trackWidth);
+  const handleOffset = MAX_VOLUME - Math.min(MAX_VOLUME, volume) + trackWidth / 2;
 
   const volumeIcon =
     muted ? (
@@ -1358,22 +1358,22 @@ function VolumeControl(props: {
           <div
             ref={trackRef}
             className={`volume-slider-track${muted ? " volume-slider-track--muted" : ""}`}
-            style={{ height: `${MAX_VOLUME + 6}px` }}
+            style={{ height: `${MAX_VOLUME + trackWidth}px` }}
           >
             <div 
               className={`volume-slider-fill${!muted && volume > 100 ? " volume-slider-fill--high" : ""}`}
-              style={{ height: `${fillPercent}px` }}
+              style={{ height: `${fillOffset}px` }}
             />
             <div className="volume-slider-handle" style={{ top: `${handleOffset}px` }} />
+            <div
+              className={`volume-label${!muted && volume > 100 ? " volume-label--high" : ""}`}
+              style={{ top: `${handleOffset}px` }}
+            >
+              {volume}
+            </div>
           </div>
         </div>
       ) : null}
-      <div
-        className={`volume-label${!muted && volume > 100 ? " volume-label--high" : ""}`}
-        style={{ top: `${handleOffset}px` }}
-      >
-        {volume}
-      </div>
     </div>
   );
 }
