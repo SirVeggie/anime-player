@@ -988,9 +988,14 @@ export function PlayerView(props: {
       />
       <div className={`volume-osd${volumeOsdVisible && !volumePopupOpen ? "" : " volume-osd--hidden"}`}>
         <div className="volume-osd-bar">
-          <div className="volume-osd-fill" style={{ height: `${Math.min(100, (volume / MAX_VOLUME) * 100)}%` }} />
+          <div 
+            className={`volume-osd-fill${volume > 100 ? " volume-osd-fill--high" : ""}`} 
+            style={{ height: `${Math.min(100, (volume / MAX_VOLUME) * 100)}%` }} 
+          />
         </div>
-        <span className="volume-osd-percent">{volume}</span>
+        <span className={`volume-osd-percent${volume > 100 ? " volume-osd-percent--high" : ""}`}>
+          {volume}
+        </span>
       </div>
       <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
         <ArrowLeftIcon />
@@ -1216,6 +1221,8 @@ function VolumeControl(props: {
   const activePointerRef = useRef<number | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
 
+  const [isDragging, setIsDragging] = useState(false);
+
   const volumeFromClientY = (clientY: number) => {
     const track = trackRef.current;
     if (!track) return volume;
@@ -1230,6 +1237,7 @@ function VolumeControl(props: {
     if (e.button !== 0) return;
     e.preventDefault();
     draggingRef.current = true;
+    setIsDragging(true);
     activePointerRef.current = e.pointerId;
     trackRef.current?.setPointerCapture(e.pointerId);
     onApplyVolume(volumeFromClientY(e.clientY));
@@ -1244,6 +1252,7 @@ function VolumeControl(props: {
         trackRef.current.releasePointerCapture(ev.pointerId);
       }
       draggingRef.current = false;
+      setIsDragging(false);
       activePointerRef.current = null;
       dragCleanupRef.current?.();
       dragCleanupRef.current = null;
@@ -1303,13 +1312,19 @@ function VolumeControl(props: {
         <div className="volume-popup">
           <div
             ref={trackRef}
-            className="volume-slider-track"
+            className={`volume-slider-track${isDragging ? " is-dragging" : ""}`}
             style={{ height: `${MAX_VOLUME}px` }}
             onPointerDown={onPointerDown}
           >
-            <div className="volume-slider-fill" style={{ height: `${fillPercent}%` }} />
+            <div 
+              className={`volume-slider-fill${volume > 100 ? " volume-slider-fill--high" : ""}`} 
+              style={{ height: `${fillPercent}%` }} 
+            />
             <div className="volume-slider-handle" style={{ top: `${handleOffset}%` }} />
-            <div className="volume-label" style={{ top: `${handleOffset}%` }}>
+            <div 
+              className={`volume-label${volume > 100 ? " volume-label--high" : ""}`} 
+              style={{ top: `${handleOffset}%` }}
+            >
               {volume}
             </div>
           </div>
