@@ -386,6 +386,14 @@
   bottom: calc(100% - 26px);
   left: 50%;
   transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.volume-popup-wrap--open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .volume-popup {
