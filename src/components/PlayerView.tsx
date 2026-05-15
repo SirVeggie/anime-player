@@ -1255,7 +1255,7 @@ function VolumeControl(props: {
     const track = trackRef.current;
     if (!track) return volume;
     const rect = track.getBoundingClientRect();
-    const offset = rect.width / 2 - 1;
+    const offset = rect.width / 2;
     const ratio = 1 - Math.max(0, Math.min(1, (clientY - rect.top - offset + 1) / (rect.height - rect.width)));
     return clampVolume(Math.round(ratio * MAX_VOLUME));
   };
@@ -1350,27 +1350,29 @@ function VolumeControl(props: {
         {volumeIcon}
       </button>
       {popupOpen ? (
-        <div
-          ref={popupRef}
-          className={`volume-popup${isDragging ? " is-dragging" : ""}`}
-          onPointerDown={onPointerDown}
-        >
+        <div className={`volume-popup-wrap${isDragging ? " is-dragging" : ""}`}>
           <div
-            ref={trackRef}
-            className={`volume-slider-track${muted ? " volume-slider-track--muted" : ""}`}
-            style={{ height: `${MAX_VOLUME + trackWidth}px` }}
+            ref={popupRef}
+            className={`volume-popup${isDragging ? " is-dragging" : ""}`}
+            onPointerDown={onPointerDown}
           >
-            <div 
-              className={`volume-slider-fill${!muted && volume > 100 ? " volume-slider-fill--high" : ""}`}
-              style={{ height: `${fillOffset}px` }}
-            />
-            <div className="volume-slider-handle" style={{ top: `${handleOffset}px` }} />
             <div
-              className={`volume-label${!muted && volume > 100 ? " volume-label--high" : ""}`}
-              style={{ top: `${handleOffset}px` }}
+              ref={trackRef}
+              className={`volume-slider-track${muted ? " volume-slider-track--muted" : ""}`}
+              style={{ height: `${MAX_VOLUME + trackWidth}px` }}
             >
-              {volume}
+              <div
+                className={`volume-slider-fill${!muted && volume > 100 ? " volume-slider-fill--high" : ""}`}
+                style={{ height: `${fillOffset}px` }}
+              />
+              <div className="volume-slider-handle" style={{ top: `${handleOffset}px` }} />
             </div>
+          </div>
+          <div
+            className={`volume-label${!muted && volume > 100 ? " volume-label--high" : ""}`}
+            style={{ top: `${12 + handleOffset}px` }}
+          >
+            {volume}
           </div>
         </div>
       ) : null}
