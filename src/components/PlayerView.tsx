@@ -738,7 +738,11 @@ export function PlayerView(props: {
     }, 1200);
   }, []);
 
-  const toggleMute = useCallback(() => {
+  const toggleMuteUi = useCallback(() => {
+    setMuted((m) => !m);
+  }, []);
+
+  const toggleMuteHotkey = useCallback(() => {
     setMuted((m) => !m);
     flashVolumeOsd();
   }, [flashVolumeOsd]);
@@ -918,7 +922,7 @@ export function PlayerView(props: {
       if (e.code === "KeyM") {
         if (!visible) return;
         e.preventDefault();
-        toggleMute();
+        toggleMuteHotkey();
         return;
       }
       if (e.code === "KeyF") {
@@ -959,7 +963,7 @@ export function PlayerView(props: {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     adjustVolumeWithOsd,
-    toggleMute,
+    toggleMuteHotkey,
     canNext,
     canPrev,
     clearControlsHideTimer,
@@ -1110,7 +1114,7 @@ export function PlayerView(props: {
                   muted={muted}
                   popupOpen={volumePopupOpen}
                   onApplyVolume={applyVolume}
-                  onToggleMute={toggleMute}
+                  onToggleMute={toggleMuteUi}
                   onOpenPopup={openVolumePopup}
                   onScheduleHidePopup={scheduleVolumePopupHide}
                 />
