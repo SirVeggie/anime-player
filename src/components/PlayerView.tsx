@@ -226,6 +226,7 @@ export function PlayerView(props: {
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
   const [volume, setVolume] = useState(loadVolume);
+  const [muted, setMuted] = useState(false);
   const [volumePopupOpen, setVolumePopupOpen] = useState(false);
   const [volumeOsdVisible, setVolumeOsdVisible] = useState(false);
   const volumeHideTimerRef = useRef<number | null>(null);
@@ -559,7 +560,7 @@ export function PlayerView(props: {
             sidebarPx,
           });
           mpvReadyRef.current = true;
-          void setMpvVolume(volumeRef.current).catch(() => {});
+          void setMpvVolume(muted ? 0 : volume).catch(() => {});
         } else {
           await invoke("mpv_set_layout", {
             windowWidth: window.innerWidth,
@@ -592,6 +593,11 @@ export function PlayerView(props: {
       cancelled = true;
     };
   }, [episode.path, eventListenersReadyVersion, visible]);
+
+  useEffect(() => {
+    if (!mpvReadyRef.current) return;
+    void setMpvVolume(muted ? 0 : volume).catch((e) => onError(errorMessage(e)));
+  }, [muted, onError, volume]);
 
   useEffect(() => {
     if (!mpvReadyRef.current) return;
@@ -715,29 +721,35 @@ export function PlayerView(props: {
     }
   }, [onError, videoGeometry]);
 
-  const applyVolume = useCallback(
-    (next: number) => {
-      const clamped = clampVolume(next);
-      setVolume(clamped);
-      volumeRef.current = clamped;
-      saveVolume(clamped);
-      void setMpvVolume(clamped).catch((e) => onError(errorMessage(e)));
-    },
-    [onError],
-  );
+  const applyVolume = useCallback((next: number) => {
+    const clamped = clampVolume(next);
+    setVolume(clamped);
+    volumeRef.current = clamped;
+    saveVolume(clamped);
+    setMuted(false);
+  }, []);
+
+  const flashVolumeOsd = useCallback(() => {
+    setVolumeOsdVisible(true);
+    if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
+    volumeOsdTimerRef.current = window.setTimeout(() => {
+      setVolumeOsdVisible(false);
+      volumeOsdTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    setMuted((m) => !m);
+    flashVolumeOsd();
+  }, [flashVolumeOsd]);
 
   const adjustVolumeWithOsd = useCallback(
     (delta: number) => {
       const snapped = Math.round(volumeRef.current / HOTKEY_STEP) * HOTKEY_STEP;
       applyVolume(snapped + delta);
-      setVolumeOsdVisible(true);
-      if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
-      volumeOsdTimerRef.current = window.setTimeout(() => {
-        setVolumeOsdVisible(false);
-        volumeOsdTimerRef.current = null;
-      }, 1200);
+      flashVolumeOsd();
     },
-    [applyVolume],
+    [applyVolume, flashVolumeOsd],
   );
 
   const openVolumePopup = useCallback(() => {
@@ -903,6 +915,12 @@ export function PlayerView(props: {
         adjustVolumeWithOsd(-HOTKEY_STEP);
         return;
       }
+      if (e.code === "KeyM") {
+        if (!visible) return;
+        e.preventDefault();
+        toggleMute();
+        return;
+      }
       if (e.code === "KeyF") {
         e.preventDefault();
         void toggleFullscreen();
@@ -941,6 +959,7 @@ export function PlayerView(props: {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     adjustVolumeWithOsd,
+    toggleMute,
     canNext,
     canPrev,
     clearControlsHideTimer,
@@ -988,13 +1007,17 @@ export function PlayerView(props: {
       />
       <div className={`volume-osd${volumeOsdVisible && !volumePopupOpen ? "" : " volume-osd--hidden"}`}>
         <div className="volume-osd-bar">
-          <div 
-            className={`volume-osd-fill${volume > 100 ? " volume-osd-fill--high" : ""}`} 
-            style={{ height: `${Math.min(100, (volume / MAX_VOLUME) * 100)}%` }} 
+          <div
+            className={`volume-osd-fill${!muted && volume > 100 ? " volume-osd-fill--high" : ""}`}
+            style={{ height: `${muted ? 0 : Math.min(100, (volume / MAX_VOLUME) * 100)}%` }}
           />
         </div>
-        <span className={`volume-osd-percent${volume > 100 ? " volume-osd-percent--high" : ""}`}>
-          {volume}
+        <span
+          className={`volume-osd-percent${!muted && volume > 100 ? " volume-osd-percent--high" : ""}${
+            muted ? " volume-osd-percent--muted" : ""
+          }`}
+        >
+          {muted ? "Muted" : volume}
         </span>
       </div>
       <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
@@ -1084,8 +1107,10 @@ export function PlayerView(props: {
                 />
                 <VolumeControl
                   volume={volume}
+                  muted={muted}
                   popupOpen={volumePopupOpen}
                   onApplyVolume={applyVolume}
+                  onToggleMute={toggleMute}
                   onOpenPopup={openVolumePopup}
                   onScheduleHidePopup={scheduleVolumePopupHide}
                 />
@@ -1210,12 +1235,15 @@ function trackLabel(track: MpvTrack) {
 
 function VolumeControl(props: {
   volume: number;
+  muted: boolean;
   popupOpen: boolean;
   onApplyVolume: (volume: number) => void;
+  onToggleMute: () => void;
   onOpenPopup: () => void;
   onScheduleHidePopup: () => void;
 }) {
-  const { volume, popupOpen, onApplyVolume, onOpenPopup, onScheduleHidePopup } = props;
+  const { volume, muted, popupOpen, onApplyVolume, onToggleMute, onOpenPopup, onScheduleHidePopup } = props;
+  const popupRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const activePointerRef = useRef<number | null>(null);
@@ -1239,7 +1267,7 @@ function VolumeControl(props: {
     draggingRef.current = true;
     setIsDragging(true);
     activePointerRef.current = e.pointerId;
-    trackRef.current?.setPointerCapture(e.pointerId);
+    popupRef.current?.setPointerCapture(e.pointerId);
     onApplyVolume(volumeFromClientY(e.clientY));
 
     const onMove = (ev: PointerEvent) => {
@@ -1248,8 +1276,8 @@ function VolumeControl(props: {
     };
     const stopDrag = (ev?: PointerEvent) => {
       if (ev && ev.pointerId !== activePointerRef.current) return;
-      if (ev && trackRef.current?.hasPointerCapture(ev.pointerId)) {
-        trackRef.current.releasePointerCapture(ev.pointerId);
+      if (ev && popupRef.current?.hasPointerCapture(ev.pointerId)) {
+        popupRef.current.releasePointerCapture(ev.pointerId);
       }
       draggingRef.current = false;
       setIsDragging(false);
@@ -1277,9 +1305,13 @@ function VolumeControl(props: {
   const handleOffset = 100 - fillPercent;
 
   const volumeIcon =
-    volume === 0 ? (
+    muted ? (
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
         <path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z" />
+      </svg>
+    ) : volume === 0 ? (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <path d="M7 9v6h4l5 5V4l-5 5H7z" />
       </svg>
     ) : volume <= 33 ? (
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -1303,26 +1335,36 @@ function VolumeControl(props: {
     >
       <button
         type="button"
+        id="volume-control-button"
         className="icon-button icon-button--player icon-button--lg"
-        title={`Volume ${volume}`}
+        title={muted ? `Unmute (M)` : `Mute (M)`}
+        aria-pressed={muted}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggleMute();
+        }}
       >
         {volumeIcon}
       </button>
       {popupOpen ? (
-        <div className="volume-popup">
+        <div
+          ref={popupRef}
+          className={`volume-popup${isDragging ? " is-dragging" : ""}`}
+          onPointerDown={onPointerDown}
+        >
           <div
             ref={trackRef}
-            className={`volume-slider-track${isDragging ? " is-dragging" : ""}`}
+            className={`volume-slider-track${muted ? " volume-slider-track--muted" : ""}`}
             style={{ height: `${MAX_VOLUME}px` }}
-            onPointerDown={onPointerDown}
           >
             <div 
-              className={`volume-slider-fill${volume > 100 ? " volume-slider-fill--high" : ""}`} 
+              className={`volume-slider-fill${!muted && volume > 100 ? " volume-slider-fill--high" : ""}`} 
               style={{ height: `${fillPercent}%` }} 
             />
             <div className="volume-slider-handle" style={{ top: `${handleOffset}%` }} />
             <div 
-              className={`volume-label${volume > 100 ? " volume-label--high" : ""}`} 
+              className={`volume-label${!muted && volume > 100 ? " volume-label--high" : ""}`} 
               style={{ top: `${handleOffset}%` }}
             >
               {volume}

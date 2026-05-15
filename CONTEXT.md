@@ -174,8 +174,11 @@ view components. Per-screen UI lives in `src/components/`:
   or **F11** app-wide); right-click toggles
   pause; **C** toggles player chrome visibility; Space and ArrowLeft/ArrowRight seek ±5s; Ctrl+ArrowLeft/ArrowRight
   loads the previous/next episode in the list when available; Numpad 4/6 seek ±28s and
-  Numpad 7/9 seek ±85s; **W**/**S** adjust volume ±5 (mpv's native
-  0–130 log scale); mouse scroll wheel also adjusts volume ±5;
+  Numpad 7/9 seek ±85s; **W**/**S** bump volume ±2 steps (mpv's native
+  0–130 range); mouse scroll wheel uses the same step;
+  **M** or a click on the volume icon toggles mute (saved level is restored
+  on unmute); adjusting volume with **W**/**S**, the wheel, or the slider
+  clears mute;
   **Q**, **Escape**, or the back
   control returns to the episode list (without unloading mpv). On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
