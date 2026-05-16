@@ -512,29 +512,29 @@
   /* No real backdrop blur over libmpv: fake “frosted” read with layered fills,
      micro-stripe grain, edge tint, and inset highlights (see CONTEXT.md). */
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 26%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.045) 100%),
-    radial-gradient(130% 70% at 50% 0%, rgba(255, 255, 255, 0.08), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0) 26%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.048) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.036) 100%),
+    radial-gradient(130% 70% at 50% 0%, rgba(255, 255, 255, 0.065), transparent 52%),
     repeating-linear-gradient(
       122deg,
-      rgba(255, 255, 255, 0.02) 0 1px,
+      rgba(255, 255, 255, 0.016) 0 1px,
       transparent 1px 4px
     ),
     repeating-linear-gradient(
       -118deg,
-      rgba(0, 0, 0, 0.045) 0 1px,
+      rgba(0, 0, 0, 0.036) 0 1px,
       transparent 1px 5px
     ),
-    linear-gradient(168deg, rgba(44, 46, 54, 0.94) 0%, rgba(26, 26, 30, 0.92) 45%, rgba(14, 14, 18, 0.97) 100%);
+    linear-gradient(168deg, rgba(44, 46, 54, 0.86) 0%, rgba(26, 26, 30, 0.83) 45%, rgba(14, 14, 18, 0.9) 100%);
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.1) inset,
-    0 10px 0 -6px rgba(255, 255, 255, 0.04) inset,
-    0 -18px 28px -12px rgba(0, 0, 0, 0.45) inset,
-    0 14px 44px rgba(0, 0, 0, 0.55),
-    0 6px 16px rgba(0, 0, 0, 0.38);
+    0 0 0 1px rgba(255, 255, 255, 0.085) inset,
+    0 10px 0 -6px rgba(255, 255, 255, 0.032) inset,
+    0 -18px 28px -12px rgba(0, 0, 0, 0.4) inset,
+    0 14px 44px rgba(0, 0, 0, 0.48),
+    0 6px 16px rgba(0, 0, 0, 0.32);
   pointer-events: none;
   z-index: 12;
-  opacity: 1;
+  opacity: 0.8;
   overflow: hidden;
   transition: opacity 280ms ease-out, transform 280ms ease-out;
 }
@@ -549,6 +549,7 @@
   bottom: 0;
   left: 0;
   width: 100%;
+  border-radius: 20px 20px 0 0;
   background: linear-gradient(to top, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.92));
   box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
 }
@@ -582,8 +583,9 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
   user-select: none;
+  z-index: 100;
 }
 
 .volume-osd-value--high {
-  color: #ff9a9a;
+  /* color: #ff9a9a; */
 }
