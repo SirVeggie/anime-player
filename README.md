@@ -103,6 +103,8 @@ Player:
 - `ArrowLeft` / `ArrowRight`: Seek backward/forward 5 seconds.
 - `Numpad4` / `Numpad6`: Seek backward/forward 28 seconds.
 - `Numpad7` / `Numpad9`: Seek backward/forward 85 seconds.
+- `W` / `S` / mouse wheel: Raise/lower volume by 2 on mpv’s 0–130 scale.
+- `M`: Toggle mute.
 - `Ctrl+ArrowLeft` / `Ctrl+ArrowRight`: Previous/next episode.
 - `F`: Toggle fullscreen.
 - `F11`: Toggle app fullscreen.
