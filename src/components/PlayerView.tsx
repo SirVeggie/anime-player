@@ -1013,19 +1013,23 @@ export function PlayerView(props: {
         className={`volume-osd${volumeOsdVisible && !volumePopupOpen ? "" : " volume-osd--hidden"}`}
         role="status"
         aria-live="polite"
-        aria-label={muted ? "Muted" : `Volume ${volume}`}
+        aria-label={muted ? "Muted" : undefined}
       >
-        <div className="volume-osd-meter">
-          <div className="volume-osd-bar">
-            <div
-              className={`volume-osd-fill${!muted && volume > 100 ? " volume-osd-fill--high" : ""}`}
-              style={{ height: `${muted ? 0 : Math.min(100, (volume / MAX_VOLUME) * 100)}%` }}
-            />
+        <div
+          className={`volume-osd-fill${!muted && volume > 100 ? " volume-osd-fill--high" : ""}`}
+          style={{ height: `${muted ? 0 : Math.min(100, (volume / MAX_VOLUME) * 100)}%` }}
+        />
+        {muted || volume === 0 ? (
+          <div className="volume-osd-icon-wrap" aria-hidden>
+            <VolumeSpeakerIcon volume={volume} muted />
           </div>
-        </div>
-        <div className="volume-osd-icon-wrap" aria-hidden>
-          <VolumeSpeakerIcon volume={volume} muted={muted} />
-        </div>
+        ) : (
+          <span
+            className={`volume-osd-value${volume > 100 ? " volume-osd-value--high" : ""}`}
+          >
+            {volume}
+          </span>
+        )}
       </div>
       <button type="button" className="player-back back-button" onClick={() => void hidePlayer()} aria-label="Back">
         <ArrowLeftIcon />
