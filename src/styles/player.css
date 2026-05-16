@@ -498,36 +498,51 @@
 
 .volume-osd {
   position: absolute;
-  right: 48px;
+  right: 44px;
   top: 50%;
   transform: translateY(-50%);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 16px 12px;
-  border-radius: 12px;
-  background: rgba(22, 22, 22, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  width: 50px;
+  aspect-ratio: 1 / 2.45;
+  min-height: 118px;
+  padding: 14px 10px 12px;
+  border-radius: 9999px;
+  background: rgba(18, 18, 20, 0.48);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   pointer-events: none;
   z-index: 12;
   opacity: 1;
-  transition: opacity 300ms ease-out, transform 300ms ease-out;
+  transition: opacity 280ms ease-out, transform 280ms ease-out;
 }
 
 .volume-osd--hidden {
   opacity: 0;
-  transform: translateY(-50%) scale(0.95);
+  transform: translateY(-50%) scale(0.94);
+}
+
+.volume-osd-meter {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+  padding: 2px 0 4px;
 }
 
 .volume-osd-bar {
   position: relative;
-  width: 6px;
-  height: 100px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  width: 8px;
+  height: 100%;
+  max-height: 100%;
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
   overflow: hidden;
 }
 
@@ -536,27 +551,28 @@
   bottom: 0;
   left: 0;
   width: 100%;
-  background: linear-gradient(to top, rgba(255, 255, 255, 0.8), #fff);
-  border-radius: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.92));
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
 }
 
 .volume-osd-fill--high {
-  background: linear-gradient(to top, rgba(255, 255, 255, 0.8), #ff8585);
+  background: linear-gradient(to top, rgba(255, 180, 180, 0.75), #ff9a9a);
+  box-shadow: 0 0 14px rgba(255, 120, 120, 0.25);
 }
 
-.volume-osd-percent {
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 13px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  user-select: none;
+.volume-osd-icon-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.82);
 }
 
-.volume-osd-percent--high {
-  color: #ff8585;
-}
-
-.volume-osd-percent--muted {
-  color: rgba(255, 255, 255, 0.72);
-  font-variant-numeric: normal;
+.volume-osd-icon-wrap svg {
+  width: 22px;
+  height: 22px;
 }
