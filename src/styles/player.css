@@ -509,9 +509,29 @@
   height: 180px;
   padding: 14px 10px 12px;
   border-radius: 20px;
-  background: rgba(18, 18, 20, 0.48);
-  backdrop-filter: blur(28px) saturate(140%);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  /* No real backdrop blur over libmpv: fake “frosted” read with layered fills,
+     micro-stripe grain, edge tint, and inset highlights (see CONTEXT.md). */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 26%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.045) 100%),
+    radial-gradient(130% 70% at 50% 0%, rgba(255, 255, 255, 0.08), transparent 52%),
+    repeating-linear-gradient(
+      122deg,
+      rgba(255, 255, 255, 0.02) 0 1px,
+      transparent 1px 4px
+    ),
+    repeating-linear-gradient(
+      -118deg,
+      rgba(0, 0, 0, 0.045) 0 1px,
+      transparent 1px 5px
+    ),
+    linear-gradient(168deg, rgba(44, 46, 54, 0.94) 0%, rgba(26, 26, 30, 0.92) 45%, rgba(14, 14, 18, 0.97) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset,
+    0 10px 0 -6px rgba(255, 255, 255, 0.04) inset,
+    0 -18px 28px -12px rgba(0, 0, 0, 0.45) inset,
+    0 14px 44px rgba(0, 0, 0, 0.55),
+    0 6px 16px rgba(0, 0, 0, 0.38);
   pointer-events: none;
   z-index: 12;
   opacity: 1;
