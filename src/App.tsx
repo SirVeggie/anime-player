@@ -140,6 +140,8 @@ function App() {
   const currentPageKeyRef = useRef("categories");
   const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
   const scrollPositionsRef = useRef(new Map<string, number>());
+  /** Set by `PlayerView` when a session is active; used to flush SQLite before `destroy()` on window close. */
+  const playbackProgressFlushRef = useRef<(() => Promise<void>) | null>(null);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     const id = Date.now() + Math.random();
@@ -231,6 +233,31 @@ function App() {
       unlisten?.();
     };
   }, [handleAnilistCallback, showToast]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    void (async () => {
+      unlisten = await appWindow.onCloseRequested(async (event) => {
+        const flush = playbackProgressFlushRef.current;
+        if (!flush) return;
+        event.preventDefault();
+        try {
+          await flush();
+        } catch (e) {
+          showToast("error", errorMessage(e));
+        } finally {
+          try {
+            await appWindow.destroy();
+          } catch (e) {
+            showToast("error", errorMessage(e));
+          }
+        }
+      });
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, [showToast]);
 
   const pageKey = useMemo(() => {
     switch (view) {
@@ -756,15 +783,24 @@ function App() {
       customThumbnailPath: string | null,
     ) => {
       const currentAnime = selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
+      let didMutate = false;
       if (currentAnime && title.trim() !== currentAnime.title) {
         if (selectedEpisode?.anime_id === animeId) {
           await stopMpv().catch(() => undefined);
           setSelectedEpisode(null);
         }
         await renameAnime(animeId, title);
+        didMutate = true;
       }
-      await setAnimeTrackerOffset(animeId, trackerOffset);
-      await setAnimeCustomThumbnailPath(animeId, customThumbnailPath);
+      if (!currentAnime || trackerOffset !== currentAnime.tracker_offset) {
+        await setAnimeTrackerOffset(animeId, trackerOffset);
+        didMutate = true;
+      }
+      const prevThumbnail = currentAnime?.custom_thumbnail_path ?? null;
+      if (!currentAnime || customThumbnailPath !== prevThumbnail) {
+        await setAnimeCustomThumbnailPath(animeId, customThumbnailPath);
+        didMutate = true;
+      }
       if (progressOverride !== null) {
         const result = await overrideAnimeProgress(animeId, progressOverride);
         const linkedAnime =
@@ -778,8 +814,11 @@ function App() {
             updatedAt: Date.now(),
           });
         }
+        didMutate = true;
       }
-      await refreshAnimePageData(animeId);
+      if (didMutate) {
+        await refreshAnimePageData(animeId);
+      }
     },
     [library?.anime, refreshAnimePageData, selectedAnime, selectedEpisode?.anime_id],
   );
@@ -1108,6 +1147,7 @@ function App() {
           episode={selectedEpisode}
           playlist={episodes}
           visible={Boolean(showPlayer)}
+          playbackProgressFlushRef={playbackProgressFlushRef}
           onSelectEpisode={setSelectedEpisode}
           onBack={() => closePlayer()}
           onClose={() => closePlayer({ unload: true })}

@@ -149,6 +149,7 @@ export function EpisodeScreen(props: {
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
+  const progressOverrideDraftTouchedRef = useRef(false);
   const remainingCount = episodes.filter((episode) => !episode.watched).length;
   const gapCount = computeGapEpisodeCount(episodes, anilistStatus?.episodes, anime.tracker_offset);
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
@@ -234,6 +235,14 @@ export function EpisodeScreen(props: {
   }, [anime.id, anilistProgressUpdate]);
 
   useEffect(() => {
+    if (!animeSettingsOpen || anime.anilist_id == null) return;
+    if (progressOverrideDraftTouchedRef.current) return;
+    const p = anilistStatus?.progress;
+    if (p == null) return;
+    setProgressOverrideDraft(String(p));
+  }, [animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
+
+  useEffect(() => {
     return () => {
       if (scoreSaveTimerRef.current !== null) {
         window.clearTimeout(scoreSaveTimerRef.current);
@@ -313,13 +322,16 @@ export function EpisodeScreen(props: {
   }, [onDeleteAnime]);
 
   const openAnimeSettings = useCallback(() => {
+    progressOverrideDraftTouchedRef.current = false;
     setAnimeTitleDraft(anime.title);
     setTrackerOffsetDraft(String(anime.tracker_offset));
     setCustomThumbnailDraft(anime.custom_thumbnail_path ?? "");
-    setProgressOverrideDraft("");
+    setProgressOverrideDraft(
+      anime.anilist_id != null && anilistStatus?.progress != null ? String(anilistStatus.progress) : "",
+    );
     setAnimeSettingsError(null);
     setAnimeSettingsOpen(true);
-  }, [anime.custom_thumbnail_path, anime.title, anime.tracker_offset]);
+  }, [anime.anilist_id, anime.custom_thumbnail_path, anime.title, anime.tracker_offset, anilistStatus?.progress]);
 
   const closeAnimeSettings = useCallback(() => {
     if (animeSettingsSaving) return;
@@ -339,11 +351,17 @@ export function EpisodeScreen(props: {
 
   const stepProgressOverrideDraft = useCallback(
     (delta: number) => {
+      progressOverrideDraftTouchedRef.current = true;
       const parsedDraft = Number(progressOverrideDraft);
-      const baseProgress = progressOverrideDraft.trim() && Number.isFinite(parsedDraft) ? parsedDraft : 0;
+      const baseProgress =
+        progressOverrideDraft.trim() && Number.isFinite(parsedDraft)
+          ? parsedDraft
+          : anime.anilist_id != null && anilistStatus?.progress != null
+            ? anilistStatus.progress
+            : 0;
       setProgressOverrideDraft(String(Math.max(0, Math.round(baseProgress + delta))));
     },
-    [progressOverrideDraft],
+    [anime.anilist_id, anilistStatus?.progress, progressOverrideDraft],
   );
 
   const saveAnimeSettings = useCallback(
@@ -358,6 +376,14 @@ export function EpisodeScreen(props: {
         if (progressOverrideDraft.trim()) {
           progressOverride = parseIntegerDraft(progressOverrideDraft, "Override progress");
           if (progressOverride < 0) throw new Error("Override progress must be 0 or greater.");
+        }
+        if (
+          anime.anilist_id != null &&
+          anilistStatus?.progress != null &&
+          progressOverride !== null &&
+          progressOverride === anilistStatus.progress
+        ) {
+          progressOverride = null;
         }
       } catch (error) {
         setAnimeSettingsError(errorMessage(error));
@@ -377,7 +403,16 @@ export function EpisodeScreen(props: {
         setAnimeSettingsSaving(false);
       }
     },
-    [anime.id, animeTitleDraft, customThumbnailDraft, onSaveAnimeSettings, progressOverrideDraft, trackerOffsetDraft],
+    [
+      anime.anilist_id,
+      anime.id,
+      anilistStatus?.progress,
+      animeTitleDraft,
+      customThumbnailDraft,
+      onSaveAnimeSettings,
+      progressOverrideDraft,
+      trackerOffsetDraft,
+    ],
   );
 
   const browseCustomThumbnail = useCallback(async () => {
@@ -810,7 +845,10 @@ export function EpisodeScreen(props: {
                       value={progressOverrideDraft}
                       placeholder="Episode number as an integer, or blank"
                       disabled={animeSettingsSaving}
-                      onChange={(e) => setProgressOverrideDraft(e.currentTarget.value)}
+                      onChange={(e) => {
+                        progressOverrideDraftTouchedRef.current = true;
+                        setProgressOverrideDraft(e.currentTarget.value);
+                      }}
                     />
                     <div className="score-stepper-buttons">
                       <button
@@ -832,6 +870,7 @@ export function EpisodeScreen(props: {
                 </label>
                 <p className="muted">
                   Manually override local and AniList progress.
+                  {anime.anilist_id ? " Saving the same value as AniList leaves progress unchanged." : ""}
                 </p>
               </div>
               {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}

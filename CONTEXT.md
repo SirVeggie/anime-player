@@ -86,13 +86,18 @@ view components. Per-screen UI lives in `src/components/`:
   `Progress: current/total`, and includes a debounced score input that writes
   back to AniList. Local watched progress syncs on EOF / near-end saves only
   when the adjusted local episode number is ahead of the viewer's current
-  AniList progress. `tracker_offset` is per-title and is subtracted from parsed
+  AniList progress; `persistProgress` in `PlayerView` awaits
+  `syncAnilistEpisodeProgress` in that case (Q/back, EOF advance, episode
+  switches, and natural window close all use the same path). `tracker_offset` is per-title and is subtracted from parsed
   episode numbers for display, AniList progress sync, and watched-progress
   import.
 - AniList progress import is conservative: opening or linking a title can mark
   matching local episodes watched from remote progress, but it does not clear
   later local progress. The title settings popup also has a force progress
-  override for intentionally rewriting all local episode progress, and
+  override for intentionally rewriting all local episode progress; when a title
+  is AniList-linked the override field prefills from remote progress and save
+  skips the override path if the value still matches that progress; save also
+  skips tracker/thumbnail IPC and library refresh when nothing changed, and
   filesystem-backed anime rename keeps categories, progress, tracker offset,
   and AniList links attached to the same anime ID while renaming files on disk.
 - Transient toast notifications are rendered by `src/App.tsx` for operation
@@ -122,6 +127,14 @@ view components. Per-screen UI lives in `src/components/`:
   **`core:window:allow-set-title`** in the default capability file.
   The title bar uses the generated app icon at `src-tauri/icons/icon.png`,
   matching the Tauri-generated executable icons.
+  When the user closes the window while an episode session is loaded,
+  `App.tsx` listens with `getCurrentWindow().onCloseRequested`, calls
+  `PlayerView`'s `persistProgress` through `playbackProgressFlushRef`, then
+  `destroy()` after that promise settles (SQLite plus any awaited watched
+  AniList sync—the same as Q/back except pause is skipped on exit so mpv may
+  already be torn down in Rust). Abrupt process death still skips this. That path needs
+  **`core:window:allow-destroy`** in the default capability file in addition
+  to `allow-close`.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits
@@ -169,7 +182,8 @@ view components. Per-screen UI lives in `src/components/`:
   the window (unless a seek, track menu, or volume popup is active), and
   are revealed by mouse movement, active menu/seek interaction, or **C**
   to toggle visibility.
-- The video pane uses Tauri `startDragging` (single left-click) and
+- The video pane uses Tauri `startDragging` (single left-click; skipped when
+  the window is maximized or fullscreen) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
   or **F11** app-wide); right-click toggles
   pause; **C** toggles player chrome visibility; Space and ArrowLeft/ArrowRight seek ±5s; Ctrl+ArrowLeft/ArrowRight

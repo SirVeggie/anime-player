@@ -8,7 +8,7 @@ Running list of things to do / explore for the Anime Player app.
     - [ ] Rename feature also renames custom thumbnail
 - [ ] Combine detection regexes into one, we probably only need the second one?
     - Could have separate regex for title and episode number, then wouldn't need duplicate rules if episode doesn't match
-- [ ] Closing app during playback does not save the current episode progress (local/anilist)
+- [x] Natural window close saves current episode progress to SQLite (`onCloseRequested`); crashes / kill still skip save
 - [ ] Background gradient effect does not scale with window size, so it looks weird above around 1280x800
 
 Episode selection page features

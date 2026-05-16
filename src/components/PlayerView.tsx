@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -193,6 +193,7 @@ export function PlayerView(props: {
   episode: Episode;
   playlist: Episode[];
   visible: boolean;
+  playbackProgressFlushRef: MutableRefObject<(() => Promise<void>) | null>;
   onSelectEpisode: (episode: Episode) => void;
   onBack: () => void;
   onClose: () => void;
@@ -206,6 +207,7 @@ export function PlayerView(props: {
     episode,
     playlist,
     visible,
+    playbackProgressFlushRef,
     onSelectEpisode,
     onBack,
     onClose,
@@ -372,12 +374,25 @@ export function PlayerView(props: {
     );
     propsRef.current.onProgressSaved(saved);
     if (watched) {
-      void syncAnilistEpisodeProgress(saved.id)
-        .then((result) => propsRef.current.onAnilistProgressSynced?.(saved.anime_id, result))
-        .catch((err) => propsRef.current.onError(errorMessage(err)));
+      try {
+        const result = await syncAnilistEpisodeProgress(saved.id);
+        propsRef.current.onAnilistProgressSynced?.(saved.anime_id, result);
+      } catch (err) {
+        propsRef.current.onError(errorMessage(err));
+      }
     }
     return saved;
   }, []);
+
+  useEffect(() => {
+    const r = playbackProgressFlushRef;
+    r.current = async () => {
+      await persistProgress();
+    };
+    return () => {
+      r.current = null;
+    };
+  }, [persistProgress, playbackProgressFlushRef]);
 
   const refreshTracks = useCallback(async () => {
     try {
@@ -830,7 +845,15 @@ export function PlayerView(props: {
         void toggleFullscreen();
         return;
       }
-      void appWindow.startDragging();
+      void (async () => {
+        try {
+          const [fs, max] = await Promise.all([appWindow.isFullscreen(), appWindow.isMaximized()]);
+          if (fs || max) return;
+          await appWindow.startDragging();
+        } catch {
+          /* ignore */
+        }
+      })();
     },
     [toggleFullscreen],
   );
