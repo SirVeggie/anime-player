@@ -7,6 +7,29 @@ Anime Player is a Windows desktop app for browsing and playing a local video lib
 ![Episode view](assets/screenshots/episodes.png)
 ![Player](assets/screenshots/player.png)
 
+## Install and update
+
+These steps are for the pre-built Windows release. To build from source, see [Development: setup](#development-setup) below.
+
+### First-time install
+
+1. Open [GitHub Releases](https://github.com/SirVeggie/anime-player/releases).
+2. Download the **versioned zip** (for example `AnimePlayer-v1.3.zip`), **not** the standalone `anime-player.exe`.
+   - The zip includes `anime-player.exe`, `libmpv-2.dll`, `update.bat`, and `_update.ps1`. The loose exe on the release page is only for updating an existing install and will not run on its own without the DLL beside it.
+3. Extract the folder anywhere you like (the app is portable) and run `anime-player.exe`.
+4. Your library database and settings are stored in `data/` next to the executable, so you can move the whole folder later.
+
+WebView2 is required; it is already installed on most current Windows 10/11 systems.
+
+### Updating
+
+1. Close Anime Player completely.
+2. In the same folder as `anime-player.exe`, double-click **`update.bat`**.
+   - Do not run `_update.ps1` directly; it is only used by `update.bat`.
+3. The script downloads the latest `anime-player.exe` from the release (much smaller than re-downloading the zip).
+
+Download the **full zip** again when you are installing on a new PC, or when release notes say the bundled `libmpv-2.dll` changed. App-only updates are enough when only the executable changed.
+
 ## Features
 
 - Local library scanner with editable categories, missing-file diagnostics, and regex-based filename detection rules.
@@ -16,45 +39,6 @@ Anime Player is a Windows desktop app for browsing and playing a local video lib
 - Portable local data beside the app executable in `data/anime-player.db`.
 
 Supported video extensions: `mkv`, `mp4`, `m4v`, `mov`, `avi`, `wmv`, `flv`, `webm`, `ts`, `m2ts`, `mts`, `ogv`, `ogm`, `vob`, `3gp`, `rm`, `rmvb`, `mpg`, `mpeg`.
-
-## Installation
-
-Prerequisites:
-
-1. Node.js 18+.
-2. Rust stable from <https://rustup.rs>.
-3. Microsoft Visual Studio C++ Build Tools with the Desktop development with C++ workload.
-4. WebView2 Runtime, which is preinstalled on current Windows 10/11 installs.
-5. `7z` on PATH for the mpv setup script.
-
-Install dependencies and download the local libmpv artifacts:
-
-```powershell
-npm install
-npm run setup:mpv
-```
-
-You do not need a separate `mpv.exe` install. The setup script downloads `libmpv-2.dll` and `mpv.lib` into `src-tauri/libs/mpv/`; these generated files are intentionally not committed.
-
-## Running
-
-```powershell
-npm run tauri dev
-```
-
-The first Rust build can take a few minutes. Later dev runs are much faster.
-
-To build an installer:
-
-```powershell
-npm run tauri build
-```
-
-To build and package the portable release folder/zip:
-
-```powershell
-npm run release
-```
 
 ## Basic Usage
 
@@ -115,11 +99,54 @@ Player:
 
 libmpv keyboard input is also enabled in the player area, so standard mpv bindings may work in addition to the custom shortcuts above.
 
+## Development: setup
+
+These steps are for building Anime Player from source, not for installing a release download.
+
+Prerequisites:
+
+1. Node.js 18+.
+2. Rust stable from <https://rustup.rs>.
+3. Microsoft Visual Studio C++ Build Tools with the Desktop development with C++ workload.
+4. WebView2 Runtime, which is preinstalled on current Windows 10/11 installs.
+5. `7z` on PATH for the mpv setup script.
+
+Install dependencies and download the local libmpv artifacts:
+
+```powershell
+npm install
+npm run setup:mpv
+```
+
+You do not need a separate `mpv.exe` install. The setup script downloads `libmpv-2.dll` and `mpv.lib` into `src-tauri/libs/mpv/`; these generated files are intentionally not committed.
+
+## Development: run and release builds
+
+```powershell
+npm run tauri dev
+```
+
+The first Rust build can take a few minutes. Later dev runs are much faster.
+
+To build an installer:
+
+```powershell
+npm run tauri build
+```
+
+To build and package the portable release folder/zip (includes `update.bat` for end users):
+
+```powershell
+npm run release
+```
+
+When publishing a GitHub release, attach the versioned zip, a standalone `anime-player.exe`, and `anime-player.exe.sha256` (written under `releases/` by the package script).
+
 ## Acknowledgements
 
 Special thanks to [FengZeng/soia](https://github.com/FengZeng/soia) and its author for providing a very helpful reference while working through the Tauri + libmpv integration.
 
-## Development Notes
+## Development notes
 
 The frontend is React + TypeScript under `src/`. The backend is Rust/Tauri under `src-tauri/`. Playback is handled by libmpv loaded in the Tauri process and rendered into the main window via DirectComposition; see `CONTEXT.md` for the detailed architecture notes.
 

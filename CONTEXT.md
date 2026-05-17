@@ -408,6 +408,9 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
   ignored local libmpv artifacts into `src-tauri/libs/mpv/`.
 - `scripts/update-mpv-libs.mjs` — compatibility updater for the same
   artifacts from the latest `shinchiro/mpv-winbuild-cmake` release.
+- `scripts/update.bat` and `scripts/_update.ps1` — portable end-user
+  updater (`update.bat` only; `_update.ps1` is internal). Shipped in the
+  release zip; downloads `anime-player.exe` from GitHub `releases/latest`.
 - `.cursor/rules/` — agent rules. `read-context.mdc` points new agents
   here; `commit-checkpoints.mdc` defines the per-change commit
   workflow.
@@ -449,7 +452,9 @@ npm run tauri dev
 npm run tauri build
 
 # Portable release: `tauri build` then versioned folder + zip under `releases/`
-# (that directory is listed in `.gitignore` so build artifacts stay local)
+# (that directory is listed in `.gitignore` so build artifacts stay local).
+# Package includes update.bat, _update.ps1, and VERSION.txt. Publish GitHub
+# release with the zip, standalone anime-player.exe, and anime-player.exe.sha256.
 npm run release
 ```
 
