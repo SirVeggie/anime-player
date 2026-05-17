@@ -867,6 +867,8 @@ export function PlayerView(props: {
   );
 
   useEffect(() => {
+    if (!visible) return;
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (isTextInputTarget(e.target)) return;
@@ -877,13 +879,11 @@ export function PlayerView(props: {
         return;
       }
       if (e.ctrlKey && e.code === "ArrowLeft") {
-        if (!visible) return;
         e.preventDefault();
         if (canPrev) loadSibling(-1);
         return;
       }
       if (e.ctrlKey && e.code === "ArrowRight") {
-        if (!visible) return;
         e.preventDefault();
         if (canNext) loadSibling(1);
         return;
@@ -931,19 +931,16 @@ export function PlayerView(props: {
         return;
       }
       if (e.code === "KeyW") {
-        if (!visible) return;
         e.preventDefault();
         adjustVolumeWithOsd(HOTKEY_STEP);
         return;
       }
       if (e.code === "KeyS") {
-        if (!visible) return;
         e.preventDefault();
         adjustVolumeWithOsd(-HOTKEY_STEP);
         return;
       }
       if (e.code === "KeyM") {
-        if (!visible) return;
         e.preventDefault();
         toggleMuteHotkey();
         return;
@@ -954,7 +951,6 @@ export function PlayerView(props: {
         return;
       }
       if (e.code === "KeyC") {
-        if (!visible) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         e.preventDefault();
         setControlsVisible((prev) => {
@@ -971,13 +967,11 @@ export function PlayerView(props: {
       if (e.code === "KeyQ") {
         // Q outside the player is owned by App.tsx (it picks an episode for
         // the current anime); here we only close the playback view.
-        if (!visible) return;
         e.preventDefault();
         void hidePlayer();
         return;
       }
       if (e.code === "Escape") {
-        if (!visible) return;
         e.preventDefault();
         void hidePlayer();
       }
