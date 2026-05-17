@@ -214,8 +214,10 @@ view components. Per-screen UI lives in `src/components/`:
 
 - `db.rs` opens a portable SQLite database at
   `<current-exe>/data/anime-player.db`, creates the first schema, and
-  seeds default categories (`Ongoing`, `Completed`, `Finished`) plus
-  fansub, simple-title, and generic video regex rules. `AppDatabase::with_conn` exposes `&mut Connection`
+  seeds default categories (`Ongoing`, `Completed`, `Finished`) and
+  fansub/simple-title/generic video regex rules only when those tables are
+  empty (deleting a default rule does not restore it on restart).
+  `AppDatabase::with_conn` exposes `&mut Connection`
   so callers can start transactions (e.g. bulk rescan writes).
 - `scanner.rs` owns recursive video discovery, extension filtering, and
   regex-based anime title / episode extraction. When multiple enabled

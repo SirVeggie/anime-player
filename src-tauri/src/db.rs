@@ -109,33 +109,41 @@ fn seed_defaults(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     }
 
-    conn.execute(
-        "INSERT OR IGNORE INTO regex_rules
-            (id, name, detection_regex, title_regex, enabled, priority)
-         VALUES
-            (1, 'Fansub',
-             '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
-             '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)',
-             1, 10),
-            (2, 'Fansub (no ep)',
-             '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
-             '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)?',
-             1, 9),
-            (3, 'Simple',
-             '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
-             '^(?P<title>([\\w, ]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)',
-             1, 5),
-            (4, 'Simple (no ep)',
-             '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
-             '^(?P<title>([\\w, ]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)?',
-             1, 4),
-            (5, 'Generic',
-             '(?i)\\.(mp4|mkv|m4v|mov|avi|wmv|flv|webm|ts|m2ts|mts|ogv|ogm|vob|3gp|rm|rmvb|mpg|mpeg)$',
-             '(?P<title>[\\w\\s.-,]+)\\.\\w+$',
-             1, 0)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
+    let rule_count = conn
+        .query_row("SELECT COUNT(*) FROM regex_rules", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|e| e.to_string())?;
+
+    if rule_count == 0 {
+        conn.execute(
+            "INSERT INTO regex_rules
+                (id, name, detection_regex, title_regex, enabled, priority)
+             VALUES
+                (1, 'Fansub',
+                 '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
+                 '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)',
+                 1, 10),
+                (2, 'Fansub (no ep)',
+                 '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
+                 '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)?',
+                 1, 9),
+                (3, 'Simple',
+                 '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
+                 '^(?P<title>([\\w, ]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)',
+                 1, 5),
+                (4, 'Simple (no ep)',
+                 '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
+                 '^(?P<title>([\\w, ]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)?',
+                 1, 4),
+                (5, 'Generic',
+                 '(?i)\\.(mp4|mkv|m4v|mov|avi|wmv|flv|webm|ts|m2ts|mts|ogv|ogm|vob|3gp|rm|rmvb|mpg|mpeg)$',
+                 '(?P<title>[\\w\\s.\\-,]+)\\.\\w+',
+                 1, 0)",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
@@ -247,3 +255,41 @@ CREATE TABLE IF NOT EXISTS unmatched_files (
   FOREIGN KEY(root_folder_id) REFERENCES root_folders(id) ON DELETE CASCADE
 );
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::OptionalExtension;
+
+    #[test]
+    fn seed_defaults_restores_rules_only_when_table_empty() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+
+        seed_defaults(&conn).unwrap();
+        assert_eq!(rule_count(&conn), 5);
+
+        conn.execute("DELETE FROM regex_rules WHERE id = 1", []).unwrap();
+        seed_defaults(&conn).unwrap();
+        assert_eq!(rule_count(&conn), 4);
+        assert!(
+            conn.query_row(
+                "SELECT 1 FROM regex_rules WHERE id = 1",
+                [],
+                |_| Ok(()),
+            )
+            .optional()
+            .unwrap()
+            .is_none()
+        );
+
+        conn.execute("DELETE FROM regex_rules", []).unwrap();
+        seed_defaults(&conn).unwrap();
+        assert_eq!(rule_count(&conn), 5);
+    }
+
+    fn rule_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM regex_rules", [], |row| row.get(0))
+            .unwrap()
+    }
+}
