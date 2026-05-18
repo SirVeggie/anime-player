@@ -73,7 +73,7 @@ Global:
 
 - `F11`: Toggle app fullscreen, unless typing in a text field.
 - `Ctrl+F`: Open/focus Search.
-- `Esc`: Go back from category, search, bulk edit, missing, episode, or settings pages.
+- `Esc`: Go back from any page.
 - `Arrow keys`: Move focus through category/title card grids.
 
 Episode page:
@@ -82,20 +82,20 @@ Episode page:
 
 Player:
 
-- `Space`: Play/pause.
 - Right click: Play/pause.
+- Single left click and drag on the video: Drag the window.
+- Double left click on the video: Toggle fullscreen.
+- `Space`: Play/pause.
 - `ArrowLeft` / `ArrowRight`: Seek backward/forward 5 seconds.
+- `Ctrl+ArrowLeft` / `Ctrl+ArrowRight`: Previous/next episode.
 - `Numpad4` / `Numpad6`: Seek backward/forward 28 seconds.
 - `Numpad7` / `Numpad9`: Seek backward/forward 85 seconds.
-- `W` / `S` / mouse wheel: Raise/lower volume by 2 on mpv’s 0–130 scale.
+- `W` / `S` / mouse wheel: Raise/lower volume.
 - `M`: Toggle mute.
-- `Ctrl+ArrowLeft` / `Ctrl+ArrowRight`: Previous/next episode.
 - `F`: Toggle fullscreen.
 - `F11`: Toggle app fullscreen.
-- `C`: Toggle player controls.
-- `Q` or `Esc`: Leave the player and return to the episode list.
-- Double left click on the video: Toggle fullscreen.
-- Single left click and drag on the video: Drag the window.
+- `C`: Show player controls.
+- `Q`: Toggle between video player and episode view.
 
 libmpv keyboard input is also enabled in the player area, so standard mpv bindings may work in addition to the custom shortcuts above.
 
