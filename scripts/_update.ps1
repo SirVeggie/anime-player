@@ -30,6 +30,16 @@ function Get-GitHubHeaders {
   return $headers
 }
 
+function Get-ResponseText($Content) {
+  if ($null -eq $Content) {
+    return ''
+  }
+  if ($Content -is [byte[]]) {
+    return [System.Text.Encoding]::UTF8.GetString($Content)
+  }
+  return [string]$Content
+}
+
 function Get-ExpectedSha256([string]$HashText) {
   $line = ($HashText -split "`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1).Trim()
   if ($line -match '^([0-9A-Fa-f]{64})\s') {
@@ -101,8 +111,8 @@ try {
 if ($hashAsset -and $hashAsset.browser_download_url) {
   Write-Info 'Verifying download hash...'
   try {
-    $hashText = (Invoke-WebRequest -Uri $hashAsset.browser_download_url -UseBasicParsing).Content
-    $expected = Get-ExpectedSha256 $hashText
+    $hashRaw = (Invoke-WebRequest -Uri $hashAsset.browser_download_url -UseBasicParsing).Content
+    $expected = Get-ExpectedSha256 (Get-ResponseText $hashRaw)
     $actual = (Get-FileHash -LiteralPath $DownloadPath -Algorithm SHA256).Hash.ToUpperInvariant()
     if ($actual -ne $expected) {
       Write-Err "SHA256 mismatch. Expected $expected but got $actual."
