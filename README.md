@@ -14,7 +14,7 @@ These steps are for the pre-built Windows release. To build from source, see [De
 ### First-time install
 
 1. Open [GitHub Releases](https://github.com/SirVeggie/anime-player/releases).
-2. Download the **versioned zip** (for example `AnimePlayer-v1.3.zip`), **not** the standalone `anime-player.exe`.
+2. Download the **versioned zip** `AnimePlayer-vX.X.zip`, **not** the standalone `anime-player.exe`.
    - The zip includes `anime-player.exe`, `libmpv-2.dll`, `update.bat`, and `_update.ps1`. The loose exe on the release page is only for updating an existing install and will not run on its own without the DLL beside it.
 3. Extract the folder anywhere you like (the app is portable) and run `anime-player.exe`.
 4. Your library database and settings are stored in `data/` next to the executable, so you can move the whole folder later.
