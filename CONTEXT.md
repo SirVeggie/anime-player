@@ -408,6 +408,8 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
   ignored local libmpv artifacts into `src-tauri/libs/mpv/`.
 - `scripts/update-mpv-libs.mjs` — compatibility updater for the same
   artifacts from the latest `shinchiro/mpv-winbuild-cmake` release.
+- `scripts/release-notes.mjs` and `scripts/publish-github-release.mjs` — automated
+  GitHub release flow (run `npm run release:notes` then `npm run release:publish`).
 - `scripts/update.bat` and `scripts/_update.ps1` — portable end-user
   updater (`update.bat` only; `_update.ps1` is internal). Shipped in the
   release zip; downloads `anime-player.exe` from GitHub `releases/latest`.

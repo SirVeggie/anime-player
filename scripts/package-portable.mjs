@@ -2,38 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
-
-function getAndTagVersion() {
-  let currentTag;
-  try {
-    currentTag = execSync('git describe --tags --exact-match', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-    if (currentTag.startsWith('v')) {
-      console.log(`Current commit is already tagged as ${currentTag}`);
-      return currentTag;
-    }
-  } catch {
-    // Not tagged exactly
-  }
-
-  let latestTag = 'v1.0';
-  try {
-    latestTag = execSync('git describe --tags --abbrev=0', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-  } catch {
-    console.log('No previous tags found, defaulting to v1.0');
-  }
-
-  const match = latestTag.match(/^v(\d+)\.(\d+)$/);
-  let newVersion = 'v1.0';
-  if (match) {
-    const major = parseInt(match[1], 10);
-    const minor = parseInt(match[2], 10);
-    newVersion = `v${major}.${minor + 1}`;
-  }
-
-  console.log(`Creating new tag: ${newVersion}`);
-  execSync(`git tag -a ${newVersion} -m "Release ${newVersion}"`);
-  return newVersion;
-}
+import { getAndTagVersion } from './release-version.mjs';
 
 async function sha256File(filePath) {
   const data = await fs.readFile(filePath);

@@ -1,0 +1,86 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import { getExactTagAtHead, getNextVersion } from './release-version.mjs';
+
+async function generateReleaseNotes() {
+  const root = process.cwd();
+  const releasesDir = path.join(root, 'releases');
+
+  // Ensure releases dir exists
+  try {
+    await fs.access(releasesDir);
+  } catch {
+    await fs.mkdir(releasesDir, { recursive: true });
+  }
+
+  // Determine the target version for notes
+  let targetVersion = getExactTagAtHead();
+  let commitRange = '';
+
+  if (targetVersion) {
+    // We're at a tag. Find the *previous* tag.
+    let previousTag = '';
+    try {
+      // `git describe --tags --abbrev=0 HEAD^` gets the latest tag before the current commit
+      previousTag = execSync('git describe --tags --abbrev=0 HEAD^', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+    } catch {
+      // No previous tag
+    }
+    
+    if (previousTag) {
+      commitRange = `${previousTag}..HEAD`;
+    } else {
+      // If no previous tag, get everything from the beginning
+      commitRange = 'HEAD';
+    }
+  } else {
+    // We're not at a tag. Use the next version.
+    targetVersion = getNextVersion();
+    let latestTag = '';
+    try {
+      latestTag = execSync('git describe --tags --abbrev=0', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+    } catch {
+      // No latest tag
+    }
+
+    if (latestTag) {
+      commitRange = `${latestTag}..HEAD`;
+    } else {
+      commitRange = 'HEAD';
+    }
+  }
+
+  console.log(`Generating notes for ${targetVersion} from commits: ${commitRange}`);
+
+  let commits = '';
+  try {
+    commits = execSync(`git log ${commitRange} --no-merges --pretty=format:"- %s (%h)"`, { encoding: 'utf-8' }).trim();
+  } catch (err) {
+    console.error('Failed to get git log:', err.message);
+    process.exit(1);
+  }
+
+  // Filter out noise like "checkpoint" or "Update VERSION" if needed, 
+  // but we leave it to the agent for now per the plan.
+  const filteredCommits = commits.split('\n')
+    .filter(line => line.trim().length > 0)
+    .filter(line => !line.match(/^- (Merge|checkpoint)/i))
+    .join('\n');
+
+  const notesContent = `# Anime Player ${targetVersion}
+
+## Changes
+
+${filteredCommits || '- No significant changes logged.'}
+`;
+
+  const notesPath = path.join(releasesDir, `NOTES-${targetVersion}.md`);
+  await fs.writeFile(notesPath, notesContent, 'utf8');
+
+  console.log(`\nDraft release notes written to:`);
+  console.log(notesPath);
+  console.log(`\nReview and polish this file before running 'npm run release:publish'.`);
+}
+
+generateReleaseNotes().catch(console.error);

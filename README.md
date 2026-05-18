@@ -142,6 +142,22 @@ npm run release
 
 When publishing a GitHub release, attach the versioned zip, a standalone `anime-player.exe`, and `anime-player.exe.sha256` (written under `releases/` by the package script).
 
+### Publishing to GitHub
+
+We use a local build + `gh` CLI workflow to publish releases.
+
+**Prerequisites:**
+1. Install the [GitHub CLI (`gh`)](https://cli.github.com/).
+2. Authenticate: `gh auth login` with `repo` scope.
+
+**Release Workflow (for Agents/Maintainers):**
+1. **Build:** Run `npm run release` to build the app and generate the versioned artifacts (`zip`, `exe`, `sha256`) in the `releases/` directory. This also creates a local git tag.
+2. **Draft Notes:** Run `npm run release:notes` to generate a draft markdown file (`releases/NOTES-vX.Y.md`) from recent git commits.
+3. **Polish Notes:** Open the generated `NOTES-vX.Y.md` file and rewrite the bullet points into user-facing language (group fixes, remove noise).
+4. **Publish:** Run `npm run release:publish`. This will push the tag to origin, create the GitHub release using your notes, and upload the three required assets.
+
+*Note for Agents: If you are instructed to create a release, follow the above 4 steps. After running `release:notes`, present the draft to the user or polish the notes file before running `release:publish`.*
+
 ## Acknowledgements
 
 Special thanks to [FengZeng/soia](https://github.com/FengZeng/soia) and its author for providing a very helpful reference while working through the Tauri + libmpv integration.
