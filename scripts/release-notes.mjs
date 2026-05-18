@@ -67,12 +67,17 @@ async function generateReleaseNotes() {
     .filter(line => !line.match(/^- (Merge|checkpoint)/i))
     .join('\n');
 
-  const notesContent = `# Anime Player ${targetVersion}
+  const notesContent = `### Features
 
-## Changes
+### Fixes
 
-${filteredCommits || '- No significant changes logged.'}
+### Other
 `;
+
+  if (filteredCommits) {
+    console.log('\nCommits to triage (rewrite into sections; omit docs/tooling):\n');
+    console.log(filteredCommits);
+  }
 
   const notesPath = path.join(releasesDir, `NOTES-${targetVersion}.md`);
   await fs.writeFile(notesPath, notesContent, 'utf8');

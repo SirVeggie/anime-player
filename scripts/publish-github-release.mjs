@@ -134,7 +134,7 @@ async function publishGithubRelease() {
     const cmd = [
       'gh release create',
       targetTag,
-      `--title "Anime Player ${targetTag}"`,
+      `--title "${targetTag}"`,
       `--notes-file "${notesPath}"`,
       `"${zipPath}"`,
       `"${exePath}"`,

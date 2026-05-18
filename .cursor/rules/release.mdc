@@ -47,11 +47,49 @@ This writes `releases/NOTES-<tag>.md` from commits since the previous tag.
 
 ### 3. Polish notes (required before publish)
 
-Edit `releases/NOTES-<tag>.md`:
+Edit `releases/NOTES-<tag>.md` before publish. The file is the **release body
+only** — GitHub already shows the tag; do not repeat it as a top-level `#`
+title in the notes.
 
-- Rewrite commit subjects into user-facing bullets (fixes, features, UI).
-- Drop checkpoint/noise commits and merge-only lines.
-- Group related changes.
+#### Release title (GitHub)
+
+Use **the tag alone** as the GitHub release title, e.g. `v1.7` — not
+`Anime Player v1.7`. `release:publish` sets this automatically.
+
+#### Release body structure
+
+Organize bullets under **section headings only** (no main `#` header):
+
+```markdown
+### Features
+- Volume controls and keyboard shortcuts
+
+### Fixes
+- Now able to delete default detection rules (default rules are only created if rules are empty)
+- Fixed bug where video player hotkeys were active even outside of the player
+```
+
+- **`### Features`** — new behavior, UI improvements, playback/library changes
+  users will notice.
+- **`### Fixes`** — bugs fixed in this version.
+- **`### Other`** — only when something user-visible does not fit above (e.g.
+  portable updater behavior). Omit empty sections.
+
+Use `###` (h3) for section titles so the body reads cleanly on GitHub.
+
+#### What to include / omit
+
+Write for someone **using the app**, not for maintainers:
+
+- **Include:** playback, library, rules, hotkeys, settings, installer/portable
+  behavior that affects how they run or update the app.
+- **Omit:** README or doc-only edits, Cursor rules, release-script refactors,
+  commit hashes, checkpoint/noise commits, merge lines, and other changes that
+  do not affect runtime behavior.
+
+Rewrite commit subjects into plain, user-facing bullets. Drop or merge related
+items. If a section has no items after triage, remove the whole section (do not
+write “no changes”).
 
 Show the polished draft to the user (or save it) before publishing unless they
 explicitly asked you to publish without review.
