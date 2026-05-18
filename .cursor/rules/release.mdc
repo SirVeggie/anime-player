@@ -67,9 +67,10 @@ Optional flags (pass through to the script):
 - `--notes <path>` — notes file (default: `releases/NOTES-<tag>.md`)
 - `--tag <vX.Y>` — override tag
 
-The script verifies `gh`, required artifacts, creates the tag if needed, runs
-`git push origin <tag>`, then `gh release create` with the zip, exe, and
-sha256 attached.
+The script verifies `gh` auth, required artifacts, and
+`releases/.build-meta.json` (commit/tag must match HEAD and the publish tag),
+creates the tag if needed, runs `git push origin <tag>`, then `gh release create`
+with the zip, exe, and sha256 attached.
 
 ## Git / safety
 

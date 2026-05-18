@@ -1,8 +1,18 @@
 import { execSync } from 'node:child_process';
 
+/** Git describe --match pattern for release tags (vMAJOR.MINOR). */
+export const VERSION_TAG_MATCH = 'v*';
+
+export function getHeadCommit() {
+  return execSync('git rev-parse HEAD', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+}
+
 export function getLatestTag() {
   try {
-    return execSync('git describe --tags --abbrev=0', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+    return execSync(`git describe --tags --abbrev=0 --match "${VERSION_TAG_MATCH}"`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return null;
   }
@@ -10,7 +20,10 @@ export function getLatestTag() {
 
 export function getExactTagAtHead() {
   try {
-    return execSync('git describe --tags --exact-match', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+    return execSync(`git describe --tags --exact-match --match "${VERSION_TAG_MATCH}"`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return null;
   }
@@ -40,7 +53,12 @@ export function createAnnotatedTag(version) {
   }
 
   console.log(`Creating new tag: ${version}`);
-  execSync(`git tag -a ${version} -m "Release ${version}"`);
+  try {
+    execSync(`git tag -a ${version} -m "Release ${version}"`);
+  } catch (err) {
+    console.error(`Failed to create tag ${version}. It may already exist on another commit.`);
+    throw err;
+  }
 }
 
 export function getAndTagVersion() {

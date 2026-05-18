@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { getAndTagVersion } from './release-version.mjs';
+import { getAndTagVersion, getHeadCommit } from './release-version.mjs';
 
 async function sha256File(filePath) {
   const data = await fs.readFile(filePath);
@@ -51,6 +51,7 @@ async function packagePortable() {
   const zipPath = path.join(releasesDir, `${destDirName}.zip`);
   const hashPath = path.join(releasesDir, 'anime-player.exe.sha256');
   const looseExePath = path.join(releasesDir, 'anime-player.exe');
+  const buildMetaPath = path.join(releasesDir, '.build-meta.json');
 
   console.log(`\nCreating ${destDirName}...`);
 
@@ -76,7 +77,15 @@ async function packagePortable() {
     execSync(`powershell -NoProfile -Command "Compress-Archive -Path '${destDir}\\*' -DestinationPath '${zipPath}' -Force"`, { stdio: 'inherit' });
   } catch (err) {
     console.error('Failed to create zip archive:', err.message);
+    process.exit(1);
   }
+
+  const commit = getHeadCommit();
+  await fs.writeFile(
+    buildMetaPath,
+    JSON.stringify({ tag: version, commit }, null, 2) + '\n',
+    'utf8',
+  );
 
   console.log('\nSuccess! Your clean portable package is ready at:');
   console.log(destDir);
@@ -88,4 +97,7 @@ async function packagePortable() {
   console.log('  - anime-player.exe.sha256');
 }
 
-packagePortable().catch(console.error);
+packagePortable().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

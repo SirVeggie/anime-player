@@ -1,45 +1,46 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { getExactTagAtHead, getNextVersion } from './release-version.mjs';
+import { getExactTagAtHead, getNextVersion, VERSION_TAG_MATCH } from './release-version.mjs';
+
+function describeVersionTag(ref) {
+  return execSync(`git describe --tags --abbrev=0 --match "${VERSION_TAG_MATCH}" ${ref}`, {
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'ignore'],
+  }).trim();
+}
 
 async function generateReleaseNotes() {
   const root = process.cwd();
   const releasesDir = path.join(root, 'releases');
 
-  // Ensure releases dir exists
   try {
     await fs.access(releasesDir);
   } catch {
     await fs.mkdir(releasesDir, { recursive: true });
   }
 
-  // Determine the target version for notes
   let targetVersion = getExactTagAtHead();
   let commitRange = '';
 
   if (targetVersion) {
-    // We're at a tag. Find the *previous* tag.
     let previousTag = '';
     try {
-      // `git describe --tags --abbrev=0 HEAD^` gets the latest tag before the current commit
-      previousTag = execSync('git describe --tags --abbrev=0 HEAD^', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+      previousTag = describeVersionTag(`${targetVersion}~1`);
     } catch {
       // No previous tag
     }
-    
+
     if (previousTag) {
       commitRange = `${previousTag}..HEAD`;
     } else {
-      // If no previous tag, get everything from the beginning
       commitRange = 'HEAD';
     }
   } else {
-    // We're not at a tag. Use the next version.
     targetVersion = getNextVersion();
     let latestTag = '';
     try {
-      latestTag = execSync('git describe --tags --abbrev=0', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+      latestTag = describeVersionTag('HEAD');
     } catch {
       // No latest tag
     }
@@ -61,8 +62,6 @@ async function generateReleaseNotes() {
     process.exit(1);
   }
 
-  // Filter out noise like "checkpoint" or "Update VERSION" if needed, 
-  // but we leave it to the agent for now per the plan.
   const filteredCommits = commits.split('\n')
     .filter(line => line.trim().length > 0)
     .filter(line => !line.match(/^- (Merge|checkpoint)/i))
@@ -83,4 +82,7 @@ ${filteredCommits || '- No significant changes logged.'}
   console.log(`\nReview and polish this file before running 'npm run release:publish'.`);
 }
 
-generateReleaseNotes().catch(console.error);
+generateReleaseNotes().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

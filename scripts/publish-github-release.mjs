@@ -1,13 +1,49 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { getExactTagAtHead, createAnnotatedTag, getNextVersion } from './release-version.mjs';
+import { getExactTagAtHead, createAnnotatedTag, getNextVersion, getHeadCommit } from './release-version.mjs';
+
+async function verifyBuildMeta(releasesDir, targetTag) {
+  const buildMetaPath = path.join(releasesDir, '.build-meta.json');
+  let raw;
+  try {
+    raw = await fs.readFile(buildMetaPath, 'utf8');
+  } catch {
+    console.error(`Error: Build metadata not found at: ${buildMetaPath}`);
+    console.error('Please run `npm run release` first to generate build artifacts.');
+    process.exit(1);
+  }
+
+  let meta;
+  try {
+    meta = JSON.parse(raw);
+  } catch {
+    console.error(`Error: Invalid build metadata at: ${buildMetaPath}`);
+    process.exit(1);
+  }
+
+  const headCommit = getHeadCommit();
+  if (meta.commit !== headCommit) {
+    console.error('Error: Release artifacts were built for a different commit than HEAD.');
+    console.error(`  Built for: ${meta.commit}`);
+    console.error(`  HEAD is:   ${headCommit}`);
+    console.error('Run `npm run release` again at the current commit before publishing.');
+    process.exit(1);
+  }
+
+  if (meta.tag !== targetTag) {
+    console.error('Error: Release artifacts were built for a different version tag.');
+    console.error(`  Built for: ${meta.tag}`);
+    console.error(`  Publishing: ${targetTag}`);
+    console.error('Run `npm run release` again for this version, or pass `--tag` matching the build.');
+    process.exit(1);
+  }
+}
 
 async function publishGithubRelease() {
   const root = process.cwd();
   const releasesDir = path.join(root, 'releases');
 
-  // 1. Verify gh is available
   try {
     execSync('gh --version', { stdio: 'ignore' });
   } catch {
@@ -16,7 +52,14 @@ async function publishGithubRelease() {
     process.exit(1);
   }
 
-  // Parse arguments
+  try {
+    execSync('gh auth status', { stdio: 'ignore' });
+  } catch {
+    console.error('Error: GitHub CLI is not authenticated.');
+    console.error('Run `gh auth login` with repo scope, or set GITHUB_TOKEN.');
+    process.exit(1);
+  }
+
   const args = process.argv.slice(2);
   let notesPathArg = null;
   let tagArg = null;
@@ -31,19 +74,16 @@ async function publishGithubRelease() {
     }
   }
 
-  // 2. Determine tag
   let targetTag = tagArg;
   if (!targetTag) {
     const headTag = getExactTagAtHead();
     if (headTag && headTag.startsWith('v')) {
       targetTag = headTag;
     } else {
-      // If we are not at a tag, use next version, and we'll tag it shortly.
       targetTag = getNextVersion();
     }
   }
 
-  // 3. Verify artifacts exist
   const zipName = `AnimePlayer-${targetTag}.zip`;
   const zipPath = path.join(releasesDir, zipName);
   const exePath = path.join(releasesDir, 'anime-player.exe');
@@ -60,7 +100,8 @@ async function publishGithubRelease() {
     }
   }
 
-  // 4. Verify notes exist
+  await verifyBuildMeta(releasesDir, targetTag);
+
   const notesPath = notesPathArg ? path.resolve(root, notesPathArg) : path.join(releasesDir, `NOTES-${targetTag}.md`);
   try {
     await fs.access(notesPath);
@@ -70,23 +111,24 @@ async function publishGithubRelease() {
     process.exit(1);
   }
 
-  // 5. Ensure annotated tag exists at current commit
   const headTag = getExactTagAtHead();
   if (headTag !== targetTag) {
     console.log(`Tagging current commit as ${targetTag}...`);
-    createAnnotatedTag(targetTag);
+    try {
+      createAnnotatedTag(targetTag);
+    } catch {
+      process.exit(1);
+    }
   }
 
-  // Push the tag to remote so gh release create works properly against it
   console.log(`Pushing tag ${targetTag} to origin...`);
   try {
     execSync(`git push origin ${targetTag}`, { stdio: 'inherit' });
-  } catch (err) {
+  } catch {
     console.error(`Failed to push tag ${targetTag}. Is the remote set up correctly?`);
     process.exit(1);
   }
 
-  // 6. Create GitHub Release
   console.log(`\nCreating GitHub release for ${targetTag}...`);
   try {
     const cmd = [
@@ -100,7 +142,7 @@ async function publishGithubRelease() {
     ].join(' ');
 
     execSync(cmd, { stdio: 'inherit' });
-  } catch (err) {
+  } catch {
     console.error('\nError: Failed to create GitHub release.');
     console.error('If the release already exists, you may need to delete it first:');
     console.error(`  gh release delete ${targetTag}`);
@@ -111,4 +153,7 @@ async function publishGithubRelease() {
   console.log('Reminder: Remember to run `git push origin main` if you have unpushed commits.');
 }
 
-publishGithubRelease().catch(console.error);
+publishGithubRelease().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
