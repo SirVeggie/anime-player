@@ -1,0 +1,97 @@
+---
+description: Create and publish a GitHub release when the user asks
+alwaysApply: false
+---
+
+# GitHub release workflow
+
+When the user asks to **create**, **cut**, or **publish** a release, follow this
+local workflow. Do **not** add GitHub Actions; releases are built on Windows and
+published with the `gh` CLI.
+
+## Prerequisites
+
+- [GitHub CLI](https://cli.github.com/) on PATH (`gh --version`).
+- Authenticated: `gh auth login` with `repo` scope (or `GITHUB_TOKEN` for
+  non-interactive runs).
+- libmpv present: `npm run setup:mpv` if `src-tauri/libs/mpv/libmpv-2.dll` is
+  missing.
+
+## Steps (in order)
+
+### 1. Build and package
+
+```powershell
+npm run release
+```
+
+This runs `tauri build` then `package:portable`, which:
+
+- Creates an annotated tag `vMAJOR.MINOR` at HEAD (or reuses the tag already
+  on HEAD).
+- Writes `releases/AnimePlayer-<tag>.zip`, `releases/anime-player.exe`, and
+  `releases/anime-player.exe.sha256`.
+
+If the user already ran a recent `npm run release` and artifacts match the
+intended tag, skip the rebuild after confirming with them.
+
+`npm run release` can be slow (full Rust + frontend build). This is expected as part of the release though, so no need to warn before starting it.
+
+### 2. Draft release notes
+
+```powershell
+npm run release:notes
+```
+
+This writes `releases/NOTES-<tag>.md` from commits since the previous tag.
+
+### 3. Polish notes (required before publish)
+
+Edit `releases/NOTES-<tag>.md`:
+
+- Rewrite commit subjects into user-facing bullets (fixes, features, UI).
+- Drop checkpoint/noise commits and merge-only lines.
+- Group related changes.
+
+Show the polished draft to the user (or save it) before publishing unless they
+explicitly asked you to publish without review.
+
+### 4. Publish to GitHub
+
+```powershell
+npm run release:publish
+```
+
+Optional flags (pass through to the script):
+
+- `--notes <path>` — notes file (default: `releases/NOTES-<tag>.md`)
+- `--tag <vX.Y>` — override tag
+
+The script verifies `gh`, required artifacts, creates the tag if needed, runs
+`git push origin <tag>`, then `gh release create` with the zip, exe, and
+sha256 attached.
+
+## Git / safety
+
+- **Do not** `git push origin main` (or any branch) unless the user explicitly
+  asks. `release:publish` only pushes the release tag.
+- After publish, remind the user to push `main` if release commits are not on
+  the remote yet.
+- If publish fails because the release already exists: `gh release view <tag>`
+  and only delete/recreate with user approval.
+
+## End-user updater alignment
+
+GitHub release assets must include exactly what `_update.ps1` expects:
+
+- `anime-player.exe`
+- `anime-player.exe.sha256` (uppercase hex, `hash anime-player.exe` format)
+
+The portable zip must include `update.bat`, `_update.ps1`, `libmpv-2.dll`, and
+`VERSION.txt` (handled by `package-portable.mjs`).
+
+## Reference
+
+- User-facing steps: `README.md` → **Publishing to GitHub**
+- Scripts: `scripts/release-version.mjs`, `release-notes.mjs`,
+  `publish-github-release.mjs`, `package-portable.mjs`
