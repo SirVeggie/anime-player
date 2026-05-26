@@ -4,8 +4,6 @@ Running list of things to do / explore for the Anime Player app.
 
 ## General UI
 
-- [ ] Support custom thumbnail files (image with same name as parsed anime title)
-    - [ ] Rename feature also renames custom thumbnail
 - [ ] Combine detection regexes into one, we probably only need the second one?
     - Could have separate regex for title and episode number, then wouldn't need duplicate rules if episode doesn't match
 - [x] Natural window close saves current episode progress to SQLite (`onCloseRequested`); crashes / kill still skip save
@@ -32,7 +30,7 @@ Episode selection page features
 ## Keybindings
 
 - [ ] Add keybind setting support (as a separate page)
-- [ ] Ability to change the existing keyboard shortcuts
+    - [ ] Ability to change the existing keyboard shortcuts
 - [x] Add keybind for skipping 28 seconds (forwards and backwards).
 - [x] Add keybind for skipping 85 seconds (forwards and backwards).
 
