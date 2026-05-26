@@ -130,7 +130,7 @@ fn seed_defaults(conn: &Connection) -> Result<(), String> {
                  1, 9),
                 (3, 'Series',
                  '.',
-                 '(?i)^(\[\w+\])?(?P<title>.*?(S\d+|[.\- ]))E(?P<episode>\d+)',
+                 '(?i)^(\\[\\w+\\])?(?P<title>.*?(S\\d+|[.\\- ]))E(?P<episode>\\d+)',
                  1, 8),
                 (4, 'Simple',
                  '^([\\w, ]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
