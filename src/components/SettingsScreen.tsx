@@ -8,6 +8,7 @@ import type {
   RegexRuleInput,
   RootFolder,
 } from "../types";
+import { CustomCheckbox } from "./CustomCheckbox";
 import { ViewHeader } from "./ViewHeader";
 
 const EMPTY_RULE: RegexRuleInput = {
@@ -310,21 +311,11 @@ function RuleEditor(props: {
     >
       <div className="rule-editor-heading">
         <strong>{title}</strong>
-        <label className="custom-checkbox">
-          <input
-            type="checkbox"
-            checked={draft.enabled}
-            onChange={(e) => {
-              // Read the event field synchronously: React's functional updater
-              // can run twice under StrictMode, and by the second pass `e.currentTarget`
-              // has been nulled, throwing inside RuleEditor and unmounting the whole tree.
-              const enabled = e.currentTarget.checked;
-              setDraft((current) => ({ ...current, enabled }));
-            }}
-          />
-          <span className="custom-checkbox__box" aria-hidden />
-          <span className="custom-checkbox__text">Enabled</span>
-        </label>
+        <CustomCheckbox
+          checked={draft.enabled}
+          onChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
+          label="Enabled"
+        />
       </div>
       <div className="form-grid">
         <label>
