@@ -191,6 +191,12 @@ impl MpvHandle {
         self.command(&["seek", &s, "absolute"])
     }
 
+    /// Fast absolute seek to the nearest keyframe (for scrub preview).
+    pub fn seek_absolute_keyframes(&self, seconds: f64) -> Result<(), String> {
+        let s = format!("{seconds}");
+        self.command(&["seek", &s, "absolute+keyframes"])
+    }
+
     /// Relative seek in seconds (may be negative).
     pub fn seek_relative(&self, seconds: f64) -> Result<(), String> {
         let s = format!("{seconds}");

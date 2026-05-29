@@ -161,10 +161,18 @@ fn mpv_get_video_geometry(
 
 #[cfg(windows)]
 #[tauri::command]
-fn mpv_seek(state: State<'_, AppState>, seconds: f64) -> Result<(), String> {
+fn mpv_seek(
+    state: State<'_, AppState>,
+    seconds: f64,
+    keyframe: Option<bool>,
+) -> Result<(), String> {
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
-        m.seek_absolute(seconds)?;
+        if keyframe == Some(true) {
+            m.seek_absolute_keyframes(seconds)?;
+        } else {
+            m.seek_absolute(seconds)?;
+        }
     }
     Ok(())
 }

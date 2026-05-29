@@ -46,19 +46,29 @@ function parentDirFromPath(path: string) {
   return separatorIndex >= 0 ? path.slice(0, separatorIndex) : null;
 }
 
+const SCRUB_PREVIEW_MIN_INTERVAL_MS = 50;
+const SCRUB_PREVIEW_MIN_DELTA_SECONDS = 0.25;
+
 function SeekBar(props: {
   duration: number;
   position: number;
-  onSeek: (seconds: number) => void;
+  onScrubStart?: () => void;
+  onScrubPreview: (seconds: number) => void;
+  onScrubEnd: (seconds: number) => void;
   onInteractionChange?: (active: boolean) => void;
   sprite?: ScrubSpriteReady | null;
 }) {
-  const { duration, position, onSeek, onInteractionChange, sprite } = props;
+  const { duration, position, onScrubStart, onScrubPreview, onScrubEnd, onInteractionChange, sprite } =
+    props;
   const areaRef = useRef<HTMLDivElement>(null);
   const durationRef = useRef(duration);
-  const onSeekRef = useRef(onSeek);
+  const onScrubStartRef = useRef(onScrubStart);
+  const onScrubPreviewRef = useRef(onScrubPreview);
+  const onScrubEndRef = useRef(onScrubEnd);
   durationRef.current = duration;
-  onSeekRef.current = onSeek;
+  onScrubStartRef.current = onScrubStart;
+  onScrubPreviewRef.current = onScrubPreview;
+  onScrubEndRef.current = onScrubEnd;
 
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
@@ -68,6 +78,11 @@ function SeekBar(props: {
   const [hoverRatio, setHoverRatio] = useState(0);
   const [hoverTime, setHoverTime] = useState(0);
   const dragListenersCleanup = useRef<(() => void) | null>(null);
+  const previewRafRef = useRef<number | null>(null);
+  const pendingPreviewSecondsRef = useRef<number | null>(null);
+  const lastPreviewSecondsRef = useRef<number | null>(null);
+  const lastPreviewAtMsRef = useRef(0);
+  const lastScrubSecondsRef = useRef(0);
 
   const clampRatio = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -79,7 +94,56 @@ function SeekBar(props: {
     return clampRatio((clientX - rect.left) / rect.width);
   };
 
+  const cancelPreviewRaf = () => {
+    if (previewRafRef.current !== null) {
+      cancelAnimationFrame(previewRafRef.current);
+      previewRafRef.current = null;
+    }
+    pendingPreviewSecondsRef.current = null;
+  };
+
+  const emitPreviewSeek = (seconds: number, force: boolean) => {
+    const now = performance.now();
+    const lastSeconds = lastPreviewSecondsRef.current;
+    const elapsed = now - lastPreviewAtMsRef.current;
+    if (
+      !force &&
+      lastSeconds !== null &&
+      elapsed < SCRUB_PREVIEW_MIN_INTERVAL_MS &&
+      Math.abs(seconds - lastSeconds) < SCRUB_PREVIEW_MIN_DELTA_SECONDS
+    ) {
+      return;
+    }
+    lastPreviewSecondsRef.current = seconds;
+    lastPreviewAtMsRef.current = now;
+    onScrubPreviewRef.current(seconds);
+  };
+
+  const flushPendingPreview = (force: boolean) => {
+    const pending = pendingPreviewSecondsRef.current;
+    if (pending === null) return;
+    pendingPreviewSecondsRef.current = null;
+    emitPreviewSeek(pending, force);
+  };
+
+  const schedulePreviewSeek = (seconds: number, force: boolean) => {
+    if (force) {
+      cancelPreviewRaf();
+      emitPreviewSeek(seconds, true);
+      return;
+    }
+    pendingPreviewSecondsRef.current = seconds;
+    if (previewRafRef.current !== null) return;
+    previewRafRef.current = requestAnimationFrame(() => {
+      previewRafRef.current = null;
+      flushPendingPreview(false);
+    });
+  };
+
   const detachDragListeners = () => {
+    cancelPreviewRaf();
+    lastPreviewSecondsRef.current = null;
+    lastPreviewAtMsRef.current = 0;
     dragListenersCleanup.current?.();
     dragListenersCleanup.current = null;
   };
@@ -121,22 +185,33 @@ function SeekBar(props: {
     setHoverTime(ratio * durationRef.current);
     setShowHoverTime(true);
 
+    const initialSeconds = ratio * durationRef.current;
+    lastScrubSecondsRef.current = initialSeconds;
+    onScrubStartRef.current?.();
+    schedulePreviewSeek(initialSeconds, true);
+
     const onMove = (ev: PointerEvent) => {
       if (!isDraggingRef.current || ev.pointerId !== activePointerId.current) return;
       const r = getRatioFromClientX(ev.clientX);
+      const seconds = r * durationRef.current;
+      lastScrubSecondsRef.current = seconds;
       setDragRatio(r);
       setHoverRatio(r);
-      setHoverTime(r * durationRef.current);
+      setHoverTime(seconds);
+      schedulePreviewSeek(seconds, false);
     };
     const onUp = (ev: PointerEvent) => {
       if (!isDraggingRef.current || ev.pointerId !== activePointerId.current) return;
+      cancelPreviewRaf();
       const r = getRatioFromClientX(ev.clientX);
-      onSeekRef.current(r * durationRef.current);
+      onScrubEndRef.current(r * durationRef.current);
       stopDragging(ev);
       setShowHoverTime(false);
     };
     const onCancel = (ev: PointerEvent) => {
       if (ev.pointerId !== activePointerId.current) return;
+      cancelPreviewRaf();
+      onScrubEndRef.current(lastScrubSecondsRef.current);
       stopDragging(ev);
       setShowHoverTime(false);
     };
@@ -252,6 +327,9 @@ export function PlayerView(props: {
   const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [seekInteracting, setSeekInteracting] = useState(false);
+  const seekInteractingRef = useRef(false);
+  const wasPlayingBeforeScrubRef = useRef(false);
+  const pausedRef = useRef(true);
   const [scrubSprite, setScrubSprite] = useState<ScrubSpriteReady | null>(null);
   const scrubSpritePathRef = useRef<string | null>(null);
   const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
@@ -287,6 +365,10 @@ export function PlayerView(props: {
   const sessionOpenedAsWatchedRef = useRef(episode.watched);
   const sessionEpisodeSnapshotRef = useRef(episode);
   const userRequestedStartResetRef = useRef(false);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     void getMinPositionSecondsToPersist().then((seconds) => {
@@ -563,7 +645,9 @@ export function PlayerView(props: {
         [
           "mpv://time-pos",
           (e) => {
-            if (typeof e.payload === "number") setPosition(e.payload);
+            if (typeof e.payload === "number" && !seekInteractingRef.current) {
+              setPosition(e.payload);
+            }
           },
         ],
         [
@@ -756,13 +840,44 @@ export function PlayerView(props: {
     void invoke("mpv_cycle_pause").catch((e) => onError(errorMessage(e)));
   }, [onError]);
 
-  const onSeekCommit = useCallback(
+  const onScrubStart = useCallback(() => {
+    seekInteractingRef.current = true;
+    const wasPlaying = !pausedRef.current;
+    wasPlayingBeforeScrubRef.current = wasPlaying;
+    if (wasPlaying) {
+      void invoke("mpv_set_pause", { paused: true }).catch((e) => onError(errorMessage(e)));
+      setPaused(true);
+    }
+  }, [onError]);
+
+  const onScrubPreview = useCallback(
+    (seconds: number) => {
+      setPosition(seconds);
+      void invoke("mpv_seek", { seconds, keyframe: true }).catch((e) => onError(errorMessage(e)));
+    },
+    [onError],
+  );
+
+  const onScrubEnd = useCallback(
     (seconds: number) => {
       if (seconds < minPositionSecondsToPersistRef.current) {
         userRequestedStartResetRef.current = true;
       }
       setPosition(seconds);
-      void invoke("mpv_seek", { seconds }).catch((e) => onError(errorMessage(e)));
+      const resume = wasPlayingBeforeScrubRef.current;
+      wasPlayingBeforeScrubRef.current = false;
+      seekInteractingRef.current = false;
+      void (async () => {
+        try {
+          await invoke("mpv_seek", { seconds, keyframe: false });
+          if (resume) {
+            await invoke("mpv_set_pause", { paused: false });
+            setPaused(false);
+          }
+        } catch (e) {
+          onError(errorMessage(e));
+        }
+      })();
     },
     [onError],
   );
@@ -1168,7 +1283,9 @@ export function PlayerView(props: {
           <SeekBar
             duration={safeDuration}
             position={Math.min(position, safeDuration || position)}
-            onSeek={onSeekCommit}
+            onScrubStart={onScrubStart}
+            onScrubPreview={onScrubPreview}
+            onScrubEnd={onScrubEnd}
             onInteractionChange={setSeekInteracting}
             sprite={scrubSprite}
           />

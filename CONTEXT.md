@@ -193,6 +193,11 @@ view components. Per-screen UI lives in `src/components/`:
   every five seconds capped at 120). The UI slices the sheet via CSS
   `background-position`; generation runs in the background and emits
   `scrub-sprite-ready` when finished.
+- Scrubber drag pauses playback (if it was playing), issues throttled
+  `mpv_seek` preview seeks with `keyframe: true` (`absolute+keyframes`),
+  then on release one exact `mpv_seek` and resumes only when playback was
+  active before the drag. `mpv://time-pos` updates are ignored while
+  scrubbing so the bar and time label follow the drag target.
 - The video pane uses Tauri `startDragging` (single left-click; skipped when
   the window is maximized or fullscreen) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
@@ -303,7 +308,8 @@ view components. Per-screen UI lives in `src/components/`:
     event named `mpv://<property>`.
 - Exposed mpv Tauri commands: `mpv_init(window_width, sidebar_px)`,
   `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_set_pause(paused)`,
-  `mpv_seek(seconds)`, `mpv_seek_relative(delta)`,
+  `mpv_seek(seconds, keyframe?)` (`keyframe: true` → `absolute+keyframes`;
+  default exact), `mpv_seek_relative(delta)`,
   `mpv_set_layout(window_width, sidebar_px)`, `mpv_get_tracks()`,
   `mpv_select_audio_track(track_id)`,
   `mpv_select_subtitle_track(track_id)`,
