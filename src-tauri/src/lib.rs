@@ -12,6 +12,8 @@ mod scanner;
 mod mpv;
 #[cfg(windows)]
 mod thumbnails;
+#[cfg(windows)]
+mod scrub_preview;
 
 #[cfg(windows)]
 use mpv::MpvHandle;
@@ -340,6 +342,7 @@ pub fn run() {
         anilist::apply_anilist_progress_to_local,
         anilist::set_anilist_media_score,
         thumbnails::get_file_thumbnail,
+        scrub_preview::ensure_scrub_sprite,
         mpv_init,
         mpv_load,
         mpv_cycle_pause,

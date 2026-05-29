@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+﻿import { invoke } from "@tauri-apps/api/core";
 import type {
   AnilistAuthState,
   AnilistLocalProgressApplyResult,
@@ -13,6 +13,7 @@ import type {
   LocalDataStats,
   MpvTrack,
   MpvVideoGeometry,
+  ScrubSpriteStatus,
   ProgressOverrideSummary,
   RegexRule,
   RegexRuleInput,
@@ -127,6 +128,10 @@ export function overrideAnimeProgress(animeId: number, progress: number): Promis
 
 export function getFileThumbnail(path: string, size: number): Promise<string | null> {
   return invoke("get_file_thumbnail", { path, size });
+}
+
+export function ensureScrubSprite(path: string): Promise<ScrubSpriteStatus> {
+  return invoke("ensure_scrub_sprite", { path });
 }
 
 export function getMpvTracks(): Promise<MpvTrack[]> {

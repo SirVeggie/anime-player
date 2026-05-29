@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addMpvSubtitleFile,
+  ensureScrubSprite,
   getMinPositionSecondsToPersist,
   getMpvTracks,
   getMpvVideoGeometry,
@@ -15,7 +16,14 @@ import {
   setMpvVolume,
   syncAnilistEpisodeProgress,
 } from "../api";
-import type { AnilistProgressSyncResult, Episode, MpvTrack, MpvVideoGeometry } from "../types";
+import type {
+  AnilistProgressSyncResult,
+  Episode,
+  MpvTrack,
+  MpvVideoGeometry,
+  ScrubSpriteReady,
+  ScrubSpriteStatus,
+} from "../types";
 import { errorMessage, formatTime, isTextInputTarget } from "../utils";
 import { HOTKEY_STEP, MAX_VOLUME, clampVolume, loadVolume, saveVolume } from "../volume";
 
@@ -43,8 +51,9 @@ function SeekBar(props: {
   position: number;
   onSeek: (seconds: number) => void;
   onInteractionChange?: (active: boolean) => void;
+  sprite?: ScrubSpriteReady | null;
 }) {
-  const { duration, position, onSeek, onInteractionChange } = props;
+  const { duration, position, onSeek, onInteractionChange, sprite } = props;
   const areaRef = useRef<HTMLDivElement>(null);
   const durationRef = useRef(duration);
   const onSeekRef = useRef(onSeek);
@@ -166,6 +175,21 @@ function SeekBar(props: {
   const displayProgressPercent =
     isDragging && dragRatio !== null ? dragRatio * 100 : progressPercent;
 
+  const previewIndex =
+    sprite && sprite.thumbCount > 0
+      ? Math.min(sprite.thumbCount - 1, Math.floor(hoverRatio * sprite.thumbCount))
+      : 0;
+  const previewCol = sprite ? previewIndex % sprite.cols : 0;
+  const previewRow = sprite ? Math.floor(previewIndex / sprite.cols) : 0;
+  const previewFrameStyle =
+    sprite ?
+      {
+        backgroundImage: `url(${sprite.dataUrl})`,
+        backgroundSize: `${sprite.cols * sprite.thumbWidth}px ${sprite.rows * sprite.thumbHeight}px`,
+        backgroundPosition: `-${previewCol * sprite.thumbWidth}px -${previewRow * sprite.thumbHeight}px`,
+      }
+    : undefined;
+
   return (
     <div
       ref={areaRef}
@@ -180,8 +204,9 @@ function SeekBar(props: {
       onMouseLeave={hideHoverTime}
     >
       {showHoverTime ? (
-        <div className="time-tooltip" style={{ left: `${hoverRatio * 100}%` }}>
-          {formatTime(hoverTime)}
+        <div className="scrub-preview" style={{ left: `${hoverRatio * 100}%` }}>
+          {sprite ? <div className="scrub-preview-frame" style={previewFrameStyle} aria-hidden /> : null}
+          <div className="time-tooltip">{formatTime(hoverTime)}</div>
         </div>
       ) : null}
       <div className="progress-bg">
@@ -227,6 +252,8 @@ export function PlayerView(props: {
   const [videoCompositorRevealed, setVideoCompositorRevealed] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [seekInteracting, setSeekInteracting] = useState(false);
+  const [scrubSprite, setScrubSprite] = useState<ScrubSpriteReady | null>(null);
+  const scrubSpritePathRef = useRef<string | null>(null);
   const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
@@ -266,6 +293,47 @@ export function PlayerView(props: {
       minPositionSecondsToPersistRef.current = seconds;
     });
   }, []);
+
+  useEffect(() => {
+    setScrubSprite(null);
+    scrubSpritePathRef.current = null;
+    let cancelled = false;
+    void ensureScrubSprite(episode.path)
+      .then((status) => {
+        if (cancelled) return;
+        if ("path" in status) {
+          scrubSpritePathRef.current = status.path;
+        }
+        if (status.status === "ready") {
+          setScrubSprite(status);
+        }
+      })
+      .catch(() => {
+        /* keep time-only tooltip */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [episode.path]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    void listen<ScrubSpriteStatus>("scrub-sprite-ready", (event) => {
+      const status = event.payload;
+      const activePath = scrubSpritePathRef.current;
+      if (!activePath || status.path !== activePath) return;
+      if (status.status === "ready") {
+        setScrubSprite(status);
+      } else if (status.status === "unavailable") {
+        setScrubSprite(null);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      void unlisten?.();
+    };
+  }, [episode.path]);
 
   // App passes inline-arrow handlers that change identity every render
   // (`onError`, `onClose`, etc.). If the listener-setup useEffect depends on
@@ -1102,6 +1170,7 @@ export function PlayerView(props: {
             position={Math.min(position, safeDuration || position)}
             onSeek={onSeekCommit}
             onInteractionChange={setSeekInteracting}
+            sprite={scrubSprite}
           />
           <div className="controls-main-viewport">
             <div className="controls-main">

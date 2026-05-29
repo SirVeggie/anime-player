@@ -187,6 +187,12 @@ view components. Per-screen UI lives in `src/components/`:
   the window (unless a seek, track menu, or volume popup is active), and
   are revealed by mouse movement, active menu/seek interaction, or **C**
   to toggle visibility.
+- Scrubber hover shows a floating thumbnail plus timestamp. On file open,
+  `ensure_scrub_sprite` builds or loads a tiled JPEG sprite sheet under
+  `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
+  every five seconds capped at 120). The UI slices the sheet via CSS
+  `background-position`; generation runs in the background and emits
+  `scrub-sprite-ready` when finished.
 - The video pane uses Tauri `startDragging` (single left-click; skipped when
   the window is maximized or fullscreen) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
@@ -303,6 +309,9 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_select_subtitle_track(track_id)`,
   `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
   `mpv_set_volume(volume)`, and `mpv_stop()`.
+- `scrub_preview.rs` — `ensure_scrub_sprite(path)` returns ready /
+  generating / unavailable; caches sprite JPEG + JSON metadata beside the
+  portable database and cancels in-flight generation when the path changes.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.

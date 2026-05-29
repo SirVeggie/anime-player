@@ -1,4 +1,4 @@
-export type RootFolder = {
+﻿export type RootFolder = {
   id: number;
   path: string;
 };
@@ -185,3 +185,19 @@ export type AnilistLocalProgressApplyResult = {
   progress: number;
   updated_episodes: number;
 };
+
+export type ScrubSpriteReady = {
+  path: string;
+  dataUrl: string;
+  cols: number;
+  rows: number;
+  thumbWidth: number;
+  thumbHeight: number;
+  thumbCount: number;
+  intervalSec: number;
+};
+
+export type ScrubSpriteStatus =
+  | ({ status: "ready" } & ScrubSpriteReady)
+  | { status: "generating"; path: string }
+  | { status: "unavailable"; path: string };

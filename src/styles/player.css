@@ -211,18 +211,37 @@
   transform: translate(-50%, -50%) scale(1.35);
 }
 
-.time-tooltip {
+.scrub-preview {
   position: absolute;
   bottom: 12px;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.scrub-preview-frame {
+  width: 160px;
+  height: 90px;
+  border-radius: 6px;
+  border: 1px solid rgba(236, 243, 255, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  background-repeat: no-repeat;
+  background-color: #0a0a0a;
+}
+
+.scrub-preview .time-tooltip {
+  position: static;
+  transform: none;
   background: rgba(28, 28, 28, 0.85);
   color: #fff;
   font-size: 12px;
   padding: 4px 6px;
   border-radius: 6px;
-  pointer-events: none;
   white-space: nowrap;
-  z-index: 5;
   font-variant-numeric: tabular-nums;
 }
 

@@ -24,7 +24,7 @@ Episode selection page features
 
 ## Video Player
 
-- [ ] Show preview when hovering the scrubber
+- [x] ~~Show preview when hovering the scrubber~~
 - [ ] Continuously seek when dragging the scrubber handle (works great in mpv, here could have performance issues)
 
 ## Keybindings
