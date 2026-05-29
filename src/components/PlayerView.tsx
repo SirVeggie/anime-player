@@ -280,7 +280,9 @@ function SeekBar(props: {
     >
       {showHoverTime ? (
         <div className="scrub-preview" style={{ left: `${hoverRatio * 100}%` }}>
-          {sprite ? <div className="scrub-preview-frame" style={previewFrameStyle} aria-hidden /> : null}
+          {sprite && !isDragging ?
+            <div className="scrub-preview-frame" style={previewFrameStyle} aria-hidden />
+          : null}
           <div className="time-tooltip">{formatTime(hoverTime)}</div>
         </div>
       ) : null}
