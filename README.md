@@ -116,9 +116,12 @@ Install dependencies and download the local libmpv artifacts:
 ```powershell
 npm install
 npm run setup:mpv
+npm run setup:ffmpeg
 ```
 
 You do not need a separate `mpv.exe` install. The setup script downloads `libmpv-2.dll` and `mpv.lib` into `src-tauri/libs/mpv/`; these generated files are intentionally not committed.
+
+OP/ED detection uses bundled `ffmpeg.exe` and `ffprobe.exe` from `npm run setup:ffmpeg` (stored under `src-tauri/libs/ffmpeg/`, also gitignored).
 
 ## Development: run and release builds
 
