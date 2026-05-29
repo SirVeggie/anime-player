@@ -226,9 +226,11 @@ fn generate_sprite(
     let ffmpeg = ffmpeg_path()?;
     let output = Command::new(&ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-hwaccel", "auto"])
+        .args(["-skip_frame", "nokey"])
         .arg("-i")
         .arg(path)
-        .args(["-an", "-vf", &vf, "-frames:v", "1", "-q:v", "5"])
+        .args(["-an", "-vf", &vf, "-vsync", "0", "-frames:v", "1", "-q:v", "5"])
         .arg(&tmp_jpg)
         .output()
         .map_err(|e| format!("failed to run ffmpeg: {e}"))?;

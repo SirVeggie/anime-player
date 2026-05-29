@@ -190,9 +190,11 @@ view components. Per-screen UI lives in `src/components/`:
 - Scrubber hover shows a floating thumbnail plus timestamp. On file open,
   `ensure_scrub_sprite` builds or loads a tiled JPEG sprite sheet under
   `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
-  every five seconds capped at 120). The UI slices the sheet via CSS
-  `background-position`; generation runs in the background and emits
-  `scrub-sprite-ready` when finished.
+  every five seconds capped at 120). Generation uses ffmpeg with `-hwaccel auto`
+  and `-skip_frame nokey` so keyframes are hardware-decoded when possible;
+  the `fps` filter still spaces thumbs at the same interval.
+  The UI slices the sheet via CSS `background-position`; generation runs in the
+  background and emits `scrub-sprite-ready` when finished.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads
