@@ -14,6 +14,8 @@ mod mpv;
 mod thumbnails;
 #[cfg(windows)]
 mod scrub_preview;
+#[cfg(windows)]
+mod jobs;
 
 #[cfg(windows)]
 use mpv::MpvHandle;
@@ -278,6 +280,11 @@ pub fn run() {
             #[cfg(windows)]
             {
                 app.manage(AppState::default());
+                let db_ref = app.state::<db::AppDatabase>();
+                app.manage(jobs::JobsState::new(
+                    app.handle().clone(),
+                    db_ref.inner(),
+                ));
 
                 // Tear libmpv down before the main window's HWND becomes
                 // invalid, and re-issue the video margin natively on every
@@ -358,7 +365,13 @@ pub fn run() {
         anilist::apply_anilist_progress_to_local,
         anilist::set_anilist_media_score,
         thumbnails::get_file_thumbnail,
-        scrub_preview::ensure_scrub_sprite,
+        scrub_preview::get_scrub_sprite_if_ready_cmd,
+        scrub_preview::scrub_sprite_is_cached_cmd,
+        jobs::jobs_get_snapshot,
+        jobs::jobs_set_max_parallel,
+        jobs::jobs_cancel,
+        jobs::jobs_cancel_all,
+        jobs::jobs_enqueue_scrub_sprite,
         mpv_init,
         mpv_load,
         mpv_cycle_pause,

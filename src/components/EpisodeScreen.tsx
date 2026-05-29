@@ -1,6 +1,11 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getAnilistCoverImage, getFileThumbnail, getMatchingDetectionRuleName } from "../api";
+import {
+  getAnilistCoverImage,
+  getFileThumbnail,
+  getMatchingDetectionRuleName,
+  jobsEnqueueScrubSprite,
+} from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
@@ -275,6 +280,30 @@ export function EpisodeScreen(props: {
       cancelled = true;
     };
   }, [episodes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const animeTitle = anime.anilist_title?.trim() || anime.title;
+
+    for (const episode of episodes) {
+      const episodeLabel = isEpisodeNumberKnown(episode.episode_number)
+        ? formatEpisodeNumber(episode.episode_number)
+        : episode.file_name;
+      void jobsEnqueueScrubSprite({
+        path: episode.path,
+        priority: "low",
+        animeTitle,
+        episodeLabel,
+      }).catch(() => {
+        /* background queue; ignore */
+      });
+      if (cancelled) break;
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [anime.anilist_title, anime.title, episodes]);
 
   const closeLinkSearch = useCallback(() => {
     linkSearchRequestRef.current += 1;

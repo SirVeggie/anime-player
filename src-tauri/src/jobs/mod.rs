@@ -1,0 +1,130 @@
+mod manager;
+mod types;
+
+pub use types::*;
+
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Manager, State};
+
+use crate::db::AppDatabase;
+
+use manager::{JobManager, WorkerOutcome};
+
+#[cfg(windows)]
+pub struct JobsState {
+    pub manager: Mutex<JobManager>,
+}
+
+#[cfg(windows)]
+impl JobsState {
+    pub fn new(app: AppHandle, db: &AppDatabase) -> Self {
+        Self {
+            manager: Mutex::new(JobManager::new(app, db)),
+        }
+    }
+}
+
+#[cfg(windows)]
+pub fn notify_job_step(app: &AppHandle, job_id: &str, current: u32, total: u32, label: &str) {
+    let Some(state) = app.try_state::<JobsState>() else {
+        return;
+    };
+    if let Ok(mut guard) = state.manager.lock() {
+        guard.update_step(job_id, current, total, label);
+    };
+}
+
+#[cfg(windows)]
+fn with_manager<T>(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    f: impl FnOnce(&mut JobManager, &AppDatabase) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+    f(&mut guard, &db)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_get_snapshot(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+) -> Result<JobsSnapshot, String> {
+    with_manager(jobs, db, |manager, _| Ok(manager.snapshot()))
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_set_max_parallel(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    max_parallel: u32,
+) -> Result<(), String> {
+    with_manager(jobs, db, |manager, db| manager.set_max_parallel(db, max_parallel))
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_cancel(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    job_id: String,
+) -> Result<(), String> {
+    with_manager(jobs, db, |manager, _| {
+        manager.cancel(&job_id)?;
+        manager.emit_snapshot();
+        Ok(())
+    })
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_cancel_all(jobs: State<'_, JobsState>, db: State<'_, AppDatabase>) -> Result<(), String> {
+    with_manager(jobs, db, |manager, _| {
+        manager.cancel_all();
+        manager.emit_snapshot();
+        Ok(())
+    })
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_enqueue_scrub_sprite(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    request: EnqueueScrubSpriteJob,
+) -> Result<EnqueueJobResult, String> {
+    with_manager(jobs, db, |manager, _| manager.enqueue_scrub_sprite(request))
+}
+
+#[cfg(windows)]
+fn complete_worker_task(app: AppHandle, job_id: String, outcome: WorkerOutcome) {
+    let Some(jobs_state) = app.try_state::<JobsState>() else {
+        return;
+    };
+    if let Ok(mut guard) = jobs_state.manager.lock() {
+        guard.complete_worker(&job_id, outcome);
+    };
+}
+
+#[cfg(windows)]
+pub fn spawn_scrub_worker(app: AppHandle, job_id: String, path: String, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    tauri::async_runtime::spawn(async move {
+        let path_for_outcome = path.clone();
+        let job_id_for_step = job_id.clone();
+        let app_for_step = app.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            manager::run_scrub_job_worker(&path, &cancel, |step, total, label| {
+                notify_job_step(&app_for_step, &job_id_for_step, step, total, label);
+            })
+        })
+        .await;
+
+        let outcome = match outcome {
+            Ok(o) => o,
+            Err(e) => WorkerOutcome::Failed(e.to_string(), Some(path_for_outcome)),
+        };
+        complete_worker_task(app, job_id, outcome);
+    });
+}

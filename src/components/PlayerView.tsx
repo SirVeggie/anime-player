@@ -6,7 +6,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addMpvSubtitleFile,
-  ensureScrubSprite,
+  getScrubSpriteIfReady,
+  jobsEnqueueScrubSprite,
   getMinPositionSecondsToPersist,
   getMpvTimePos,
   getMpvTracks,
@@ -385,25 +386,34 @@ export function PlayerView(props: {
 
   useEffect(() => {
     setScrubSprite(null);
-    scrubSpritePathRef.current = null;
+    scrubSpritePathRef.current = episode.path;
     let cancelled = false;
-    void ensureScrubSprite(episode.path)
-      .then((status) => {
-        if (cancelled) return;
-        if ("path" in status) {
-          scrubSpritePathRef.current = status.path;
-        }
-        if (status.status === "ready") {
-          setScrubSprite(status);
-        }
-      })
-      .catch(() => {
-        /* keep time-only tooltip */
-      });
+
+    const loadSprite = () => {
+      void getScrubSpriteIfReady(episode.path)
+        .then((ready) => {
+          if (cancelled || !ready) return;
+          setScrubSprite(ready);
+        })
+        .catch(() => {
+          /* keep time-only tooltip */
+        });
+    };
+
+    loadSprite();
+    void jobsEnqueueScrubSprite({
+      path: episode.path,
+      priority: "high",
+      episodeLabel: episode.file_name,
+    }).catch(() => {
+      /* keep time-only tooltip */
+    });
+
     return () => {
       cancelled = true;
+      scrubSpritePathRef.current = null;
     };
-  }, [episode.path]);
+  }, [episode.path, episode.file_name]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;

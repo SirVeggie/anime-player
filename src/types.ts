@@ -199,5 +199,57 @@ export type ScrubSpriteReady = {
 
 export type ScrubSpriteStatus =
   | ({ status: "ready" } & ScrubSpriteReady)
-  | { status: "generating"; path: string }
   | { status: "unavailable"; path: string };
+
+export type JobPriority = "low" | "medium" | "high";
+
+export type JobStatus = "queued" | "running" | "done" | "failed" | "canceled";
+
+export type JobProgress = {
+  currentStep: number;
+  totalSteps: number;
+};
+
+export type JobRecord = {
+  id: string;
+  name: string;
+  desc: string;
+  identity: string;
+  jobType: string;
+  priority: JobPriority;
+  status: JobStatus;
+  cancelable: boolean;
+  progress: JobProgress;
+  stepLabel: string;
+  completionMessage: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+};
+
+export type JobsSnapshot = {
+  active: JobRecord[];
+  history: JobRecord[];
+  maxParallel: number;
+  activeCount: number;
+};
+
+export type EnqueueJobResult = {
+  jobId: string | null;
+  skipped: boolean;
+};
+
+export type EnqueueScrubSpriteJob = {
+  path: string;
+  priority: JobPriority;
+  animeTitle?: string | null;
+  episodeLabel?: string | null;
+  followUp?: EnqueueScrubSpriteJob[];
+};
+
+export type JobFinishedEvent = {
+  jobId: string;
+  identity: string;
+  jobType: string;
+  status: JobStatus;
+};

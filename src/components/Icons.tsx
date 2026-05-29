@@ -38,6 +38,14 @@ export function MissingIcon() {
   );
 }
 
+export function JobsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M6 3.75A1.75 1.75 0 0 1 7.75 2h8.5A1.75 1.75 0 0 1 18 3.75V7H6V3.75zM7.5 4.5v1.5h9V4.5h-9zM4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5v12A1.5 1.5 0 0 1 18.5 22h-13A1.5 1.5 0 0 1 4 20.5v-12zM5.5 8.5v11h13v-11h-13zM8 11h2v2H8v-2zm3 0h2v2h-2v-2zm3 0h2v2h-2v-2zM8 14.5h2v2H8v-2zm3 0h2v2h-2v-2zm3 0h2v2h-2v-2z" />
+    </svg>
+  );
+}
+
 export function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>

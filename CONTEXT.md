@@ -25,7 +25,7 @@ The frontend is split so `App.tsx` only owns top-level state (library data,
 view selection, async handlers, toasts, F11 / Esc / Q hotkeys) and composes the
 view components. Per-screen UI lives in `src/components/`:
 `WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
-`EpisodeScreen.tsx`, `BulkEditScreen.tsx`, `SettingsScreen.tsx` (plus the local
+`EpisodeScreen.tsx`, `BulkEditScreen.tsx`, `JobsScreen.tsx`, `SettingsScreen.tsx` (plus the local
 `RuleEditor`), `PlayerView.tsx`, `ViewHeader.tsx`, `CustomDropdown.tsx`,
 `ToastStack.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
 `EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
@@ -47,6 +47,16 @@ view components. Per-screen UI lives in `src/components/`:
   category. Its filename replacer tab scans all video files under configured
   root folders, so malformed files that are not yet detected as episodes can be
   renamed and then imported by the follow-up rescan.
+- A **Jobs** sidebar page (between Settings and Rescan) lists queued/running
+  background work and job history (two tabs, like Bulk Edit). The nav icon shows
+  a badge with the count of queued + running jobs. **Max parallel jobs** (1–8,
+  default 2, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
+  jobs may run at once for scheduling low/medium work (high-priority jobs count
+  toward that cap but are never blocked by it—e.g. six low jobs at the limit can
+  still be joined by a seventh high job). Jobs dedupe by `identity`, support cancel/cancel-all,
+  progress steps, and emit `jobs://updated` / `jobs://finished`. Frontend
+  helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
+  `onJobIdentityFinished`).
 - The anime grid header includes a sort dropdown (alphabetical, most recent
   episode, last watched, episode/remaining counts); the choice is persisted in
   `localStorage` under `animePlayer.animeGridSort`. **Most recent** sorts by
@@ -187,14 +197,15 @@ view components. Per-screen UI lives in `src/components/`:
   the window (unless a seek, track menu, or volume popup is active), and
   are revealed by mouse movement, active menu/seek interaction, or **C**
   to toggle visibility.
-- Scrubber hover shows a floating thumbnail plus timestamp. On file open,
-  `ensure_scrub_sprite` builds or loads a tiled JPEG sprite sheet under
-  `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
-  every five seconds capped at 120). Generation uses ffmpeg with `-hwaccel auto`
-  and `-skip_frame nokey` so keyframes are hardware-decoded when possible;
-  the `fps` filter still spaces thumbs at the same interval.
-  The UI slices the sheet via CSS `background-position`; generation runs in the
-  background and emits `scrub-sprite-ready` when finished.
+- Scrubber hover shows a floating thumbnail plus timestamp. Sprite sheets live
+  under `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
+  every five seconds capped at 120). **Scrub thumbnail** work runs as background
+  jobs (`jobs_enqueue_scrub_sprite`): opening an anime’s episode list queues
+  low-priority jobs for uncached episodes; opening the player queues a
+  high-priority job for the current file. `get_scrub_sprite_if_ready` reads the
+  cache synchronously; finished jobs emit `scrub-sprite-ready`. Generation uses
+  ffmpeg with `-hwaccel auto` and `-skip_frame nokey`. The UI slices the sheet
+  via CSS `background-position`.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads
@@ -319,9 +330,11 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_select_subtitle_track(track_id)`,
   `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
   `mpv_get_time_pos()`, `mpv_set_volume(volume)`, and `mpv_stop()`.
-- `scrub_preview.rs` — `ensure_scrub_sprite(path)` returns ready /
-  generating / unavailable; caches sprite JPEG + JSON metadata beside the
-  portable database and cancels in-flight generation when the path changes.
+- `scrub_preview.rs` — sprite cache I/O and ffmpeg generation;
+  `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
+- `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,
+  dedupe), scrub-sprite worker; commands `jobs_get_snapshot`, `jobs_enqueue_scrub_sprite`,
+  `jobs_cancel`, `jobs_cancel_all`, `jobs_set_max_parallel`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.

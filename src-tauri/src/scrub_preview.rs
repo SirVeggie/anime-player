@@ -2,7 +2,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -17,6 +16,7 @@ const THUMB_HEIGHT: u32 = 90;
 const MIN_THUMBS: u32 = 20;
 const MAX_THUMBS: u32 = 120;
 const THUMB_INTERVAL_SEC: f64 = 5.0;
+const SCRUB_JOB_NAME: &str = "scrub_sprite";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,7 +35,6 @@ pub struct ScrubSpriteReady {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ScrubSpriteStatus {
     Ready(ScrubSpriteReady),
-    Generating { path: String },
     Unavailable { path: String },
 }
 
@@ -50,13 +49,6 @@ struct ScrubSpriteMeta {
     interval_sec: f64,
     source_path: String,
 }
-
-struct ActiveGeneration {
-    path: String,
-    cancel: Arc<AtomicBool>,
-}
-
-static ACTIVE_GENERATION: Mutex<Option<ActiveGeneration>> = Mutex::new(None);
 
 fn portable_data_dir() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("failed to resolve exe path: {e}"))?;
@@ -80,7 +72,7 @@ fn ffmpeg_path() -> Result<PathBuf, String> {
     if dev.is_file() {
         return Ok(dev);
     }
-    Err("ffmpeg.exe not found ÔÇö run: npm run setup:ffmpeg".to_string())
+    Err("ffmpeg.exe not found — run: npm run setup:ffmpeg".to_string())
 }
 
 fn ffprobe_path() -> Result<PathBuf, String> {
@@ -89,10 +81,10 @@ fn ffprobe_path() -> Result<PathBuf, String> {
     if probe.is_file() {
         return Ok(probe);
     }
-    Err("ffprobe.exe not found ÔÇö run: npm run setup:ffmpeg".to_string())
+    Err("ffprobe.exe not found — run: npm run setup:ffmpeg".to_string())
 }
 
-fn normalized_video_path(path: &str) -> Result<PathBuf, String> {
+pub fn normalized_video_path(path: &str) -> Result<PathBuf, String> {
     let path_buf = PathBuf::from(path);
     if !path_buf.is_file() {
         return Err(format!("video file not found: {path}"));
@@ -102,7 +94,7 @@ fn normalized_video_path(path: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("failed to canonicalize {path}: {e}"))
 }
 
-fn cache_key(path: &Path) -> Result<String, String> {
+pub fn cache_key(path: &Path) -> Result<String, String> {
     let meta = fs::metadata(path).map_err(|e| format!("failed to stat {}: {e}", path.display()))?;
     let modified = meta
         .modified()
@@ -124,6 +116,21 @@ fn sprite_cache_dir() -> Result<PathBuf, String> {
     let dir = portable_data_dir()?.join(SPRITE_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
     Ok(dir)
+}
+
+pub fn scrub_sprite_identity(path: &str) -> Result<String, String> {
+    let path_buf = normalized_video_path(path)?;
+    let canonical = path_buf.to_string_lossy().to_ascii_lowercase();
+    Ok(format!("{SCRUB_JOB_NAME}:{canonical}"))
+}
+
+pub fn scrub_sprite_is_cached(path: &str) -> Result<bool, String> {
+    let path_buf = normalized_video_path(path)?;
+    let key = cache_key(&path_buf)?;
+    let cache_dir = sprite_cache_dir()?;
+    let jpg_path = cache_dir.join(format!("{key}.jpg"));
+    let json_path = cache_dir.join(format!("{key}.json"));
+    Ok(jpg_path.is_file() && json_path.is_file())
 }
 
 fn probe_duration(path: &Path) -> Result<f64, String> {
@@ -169,7 +176,7 @@ fn read_data_url(path: &Path) -> Result<String, String> {
     ))
 }
 
-fn load_cached_ready(path: &str, key: &str) -> Result<Option<ScrubSpriteReady>, String> {
+pub fn load_cached_ready(path: &str, key: &str) -> Result<Option<ScrubSpriteReady>, String> {
     let cache_dir = sprite_cache_dir()?;
     let jpg_path = cache_dir.join(format!("{key}.jpg"));
     let json_path = cache_dir.join(format!("{key}.json"));
@@ -192,6 +199,17 @@ fn load_cached_ready(path: &str, key: &str) -> Result<Option<ScrubSpriteReady>, 
         thumb_count: meta.thumb_count,
         interval_sec: meta.interval_sec,
     }))
+}
+
+pub fn get_scrub_sprite_if_ready(path: &str) -> Result<Option<ScrubSpriteReady>, String> {
+    let path_buf = normalized_video_path(path)?;
+    let display_path = path_buf.to_string_lossy().into_owned();
+    let key = cache_key(&path_buf)?;
+    let mut ready = load_cached_ready(&display_path, &key)?;
+    if let Some(sprite) = ready.as_mut() {
+        sprite.path = display_path;
+    }
+    Ok(ready)
 }
 
 fn generate_sprite(
@@ -291,94 +309,42 @@ fn generate_sprite(
     })
 }
 
-fn cancel_active_generation() {
-    let mut guard = ACTIVE_GENERATION.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(active) = guard.take() {
-        active.cancel.store(true, Ordering::Relaxed);
-    }
-}
-
-fn start_generation(app: AppHandle, path: String, key: String) {
-    cancel_active_generation();
-
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut guard = ACTIVE_GENERATION.lock().unwrap_or_else(|e| e.into_inner());
-        *guard = Some(ActiveGeneration {
-            path: path.clone(),
-            cancel: Arc::clone(&cancel),
-        });
-    }
-
-    tauri::async_runtime::spawn(async move {
-        let path_for_job = path.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            let path_buf = PathBuf::from(&path_for_job);
-            generate_sprite(&path_buf, &key, &cancel)
-        })
-        .await;
-
-        let mut still_active = false;
-        {
-            let mut guard = ACTIVE_GENERATION.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(active) = guard.as_ref() {
-                still_active = active.path == path && !active.cancel.load(Ordering::Relaxed);
-            }
-            if still_active {
-                *guard = None;
-            }
-        }
-
-        if !still_active {
-            return;
-        }
-
-        let emit_path = path.clone();
-        match result {
-            Ok(Ok(ready)) => {
-                let _ = app.emit(
-                    "scrub-sprite-ready",
-                    ScrubSpriteStatus::Ready(ready),
-                );
-            }
-            Ok(Err(_)) | Err(_) => {
-                let _ = app.emit(
-                    "scrub-sprite-ready",
-                    ScrubSpriteStatus::Unavailable { path: emit_path },
-                );
-            }
-        }
-    });
-}
-
-fn ensure_scrub_sprite_blocking(app: &AppHandle, path: String) -> Result<ScrubSpriteStatus, String> {
-    let path_buf = match normalized_video_path(&path) {
-        Ok(path_buf) => path_buf,
-        Err(_) => return Ok(ScrubSpriteStatus::Unavailable { path }),
-    };
-    let path = path_buf.to_string_lossy().into_owned();
-
+/// Runs scrub sprite generation with step callbacks (used by the background job worker).
+pub fn run_scrub_sprite_job(
+    path: &str,
+    cancel: &AtomicBool,
+    on_step: impl Fn(u32, u32, &str),
+) -> Result<ScrubSpriteReady, String> {
+    let path_buf = normalized_video_path(path)?;
     let key = cache_key(&path_buf)?;
-    if let Some(mut ready) = load_cached_ready(&path, &key)? {
-        ready.path = path.clone();
-        return Ok(ScrubSpriteStatus::Ready(ready));
-    }
-    {
-        let guard = ACTIVE_GENERATION.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(active) = guard.as_ref() {
-            if active.path == path {
-                return Ok(ScrubSpriteStatus::Generating { path: path.clone() });
-            }
-        }
+    if let Some(ready) = load_cached_ready(path, &key)? {
+        return Ok(ready);
     }
 
-    start_generation(app.clone(), path.clone(), key);
-    Ok(ScrubSpriteStatus::Generating { path })
+    on_step(1, 2, "Probing duration");
+    let _duration = probe_duration(&path_buf)?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err("scrub sprite generation cancelled".to_string());
+    }
+
+    on_step(2, 2, "Generating sprite sheet");
+    generate_sprite(&path_buf, &key, cancel)
+}
+
+pub fn emit_scrub_sprite_status(app: &AppHandle, status: ScrubSpriteStatus) {
+    let _ = app.emit("scrub-sprite-ready", status);
 }
 
 #[tauri::command]
-pub async fn ensure_scrub_sprite(app: AppHandle, path: String) -> Result<ScrubSpriteStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || ensure_scrub_sprite_blocking(&app, path))
+pub async fn get_scrub_sprite_if_ready_cmd(path: String) -> Result<Option<ScrubSpriteReady>, String> {
+    tauri::async_runtime::spawn_blocking(move || get_scrub_sprite_if_ready(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn scrub_sprite_is_cached_cmd(path: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || scrub_sprite_is_cached(&path))
         .await
         .map_err(|e| e.to_string())?
 }

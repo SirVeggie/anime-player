@@ -157,6 +157,136 @@
   overflow-wrap: anywhere;
 }
 
+.jobs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.jobs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.jobs-cancel-all {
+  align-self: flex-end;
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.job-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.job-row-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.job-row-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.job-row-name-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-priority-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.job-priority-pill--low {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(180, 185, 195, 0.9);
+}
+
+.job-priority-pill--medium {
+  background: rgba(210, 153, 34, 0.12);
+  color: rgba(200, 175, 115, 0.95);
+}
+
+.job-priority-pill--high {
+  background: rgba(88, 166, 255, 0.14);
+  color: rgba(155, 190, 230, 0.95);
+}
+
+.job-row-desc {
+  word-break: break-all;
+}
+
+.job-status {
+  flex-shrink: 0;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.job-status--running {
+  color: var(--progress-color);
+}
+
+.job-status--done {
+  color: #3fb950;
+}
+
+.job-status--failed {
+  color: #f85149;
+}
+
+.job-status--canceled {
+  color: var(--text-muted);
+}
+
+.job-progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.job-progress-fill {
+  height: 100%;
+  background: var(--progress-color);
+  transition: width 0.2s ease;
+}
+
+.job-row-duration,
+.job-row-step,
+.job-row-completion {
+  font-size: 12px;
+}
+
+.job-row-cancel {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 .bulk-rename-preview-row strong {
   color: var(--text-muted);
   font-family: Roboto, system-ui, sans-serif;

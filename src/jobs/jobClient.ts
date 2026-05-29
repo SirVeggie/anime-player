@@ -1,0 +1,114 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { jobsGetSnapshot } from "../api";
+import type { JobFinishedEvent, JobRecord, JobStatus, JobsSnapshot } from "../types";
+
+type IdentityListener = (event: JobFinishedEvent) => void;
+
+const identityListeners = new Map<string, Set<IdentityListener>>();
+
+let snapshotListeners = new Set<(snapshot: JobsSnapshot) => void>();
+let started = false;
+
+function ensureGlobalListeners() {
+  if (started) return;
+  started = true;
+  void listen<JobsSnapshot>("jobs://updated", (event) => {
+    for (const cb of snapshotListeners) {
+      cb(event.payload);
+    }
+  });
+  void listen<JobFinishedEvent>("jobs://finished", (event) => {
+    const payload = event.payload;
+    const set = identityListeners.get(payload.identity);
+    if (!set) return;
+    for (const cb of set) {
+      cb(payload);
+    }
+  });
+}
+
+export function subscribeJobsSnapshot(listener: (snapshot: JobsSnapshot) => void): () => void {
+  ensureGlobalListeners();
+  snapshotListeners.add(listener);
+  void jobsGetSnapshot().then(listener).catch(() => {
+    /* ignore */
+  });
+  return () => {
+    snapshotListeners.delete(listener);
+  };
+}
+
+export function onJobIdentityFinished(identity: string, listener: IdentityListener): () => void {
+  ensureGlobalListeners();
+  let set = identityListeners.get(identity);
+  if (!set) {
+    set = new Set();
+    identityListeners.set(identity, set);
+  }
+  set.add(listener);
+  return () => {
+    const current = identityListeners.get(identity);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) {
+      identityListeners.delete(identity);
+    }
+  };
+}
+
+export function waitForJob(jobId: string): Promise<JobRecord> {
+  ensureGlobalListeners();
+  return new Promise((resolve, reject) => {
+    let unlistenFinished: UnlistenFn | undefined;
+    let unlistenUpdated: UnlistenFn | undefined;
+
+    const cleanup = () => {
+      void unlistenFinished?.();
+      void unlistenUpdated?.();
+    };
+
+    const terminal = new Set<JobStatus>(["done", "failed", "canceled"]);
+
+    void listen<JobFinishedEvent>("jobs://finished", (event) => {
+      if (event.payload.jobId !== jobId) return;
+      cleanup();
+      void jobsGetSnapshot()
+        .then((snapshot) => {
+          const record =
+            snapshot.history.find((j) => j.id === jobId) ??
+            snapshot.active.find((j) => j.id === jobId);
+          if (record) {
+            resolve(record);
+            return;
+          }
+          reject(new Error(`Job ${jobId} finished but was not found in snapshot`));
+        })
+        .catch(reject);
+    }).then((fn) => {
+      unlistenFinished = fn;
+    });
+
+    void listen<JobsSnapshot>("jobs://updated", (event) => {
+      const record = event.payload.active.find((j) => j.id === jobId);
+      if (!record || !terminal.has(record.status)) return;
+      cleanup();
+      resolve(record);
+    }).then((fn) => {
+      unlistenUpdated = fn;
+    });
+
+    void jobsGetSnapshot()
+      .then((snapshot) => {
+        const record =
+          snapshot.history.find((j) => j.id === jobId) ??
+          snapshot.active.find((j) => j.id === jobId);
+        if (record && terminal.has(record.status)) {
+          cleanup();
+          resolve(record);
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  });
+}

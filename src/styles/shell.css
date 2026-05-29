@@ -207,3 +207,20 @@
   background: var(--progress-color);
   transform: translateY(-50%);
 }
+
+.nav-item-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--progress-color);
+  border-radius: 999px;
+  pointer-events: none;
+}

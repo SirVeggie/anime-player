@@ -13,7 +13,10 @@ import type {
   LocalDataStats,
   MpvTrack,
   MpvVideoGeometry,
-  ScrubSpriteStatus,
+  EnqueueJobResult,
+  EnqueueScrubSpriteJob,
+  JobsSnapshot,
+  ScrubSpriteReady,
   ProgressOverrideSummary,
   RegexRule,
   RegexRuleInput,
@@ -130,8 +133,32 @@ export function getFileThumbnail(path: string, size: number): Promise<string | n
   return invoke("get_file_thumbnail", { path, size });
 }
 
-export function ensureScrubSprite(path: string): Promise<ScrubSpriteStatus> {
-  return invoke("ensure_scrub_sprite", { path });
+export function getScrubSpriteIfReady(path: string): Promise<ScrubSpriteReady | null> {
+  return invoke("get_scrub_sprite_if_ready_cmd", { path });
+}
+
+export function scrubSpriteIsCached(path: string): Promise<boolean> {
+  return invoke("scrub_sprite_is_cached_cmd", { path });
+}
+
+export function jobsGetSnapshot(): Promise<JobsSnapshot> {
+  return invoke("jobs_get_snapshot");
+}
+
+export function jobsSetMaxParallel(maxParallel: number): Promise<void> {
+  return invoke("jobs_set_max_parallel", { maxParallel });
+}
+
+export function jobsCancel(jobId: string): Promise<void> {
+  return invoke("jobs_cancel", { jobId });
+}
+
+export function jobsCancelAll(): Promise<void> {
+  return invoke("jobs_cancel_all");
+}
+
+export function jobsEnqueueScrubSprite(request: EnqueueScrubSpriteJob): Promise<EnqueueJobResult> {
+  return invoke("jobs_enqueue_scrub_sprite", { request });
 }
 
 export function getMpvTracks(): Promise<MpvTrack[]> {

@@ -47,7 +47,16 @@ import { AnimeGrid } from "./components/AnimeGrid";
 import { BulkEditScreen } from "./components/BulkEditScreen";
 import { CategoryScreen } from "./components/CategoryScreen";
 import { EpisodeScreen } from "./components/EpisodeScreen";
-import { BulkEditIcon, LibraryIcon, MissingIcon, RescanIcon, SearchIcon, SettingsIcon } from "./components/Icons";
+import {
+  BulkEditIcon,
+  JobsIcon,
+  LibraryIcon,
+  MissingIcon,
+  RescanIcon,
+  SearchIcon,
+  SettingsIcon,
+} from "./components/Icons";
+import { JobsScreen, useJobsSnapshot } from "./components/JobsScreen";
 import { MissingScreen } from "./components/MissingScreen";
 import { PlayerView } from "./components/PlayerView";
 import { SearchScreen } from "./components/SearchScreen";
@@ -73,7 +82,16 @@ import type {
 import { APP_WINDOW_TITLE, errorMessage, formatSize, isAnilistConnected, isTextInputTarget, shortenForOsTitle } from "./utils";
 import "./App.css";
 
-type View = "categories" | "anime" | "search" | "bulkEdit" | "missing" | "episodes" | "settings" | "player";
+type View =
+  | "categories"
+  | "anime"
+  | "search"
+  | "bulkEdit"
+  | "missing"
+  | "episodes"
+  | "jobs"
+  | "settings"
+  | "player";
 type EpisodeReturnView = "anime" | "search" | "bulkEdit" | "categories";
 type ScrollRestoration = "top" | "restore";
 
@@ -130,6 +148,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const jobsSnapshot = useJobsSnapshot();
   const [screenTransition, setScreenTransition] = useState<ScreenTransitionPhase>("idle");
   const screenTransitionRef = useRef<ScreenTransitionPhase>("idle");
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
@@ -271,6 +290,8 @@ function App() {
         return "missing";
       case "bulkEdit":
         return "bulkEdit";
+      case "jobs":
+        return "jobs";
       default:
         return view;
     }
@@ -985,7 +1006,7 @@ function App() {
         navigateToView(episodeReturnView, "restore");
         return;
       }
-      if (view === "settings") {
+      if (view === "settings" || view === "jobs") {
         navigateToView("categories", "restore");
       }
     };
@@ -1130,6 +1151,21 @@ function App() {
           </button>
           <button
             type="button"
+            className={view === "jobs" ? "nav-item active" : "nav-item"}
+            onClick={() => navigateToView("jobs")}
+            aria-label="Background jobs"
+            title="Background jobs"
+          >
+            <JobsIcon />
+            <span className="nav-label">Jobs</span>
+            {(jobsSnapshot?.activeCount ?? 0) > 0 ?
+              <span className="nav-item-badge" aria-hidden>
+                {jobsSnapshot!.activeCount > 99 ? "99+" : jobsSnapshot!.activeCount}
+              </span>
+            : null}
+          </button>
+          <button
+            type="button"
             className="nav-item nav-item--action"
             onClick={() => void handleRescan()}
             disabled={busy}
@@ -1229,6 +1265,14 @@ function App() {
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
               anilistConnected={isAnilistConnected(anilistAuth)}
+            />
+          ) : null}
+
+          {view === "jobs" ? (
+            <JobsScreen
+              snapshot={jobsSnapshot}
+              onBack={() => navigateToView("categories", "restore")}
+              onError={(message) => showToast("error", message)}
             />
           ) : null}
 
