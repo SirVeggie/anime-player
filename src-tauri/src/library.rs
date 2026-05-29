@@ -845,6 +845,11 @@ pub fn override_anime_progress(
 }
 
 #[tauri::command]
+pub fn get_min_position_seconds_to_persist() -> f64 {
+    MIN_POSITION_SECONDS_TO_PERSIST
+}
+
+#[tauri::command]
 pub fn save_episode_progress(
     db: State<'_, AppDatabase>,
     episode_id: i64,

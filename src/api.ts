@@ -157,6 +157,25 @@ export function stopMpv(): Promise<void> {
   return invoke("mpv_stop");
 }
 
+let minPositionSecondsToPersistCache: number | null = null;
+let minPositionSecondsToPersistPromise: Promise<number> | null = null;
+
+/** Mirrors `MIN_POSITION_SECONDS_TO_PERSIST` in `library.rs` (cached after first call). */
+export function getMinPositionSecondsToPersist(): Promise<number> {
+  if (minPositionSecondsToPersistCache !== null) {
+    return Promise.resolve(minPositionSecondsToPersistCache);
+  }
+  if (!minPositionSecondsToPersistPromise) {
+    minPositionSecondsToPersistPromise = invoke<number>("get_min_position_seconds_to_persist").then(
+      (value) => {
+        minPositionSecondsToPersistCache = value;
+        return value;
+      },
+    );
+  }
+  return minPositionSecondsToPersistPromise;
+}
+
 export function saveEpisodeProgress(
   episodeId: number,
   positionSeconds: number,

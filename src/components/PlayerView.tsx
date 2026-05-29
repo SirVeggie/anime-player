@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addMpvSubtitleFile,
+  getMinPositionSecondsToPersist,
   getMpvTracks,
   getMpvVideoGeometry,
   saveEpisodeProgress,
@@ -22,6 +23,8 @@ const PLAYER_SIDEBAR_PX = 0;
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
 /** Same ratio as `persistProgress` marking an episode watched without EOF. */
 const NEAR_END_PROGRESS_RATIO = 0.9;
+/** Brief revisits to an already-watched episode do not overwrite saved progress. */
+const WATCHED_PEEK_MAX_MS = 5 * 60 * 1000;
 const appWindow = getCurrentWindow();
 
 function sidebarPxForVisibility(visible: boolean) {
@@ -252,6 +255,17 @@ export function PlayerView(props: {
   // real false -> true transition (returning to the player), not on every
   // re-run from unrelated state changes.
   const wasVisibleRef = useRef(false);
+  const minPositionSecondsToPersistRef = useRef(60);
+  const sessionOpenedAtMsRef = useRef(Date.now());
+  const sessionOpenedAsWatchedRef = useRef(episode.watched);
+  const sessionEpisodeSnapshotRef = useRef(episode);
+  const userRequestedStartResetRef = useRef(false);
+
+  useEffect(() => {
+    void getMinPositionSecondsToPersist().then((seconds) => {
+      minPositionSecondsToPersistRef.current = seconds;
+    });
+  }, []);
 
   // App passes inline-arrow handlers that change identity every render
   // (`onError`, `onClose`, etc.). If the listener-setup useEffect depends on
@@ -362,6 +376,26 @@ export function PlayerView(props: {
 
   const persistProgress = useCallback(async (forceWatched = false) => {
     const current = playbackRef.current;
+
+    if (userRequestedStartResetRef.current) {
+      const saved = await saveEpisodeProgress(
+        current.episode.id,
+        current.position,
+        current.duration,
+        false,
+      );
+      propsRef.current.onProgressSaved(saved);
+      return saved;
+    }
+
+    if (
+      !forceWatched &&
+      sessionOpenedAsWatchedRef.current &&
+      Date.now() - sessionOpenedAtMsRef.current < WATCHED_PEEK_MAX_MS
+    ) {
+      return sessionEpisodeSnapshotRef.current;
+    }
+
     const watched =
       forceWatched ||
       (current.duration > 0 &&
@@ -541,6 +575,10 @@ export function PlayerView(props: {
   // while mpv still had the file loaded, which broke reopening the same episode from the list.
   useEffect(() => {
     handlingEofRef.current = false;
+    sessionOpenedAtMsRef.current = Date.now();
+    sessionOpenedAsWatchedRef.current = episode.watched;
+    sessionEpisodeSnapshotRef.current = episode;
+    userRequestedStartResetRef.current = false;
     setPosition(episode.position_seconds || 0);
     setDuration(episode.duration_seconds || 0);
     setTracks([]);
@@ -652,6 +690,9 @@ export function PlayerView(props: {
 
   const onSeekCommit = useCallback(
     (seconds: number) => {
+      if (seconds < minPositionSecondsToPersistRef.current) {
+        userRequestedStartResetRef.current = true;
+      }
       setPosition(seconds);
       void invoke("mpv_seek", { seconds }).catch((e) => onError(errorMessage(e)));
     },

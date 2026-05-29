@@ -88,7 +88,12 @@ view components. Per-screen UI lives in `src/components/`:
   when the adjusted local episode number is ahead of the viewer's current
   AniList progress; `persistProgress` in `PlayerView` awaits
   `syncAnilistEpisodeProgress` in that case (Q/back, EOF advance, episode
-  switches, and natural window close all use the same path). `tracker_offset` is per-title and is subtracted from parsed
+  switches, and natural window close all use the same path). Reopening an
+  episode that was already watched does not write new progress if the player
+  session lasts under five minutes, unless the user seeks into the start
+  period (`MIN_POSITION_SECONDS_TO_PERSIST`, exposed to the UI via
+  `get_min_position_seconds_to_persist`), which clears watched state through
+  the normal save path. `tracker_offset` is per-title and is subtracted from parsed
   episode numbers for display, AniList progress sync, and watched-progress
   import.
 - AniList progress import is conservative: opening or linking a title can mark
@@ -256,9 +261,11 @@ view components. Per-screen UI lives in `src/components/`:
   `set_anime_custom_thumbnail_path` updates/clears the optional per-title
   custom poster file path on `anime.custom_thumbnail_path`.
   `save_episode_progress` stores `position_seconds`
-  as 0 when the reported position is under 60 seconds so brief opens do
-  not leave a resume point; when `watched` is true (end-of-episode
-  threshold), it stores `position_seconds` at full duration (100%).
+  as 0 when the reported position is under `MIN_POSITION_SECONDS_TO_PERSIST`
+  (60 seconds) so brief opens do not leave a resume point; when `watched` is
+  true (end-of-episode threshold), it stores `position_seconds` at full
+  duration (100%). `get_min_position_seconds_to_persist` exposes that cutoff
+  to the frontend for start-reset detection in `PlayerView`.
 - `anilist.rs` owns the AniList OAuth, GraphQL, cover-cache, and progress/score
   sync layer. It stores an optional custom OAuth client ID, access token, and
   viewer metadata in `settings`; stores link metadata on `anime` rows
