@@ -15,6 +15,7 @@ import type {
   MpvVideoGeometry,
   EnqueueJobResult,
   EnqueueScrubSpriteJob,
+  JobPriority,
   JobsSnapshot,
   ScrubSpriteReady,
   ProgressOverrideSummary,
@@ -159,6 +160,17 @@ export function jobsCancelAll(): Promise<void> {
 
 export function jobsEnqueueScrubSprite(request: EnqueueScrubSpriteJob): Promise<EnqueueJobResult> {
   return invoke("jobs_enqueue_scrub_sprite", { request });
+}
+
+export function jobsSetJobPriority(jobId: string, priority: JobPriority): Promise<void> {
+  return invoke("jobs_set_job_priority", { jobId, priority });
+}
+
+export function jobsSetScrubSpritePriorityForPaths(
+  paths: string[],
+  priority: JobPriority,
+): Promise<void> {
+  return invoke("jobs_set_scrub_sprite_priority_for_paths", { paths, priority });
 }
 
 export function getMpvTracks(): Promise<MpvTrack[]> {

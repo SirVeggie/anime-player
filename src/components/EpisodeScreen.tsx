@@ -5,6 +5,7 @@ import {
   getFileThumbnail,
   getMatchingDetectionRuleName,
   jobsEnqueueScrubSprite,
+  jobsSetScrubSpritePriorityForPaths,
 } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
@@ -284,24 +285,29 @@ export function EpisodeScreen(props: {
   useEffect(() => {
     let cancelled = false;
     const animeTitle = anime.anilist_title?.trim() || anime.title;
+    const paths = episodes.map((episode) => episode.path);
 
     for (const episode of episodes) {
+      if (cancelled) break;
       const episodeLabel = isEpisodeNumberKnown(episode.episode_number)
         ? formatEpisodeNumber(episode.episode_number)
         : episode.file_name;
       void jobsEnqueueScrubSprite({
         path: episode.path,
-        priority: "low",
+        priority: "medium",
         animeTitle,
         episodeLabel,
       }).catch(() => {
         /* background queue; ignore */
       });
-      if (cancelled) break;
     }
 
     return () => {
       cancelled = true;
+      if (paths.length === 0) return;
+      void jobsSetScrubSpritePriorityForPaths(paths, "low").catch(() => {
+        /* background queue; ignore */
+      });
     };
   }, [anime.anilist_title, anime.title, episodes]);
 

@@ -99,6 +99,30 @@ pub fn jobs_enqueue_scrub_sprite(
 }
 
 #[cfg(windows)]
+#[tauri::command]
+pub fn jobs_set_job_priority(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    job_id: String,
+    priority: JobPriority,
+) -> Result<(), String> {
+    with_manager(jobs, db, |manager, _| manager.set_job_priority(&job_id, priority))
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_set_scrub_sprite_priority_for_paths(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    paths: Vec<String>,
+    priority: JobPriority,
+) -> Result<(), String> {
+    with_manager(jobs, db, |manager, _| {
+        manager.set_scrub_sprite_priority_for_paths(&paths, priority)
+    })
+}
+
+#[cfg(windows)]
 fn complete_worker_task(app: AppHandle, job_id: String, outcome: WorkerOutcome) {
     let Some(jobs_state) = app.try_state::<JobsState>() else {
         return;

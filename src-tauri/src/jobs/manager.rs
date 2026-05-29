@@ -148,22 +148,66 @@ impl JobManager {
         }
     }
 
+    /// Changes priority for a **queued** job. High starts immediately; upgrades call `pump`.
+    pub fn set_job_priority(&mut self, job_id: &str, priority: JobPriority) -> Result<(), String> {
+        let Some(record) = self.records.get(job_id) else {
+            return Err(format!("job not found: {job_id}"));
+        };
+        if record.view.status != JobStatus::Queued {
+            return Err("only queued jobs can change priority".to_string());
+        }
+        if record.view.priority == priority {
+            return Ok(());
+        }
+        let old = record.view.priority;
+        if let Some(record) = self.records.get_mut(job_id) {
+            record.view.priority = priority;
+        }
+
+        if priority == JobPriority::High {
+            self.start_job(job_id);
+        } else if priority_rank(priority) > priority_rank(old) {
+            self.pump();
+        }
+        self.emit_snapshot();
+        Ok(())
+    }
+
+    pub fn set_scrub_sprite_priority_for_paths(
+        &mut self,
+        paths: &[String],
+        priority: JobPriority,
+    ) -> Result<(), String> {
+        let mut job_ids = Vec::new();
+        for path in paths {
+            let identity = scrub_sprite_identity(path)?;
+            if let Some(id) = self.identity_to_id.get(&identity) {
+                job_ids.push(id.clone());
+            }
+        }
+        for job_id in job_ids {
+            if self
+                .records
+                .get(&job_id)
+                .is_some_and(|r| r.view.status == JobStatus::Queued)
+            {
+                let _ = self.set_job_priority(&job_id, priority);
+            }
+        }
+        Ok(())
+    }
+
     pub fn enqueue_scrub_sprite(
         &mut self,
         request: EnqueueScrubSpriteJob,
     ) -> Result<EnqueueJobResult, String> {
         let identity = scrub_sprite_identity(&request.path)?;
         if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
-            if let Some(record) = self.records.get_mut(&existing_id) {
-                if priority_rank(request.priority) > priority_rank(record.view.priority) {
-                    record.view.priority = request.priority;
-                    if request.priority == JobPriority::High && record.view.status == JobStatus::Queued {
-                        self.start_job(&existing_id);
-                    } else if record.view.status == JobStatus::Queued {
-                        self.pump();
-                    }
-                    self.emit_snapshot();
-                }
+            if self.records.get(&existing_id).is_some_and(|r| {
+                r.view.status == JobStatus::Queued
+                    && priority_rank(request.priority) > priority_rank(r.view.priority)
+            }) {
+                self.set_job_priority(&existing_id, request.priority)?;
             }
             return Ok(EnqueueJobResult {
                 job_id: Some(existing_id),

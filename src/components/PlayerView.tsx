@@ -26,7 +26,7 @@ import type {
   ScrubSpriteReady,
   ScrubSpriteStatus,
 } from "../types";
-import { errorMessage, formatTime, isTextInputTarget } from "../utils";
+import { errorMessage, formatTime, isTextInputTarget, mediaPathsEqual } from "../utils";
 import { HOTKEY_STEP, MAX_VOLUME, clampVolume, loadVolume, saveVolume } from "../volume";
 
 const PLAYER_SIDEBAR_PX = 0;
@@ -385,14 +385,15 @@ export function PlayerView(props: {
   }, []);
 
   useEffect(() => {
-    setScrubSprite(null);
-    scrubSpritePathRef.current = episode.path;
+    const path = episode.path;
     let cancelled = false;
+    scrubSpritePathRef.current = path;
+    setScrubSprite(null);
 
-    const loadSprite = () => {
-      void getScrubSpriteIfReady(episode.path)
+    const applyReadyFromCache = () => {
+      void getScrubSpriteIfReady(path)
         .then((ready) => {
-          if (cancelled || !ready) return;
+          if (cancelled || scrubSpritePathRef.current !== path || !ready) return;
           setScrubSprite(ready);
         })
         .catch(() => {
@@ -400,39 +401,48 @@ export function PlayerView(props: {
         });
     };
 
-    loadSprite();
-    void jobsEnqueueScrubSprite({
-      path: episode.path,
-      priority: "high",
-      episodeLabel: episode.file_name,
-    }).catch(() => {
-      /* keep time-only tooltip */
-    });
+    let unlisten: UnlistenFn | undefined;
+
+    void (async () => {
+      applyReadyFromCache();
+
+      unlisten = await listen<ScrubSpriteStatus>("scrub-sprite-ready", (event) => {
+        if (scrubSpritePathRef.current !== path) return;
+        if (event.payload.status === "ready") {
+          // Reload from cache: emitted paths are canonicalized in Rust and may not
+          // strictly equal `episode.path`, and the payload is not needed here.
+          applyReadyFromCache();
+        } else if (event.payload.status === "unavailable" && mediaPathsEqual(event.payload.path, path)) {
+          setScrubSprite(null);
+        }
+      });
+
+      if (cancelled) {
+        void unlisten();
+        return;
+      }
+
+      try {
+        await jobsEnqueueScrubSprite({
+          path,
+          priority: "high",
+          episodeLabel: episode.file_name,
+        });
+      } catch {
+        /* keep time-only tooltip */
+      }
+
+      if (!cancelled) {
+        applyReadyFromCache();
+      }
+    })();
 
     return () => {
       cancelled = true;
       scrubSpritePathRef.current = null;
-    };
-  }, [episode.path, episode.file_name]);
-
-  useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
-    void listen<ScrubSpriteStatus>("scrub-sprite-ready", (event) => {
-      const status = event.payload;
-      const activePath = scrubSpritePathRef.current;
-      if (!activePath || status.path !== activePath) return;
-      if (status.status === "ready") {
-        setScrubSprite(status);
-      } else if (status.status === "unavailable") {
-        setScrubSprite(null);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
       void unlisten?.();
     };
-  }, [episode.path]);
+  }, [episode.path, episode.file_name]);
 
   // App passes inline-arrow handlers that change identity every render
   // (`onError`, `onClose`, etc.). If the listener-setup useEffect depends on

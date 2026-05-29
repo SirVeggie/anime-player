@@ -201,8 +201,11 @@ view components. Per-screen UI lives in `src/components/`:
   under `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
   every five seconds capped at 120). **Scrub thumbnail** work runs as background
   jobs (`jobs_enqueue_scrub_sprite`): opening an anime’s episode list queues
-  low-priority jobs for uncached episodes; opening the player queues a
-  high-priority job for the current file. `get_scrub_sprite_if_ready` reads the
+  **medium**-priority jobs for uncached episodes and downgrades them to **low**
+  when leaving that page (`jobs_set_scrub_sprite_priority_for_paths`); opening
+  the player upgrades the current file’s queued job to **high** (starts
+  immediately). Queued priorities can be changed via `jobs_set_job_priority`.
+  `get_scrub_sprite_if_ready` reads the
   cache synchronously; finished jobs emit `scrub-sprite-ready`. Generation uses
   ffmpeg with `-hwaccel auto` and `-skip_frame nokey`. The UI slices the sheet
   via CSS `background-position`.
@@ -334,7 +337,8 @@ view components. Per-screen UI lives in `src/components/`:
   `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
 - `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,
   dedupe), scrub-sprite worker; commands `jobs_get_snapshot`, `jobs_enqueue_scrub_sprite`,
-  `jobs_cancel`, `jobs_cancel_all`, `jobs_set_max_parallel`.
+  `jobs_set_job_priority`, `jobs_set_scrub_sprite_priority_for_paths`, `jobs_cancel`,
+  `jobs_cancel_all`, `jobs_set_max_parallel`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.

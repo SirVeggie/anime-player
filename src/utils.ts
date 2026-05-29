@@ -16,6 +16,15 @@ export function formatSize(bytes: number): string {
   return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+/** Case-insensitive path compare for matching episode paths to backend canonical paths. */
+export function mediaPathsEqual(a: string, b: string): boolean {
+  return normalizeMediaPath(a) === normalizeMediaPath(b);
+}
+
+function normalizeMediaPath(path: string): string {
+  return path.trim().replace(/\//g, "\\").toLowerCase();
+}
+
 /** Formats a millisecond duration as M:SS or H:MM:SS (for job timers). */
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "0:00";

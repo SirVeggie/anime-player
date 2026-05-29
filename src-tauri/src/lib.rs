@@ -372,6 +372,8 @@ pub fn run() {
         jobs::jobs_cancel,
         jobs::jobs_cancel_all,
         jobs::jobs_enqueue_scrub_sprite,
+        jobs::jobs_set_job_priority,
+        jobs::jobs_set_scrub_sprite_priority_for_paths,
         mpv_init,
         mpv_load,
         mpv_cycle_pause,
