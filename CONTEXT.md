@@ -193,11 +193,13 @@ view components. Per-screen UI lives in `src/components/`:
   every five seconds capped at 120). The UI slices the sheet via CSS
   `background-position`; generation runs in the background and emits
   `scrub-sprite-ready` when finished.
-- Scrubber drag pauses playback (if it was playing), issues throttled
-  `mpv_seek` preview seeks with `keyframe: true` (`absolute+keyframes`),
-  then on release one exact `mpv_seek` and resumes only when playback was
-  active before the drag. `mpv://time-pos` updates are ignored while
-  scrubbing so the bar and time label follow the drag target.
+- Scrubber drag pauses playback (if it was playing), issues throttled keyframe
+  `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
+  release one final keyframe seek. After the seek settles, the UI reads
+  `mpv_get_time_pos` so the bar, clock, and saved progress match the decoded
+  keyframe (not the pre-snap scrub target). Resumes only when playback was
+  active before the drag. `mpv://time-pos` updates are ignored while scrubbing
+  so the bar follows the drag target until release.
 - The video pane uses Tauri `startDragging` (single left-click; skipped when
   the window is maximized or fullscreen) and
   `setFullscreen` (double left-click canvas, **F** on the player control,
@@ -314,7 +316,7 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_select_audio_track(track_id)`,
   `mpv_select_subtitle_track(track_id)`,
   `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
-  `mpv_set_volume(volume)`, and `mpv_stop()`.
+  `mpv_get_time_pos()`, `mpv_set_volume(volume)`, and `mpv_stop()`.
 - `scrub_preview.rs` — `ensure_scrub_sprite(path)` returns ready /
   generating / unavailable; caches sprite JPEG + JSON metadata beside the
   portable database and cancels in-flight generation when the path changes.

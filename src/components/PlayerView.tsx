@@ -8,6 +8,7 @@ import {
   addMpvSubtitleFile,
   ensureScrubSprite,
   getMinPositionSecondsToPersist,
+  getMpvTimePos,
   getMpvTracks,
   getMpvVideoGeometry,
   saveEpisodeProgress,
@@ -48,6 +49,8 @@ function parentDirFromPath(path: string) {
 
 const SCRUB_PREVIEW_MIN_INTERVAL_MS = 50;
 const SCRUB_PREVIEW_MIN_DELTA_SECONDS = 0.25;
+/** mpv may emit pause / playback-restart after `seek` returns; hold the scrub session until then. */
+const SCRUB_SETTLE_MS = 200;
 
 function SeekBar(props: {
   duration: number;
@@ -330,7 +333,9 @@ export function PlayerView(props: {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [seekInteracting, setSeekInteracting] = useState(false);
   const seekInteractingRef = useRef(false);
-  const wasPlayingBeforeScrubRef = useRef(false);
+  const scrubSessionRef = useRef<{ resumeAfter: boolean } | null>(null);
+  const scrubSeekEpochRef = useRef(0);
+  const scrubEndIdRef = useRef(0);
   const pausedRef = useRef(true);
   const [scrubSprite, setScrubSprite] = useState<ScrubSpriteReady | null>(null);
   const scrubSpritePathRef = useRef<string | null>(null);
@@ -661,6 +666,7 @@ export function PlayerView(props: {
         [
           "mpv://pause",
           (e) => {
+            if (scrubSessionRef.current) return;
             if (typeof e.payload === "boolean") setPaused(e.payload);
           },
         ],
@@ -691,6 +697,11 @@ export function PlayerView(props: {
         [
           "mpv://playback-restart",
           () => {
+            if (scrubSessionRef.current) {
+              setVideoCompositorRevealed(true);
+              void refreshVideoGeometry();
+              return;
+            }
             setPaused(false);
             setVideoCompositorRevealed(true);
             void refreshVideoGeometry();
@@ -843,19 +854,31 @@ export function PlayerView(props: {
   }, [onError]);
 
   const onScrubStart = useCallback(() => {
+    scrubEndIdRef.current += 1;
+    scrubSeekEpochRef.current += 1;
+    const resumeAfter = !pausedRef.current;
+    scrubSessionRef.current = { resumeAfter };
     seekInteractingRef.current = true;
-    const wasPlaying = !pausedRef.current;
-    wasPlayingBeforeScrubRef.current = wasPlaying;
-    if (wasPlaying) {
-      void invoke("mpv_set_pause", { paused: true }).catch((e) => onError(errorMessage(e)));
-      setPaused(true);
-    }
+    void invoke("mpv_set_pause", { paused: true }).catch((e) => onError(errorMessage(e)));
+    setPaused(true);
   }, [onError]);
 
   const onScrubPreview = useCallback(
     (seconds: number) => {
+      const epoch = scrubSeekEpochRef.current;
       setPosition(seconds);
-      void invoke("mpv_seek", { seconds, keyframe: true }).catch((e) => onError(errorMessage(e)));
+      void (async () => {
+        try {
+          await invoke("mpv_seek", { seconds, keyframe: true });
+          const session = scrubSessionRef.current;
+          if (scrubSeekEpochRef.current !== epoch || !session) return;
+          if (!session.resumeAfter) {
+            await invoke("mpv_set_pause", { paused: true });
+          }
+        } catch (e) {
+          onError(errorMessage(e));
+        }
+      })();
     },
     [onError],
   );
@@ -865,19 +888,33 @@ export function PlayerView(props: {
       if (seconds < minPositionSecondsToPersistRef.current) {
         userRequestedStartResetRef.current = true;
       }
-      setPosition(seconds);
-      const resume = wasPlayingBeforeScrubRef.current;
-      wasPlayingBeforeScrubRef.current = false;
-      seekInteractingRef.current = false;
+      scrubSeekEpochRef.current += 1;
+      const endId = (scrubEndIdRef.current += 1);
+      const resume = scrubSessionRef.current?.resumeAfter ?? false;
       void (async () => {
         try {
-          await invoke("mpv_seek", { seconds, keyframe: false });
-          if (resume) {
-            await invoke("mpv_set_pause", { paused: false });
-            setPaused(false);
+          await invoke("mpv_seek", { seconds, keyframe: true });
+          if (scrubEndIdRef.current !== endId) return;
+          await invoke("mpv_set_pause", { paused: !resume });
+          setPaused(!resume);
+          await new Promise((resolve) => window.setTimeout(resolve, SCRUB_SETTLE_MS));
+          if (scrubEndIdRef.current !== endId) return;
+          await invoke("mpv_set_pause", { paused: !resume });
+          setPaused(!resume);
+          const actualSeconds = await getMpvTimePos();
+          if (scrubEndIdRef.current !== endId) return;
+          if (Number.isFinite(actualSeconds) && actualSeconds >= 0) {
+            setPosition(actualSeconds);
+          } else {
+            setPosition(seconds);
           }
         } catch (e) {
           onError(errorMessage(e));
+        } finally {
+          if (scrubEndIdRef.current === endId) {
+            scrubSessionRef.current = null;
+            seekInteractingRef.current = false;
+          }
         }
       })();
     },

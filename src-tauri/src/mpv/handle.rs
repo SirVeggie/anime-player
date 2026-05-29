@@ -212,6 +212,29 @@ impl MpvHandle {
         self.command(&["stop"])
     }
 
+    pub fn time_pos(&self) -> Result<f64, String> {
+        self.get_property_f64("time-pos")
+    }
+
+    fn get_property_f64(&self, name: &str) -> Result<f64, String> {
+        let ctx = self.ctx()?;
+        let c_name = cstring(name)?;
+        let mut value = 0.0_f64;
+        let rc = unsafe {
+            mpv_get_property(
+                ctx,
+                c_name.as_ptr(),
+                mpv_format::MPV_FORMAT_DOUBLE,
+                (&mut value as *mut f64).cast(),
+            )
+        };
+        if rc < 0 {
+            Err(format!("mpv_get_property({name}) failed: {rc}"))
+        } else {
+            Ok(value)
+        }
+    }
+
     fn get_property_node(&self, name: &str) -> Result<MpvNode, String> {
         let ctx = self.ctx()?;
         let c_name = cstring(name)?;

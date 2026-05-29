@@ -158,6 +158,10 @@ export function getMpvVideoGeometry(): Promise<MpvVideoGeometry | null> {
   return invoke("mpv_get_video_geometry");
 }
 
+export function getMpvTimePos(): Promise<number> {
+  return invoke("mpv_get_time_pos");
+}
+
 export function stopMpv(): Promise<void> {
   return invoke("mpv_stop");
 }
