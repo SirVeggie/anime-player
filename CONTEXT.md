@@ -50,7 +50,7 @@ view components. Per-screen UI lives in `src/components/`:
 - A **Jobs** sidebar page (between Settings and Rescan) lists queued/running
   background work and job history (two tabs, like Bulk Edit). The nav icon shows
   a badge with the count of queued + running jobs. **Max parallel jobs** (1–8,
-  default 2, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
+  default 5, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
   jobs may run at once for scheduling low/medium work (high-priority jobs count
   toward that cap but are never blocked by it—e.g. six low jobs at the limit can
   still be joined by a seventh high job). Jobs also have a **resource type**

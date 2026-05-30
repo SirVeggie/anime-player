@@ -19,7 +19,7 @@ use super::types::{
 
 const MAX_PARALLEL_SETTING: &str = "jobs_max_parallel";
 const TYPE_MAX_PARALLEL_SETTING_PREFIX: &str = "jobs_max_parallel_type_";
-const DEFAULT_MAX_PARALLEL: u32 = 2;
+const DEFAULT_MAX_PARALLEL: u32 = 5;
 const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
 const MAX_PARALLEL_CAP: u32 = 8;
 const HISTORY_CAP: usize = 200;
