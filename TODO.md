@@ -29,6 +29,8 @@ Episode selection page features
 - [ ] Automatically detect new files via filesystem events (instead of manual rescan only)
 - [ ] Group seasons of the same show (subfolders? or fuzzy title match — low relative edit distance vs title length)
 - [ ] Auto-detect OP/ED by finding common audio signatures across episodes
+    - [ ] Skip detected regions automatically
+    - [ ] Option in settings to not skip on the first episode, so you get to watch them once
 
 ## Video Player
 
