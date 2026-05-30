@@ -135,7 +135,10 @@ view components. Per-screen UI lives in `src/components/`:
   in `PlayerView`), uses no extra top gradient (the player UI already
   shades the top/bottom), and the **“Anime Player”** label stays hidden
   so only the system buttons appear. **F11** (globally, unless typing in a
-  field) toggles Tauri window fullscreen like a browser. **Escape** matches
+  field) toggles Tauri window fullscreen like a browser. Fullscreen entered
+  only during a player session (F11, F, or double-click on the video) is
+  reverted to windowed when leaving the player; if the window was already
+  fullscreen when playback started, it stays fullscreen after exit. **Escape** matches
   the per-screen back control (library → up a level, settings → library);
   in the player it uses the same path as **Q** / the back arrow (pause +
   persist + return to episodes). Those actions

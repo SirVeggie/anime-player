@@ -162,6 +162,8 @@ function App() {
   const screenTransitionRef = useRef<ScreenTransitionPhase>("idle");
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
   const [windowFullscreen, setWindowFullscreen] = useState(false);
+  /** Whether the window was fullscreen when the current player session was entered. */
+  const fullscreenAtPlayerEntryRef = useRef(false);
   const [playerPaused, setPlayerPaused] = useState(true);
   const contentRef = useRef<HTMLElement | null>(null);
   const selectedAnimeIdRef = useRef<number | null>(null);
@@ -938,6 +940,27 @@ function App() {
   // then uncover. PlayerView's own .player-load-fade keeps the screen black
   // for fresh playback after uncover until mpv emits playback-restart, so the
   // hand-off is seamless without us coordinating with mpv directly.
+  const captureFullscreenAtPlayerEntry = useCallback(async () => {
+    try {
+      fullscreenAtPlayerEntryRef.current = await appWindow.isFullscreen();
+    } catch {
+      fullscreenAtPlayerEntryRef.current = false;
+    }
+  }, []);
+
+  const restoreFullscreenAfterPlayerIfNeeded = useCallback(async () => {
+    try {
+      const enteredFullscreen = fullscreenAtPlayerEntryRef.current;
+      const currentFullscreen = await appWindow.isFullscreen();
+      if (!enteredFullscreen && currentFullscreen) {
+        await appWindow.setFullscreen(false);
+        setWindowFullscreen(false);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const runScreenTransition = useCallback(async (between: () => void) => {
     if (screenTransitionRef.current !== "idle") return;
     screenTransitionRef.current = "cover";
@@ -954,23 +977,29 @@ function App() {
 
   const openEpisode = useCallback(
     (episode: Episode) => {
-      void runScreenTransition(() => {
-        setSelectedEpisode(episode);
-        navigateToView("player");
-      });
+      void (async () => {
+        await captureFullscreenAtPlayerEntry();
+        await runScreenTransition(() => {
+          setSelectedEpisode(episode);
+          navigateToView("player");
+        });
+      })();
     },
-    [navigateToView, runScreenTransition],
+    [captureFullscreenAtPlayerEntry, navigateToView, runScreenTransition],
   );
 
   const closePlayer = useCallback(
     (options?: { unload?: boolean }) => {
       const unload = options?.unload === true;
-      void runScreenTransition(() => {
-        if (unload) setSelectedEpisode(null);
-        navigateToView("episodes", "restore");
-      });
+      void (async () => {
+        await restoreFullscreenAfterPlayerIfNeeded();
+        await runScreenTransition(() => {
+          if (unload) setSelectedEpisode(null);
+          navigateToView("episodes", "restore");
+        });
+      })();
     },
-    [navigateToView, runScreenTransition],
+    [navigateToView, restoreFullscreenAfterPlayerIfNeeded, runScreenTransition],
   );
 
   // Q on the episodes screen jumps into the current anime's last-played episode
@@ -988,14 +1017,26 @@ function App() {
         // Same file already loaded; transition through the fade anyway so the
         // reveal feels consistent with a fresh play. PlayerView's `visible`
         // effect handles the unpause once we navigate.
-        void runScreenTransition(() => navigateToView("player"));
+        void (async () => {
+          await captureFullscreenAtPlayerEntry();
+          await runScreenTransition(() => navigateToView("player"));
+        })();
       } else {
         openEpisode(target);
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [episodes, navigateToView, openEpisode, runScreenTransition, selectedAnime, selectedEpisode, view]);
+  }, [
+    captureFullscreenAtPlayerEntry,
+    episodes,
+    navigateToView,
+    openEpisode,
+    runScreenTransition,
+    selectedAnime,
+    selectedEpisode,
+    view,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
