@@ -542,7 +542,7 @@ pub fn delete_anime_files(
     db: State<'_, AppDatabase>,
     anime_id: i64,
 ) -> Result<DeleteAnimeFilesSummary, String> {
-    let (episodes, cover_path) = db.with_conn(|conn| {
+    let (episodes, cover_path, root_folders) = db.with_conn(|conn| {
         let episodes = list_deletable_episodes_for_anime(conn, anime_id)?;
         let cover_path = conn
             .query_row(
@@ -553,18 +553,26 @@ pub fn delete_anime_files(
             .optional()
             .map_err(|e| e.to_string())?
             .flatten();
-        Ok((episodes, cover_path))
+        let root_folders = list_root_folders(conn)?
+            .into_iter()
+            .map(|root| PathBuf::from(root.path))
+            .collect::<Vec<_>>();
+        Ok((episodes, cover_path, root_folders))
     })?;
 
     let mut deleted_episode_ids = Vec::new();
     let mut bytes_deleted = 0_u64;
     let mut episodes_failed = 0_i64;
     let mut permanent_delete_used = false;
+    let mut dirs_to_cleanup = HashSet::new();
 
     for episode in episodes {
         let path = PathBuf::from(&episode.path);
         if !path.exists() {
             deleted_episode_ids.push(episode.id);
+            if let Some(parent) = path.parent() {
+                dirs_to_cleanup.insert(parent.to_path_buf());
+            }
             continue;
         }
 
@@ -576,12 +584,17 @@ pub fn delete_anime_files(
                 deleted_episode_ids.push(episode.id);
                 bytes_deleted += size;
                 permanent_delete_used |= permanent;
+                if let Some(parent) = path.parent() {
+                    dirs_to_cleanup.insert(parent.to_path_buf());
+                }
             }
             Err(_) => {
                 episodes_failed += 1;
             }
         }
     }
+
+    cleanup_empty_dirs_after_deletions(dirs_to_cleanup, &root_folders);
 
     let mut cover_deleted = false;
     let mut cover_failed = false;
@@ -1502,6 +1515,62 @@ fn move_path_to_trash_or_delete(path: &Path) -> Result<bool, String> {
             Ok(true)
         }
     }
+}
+
+fn cleanup_empty_dirs_after_deletions(dirs: HashSet<PathBuf>, roots: &[PathBuf]) {
+    if dirs.is_empty() || roots.is_empty() {
+        return;
+    }
+
+    let mut ordered: Vec<PathBuf> = dirs.into_iter().collect();
+    ordered.sort_by(|a, b| {
+        b.components()
+            .count()
+            .cmp(&a.components().count())
+            .then_with(|| b.to_string_lossy().cmp(&a.to_string_lossy()))
+    });
+
+    for dir in ordered {
+        remove_empty_parent_dirs(&dir, roots);
+    }
+}
+
+fn remove_empty_parent_dirs(start: &Path, roots: &[PathBuf]) {
+    let mut dir = start.to_path_buf();
+    let Some(root) = matching_root_folder(&dir, roots) else {
+        return;
+    };
+
+    while !paths_equal(&dir, root) {
+        if !is_directory_empty(&dir) {
+            break;
+        }
+        if fs::remove_dir(&dir).is_err() {
+            break;
+        }
+        dir = match dir.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => break,
+        };
+    }
+}
+
+fn matching_root_folder<'a>(path: &Path, roots: &'a [PathBuf]) -> Option<&'a PathBuf> {
+    roots
+        .iter()
+        .filter(|root| path.starts_with(root.as_path()))
+        .max_by_key(|root| root.as_os_str().len())
+}
+
+fn paths_equal(a: &Path, b: &Path) -> bool {
+    windows_path_key(&a.to_string_lossy()) == windows_path_key(&b.to_string_lossy())
+}
+
+fn is_directory_empty(path: &Path) -> bool {
+    let Ok(mut entries) = fs::read_dir(path) else {
+        return false;
+    };
+    entries.next().is_none()
 }
 
 fn get_episode(conn: &Connection, episode_id: i64) -> Result<Episode, String> {
