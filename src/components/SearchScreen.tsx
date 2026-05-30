@@ -15,12 +15,13 @@ function matchesAnime(anime: AnimeSummary, query: string) {
 
 export function SearchScreen(props: {
   anime: AnimeSummary[];
+  preferAnilistDisplayTitle: boolean;
   query: string;
   focusToken: number;
   onQueryChange: (query: string) => void;
   onOpenAnime: (anime: AnimeSummary) => void;
 }) {
-  const { anime, query, focusToken, onQueryChange, onOpenAnime } = props;
+  const { anime, preferAnilistDisplayTitle, query, focusToken, onQueryChange, onOpenAnime } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const normalizedQuery = normalizeSearchText(query);
   const matchingAnime = useMemo(() => {
@@ -67,7 +68,11 @@ export function SearchScreen(props: {
           <p className="muted">Try a different title or AniList name.</p>
         </div>
       ) : (
-        <AnimeCardGrid anime={matchingAnime} onOpenAnime={onOpenAnime} />
+        <AnimeCardGrid
+          anime={matchingAnime}
+          preferAnilistDisplayTitle={preferAnilistDisplayTitle}
+          onOpenAnime={onOpenAnime}
+        />
       )}
     </>
   );

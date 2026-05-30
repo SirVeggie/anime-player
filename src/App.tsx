@@ -32,6 +32,7 @@ import {
   removeRootFolder,
   rescanLibrary,
   searchAnilistAnime,
+  setPreferAnilistDisplayTitle,
   setAnimeCustomThumbnailPath,
   setAnimeTrackerOffset,
   setDefaultCategory,
@@ -79,7 +80,15 @@ import type {
   RenameFileRequest,
   RootFolder,
 } from "./types";
-import { APP_WINDOW_TITLE, errorMessage, formatSize, isAnilistConnected, isTextInputTarget, shortenForOsTitle } from "./utils";
+import {
+  animeDisplayTitle,
+  APP_WINDOW_TITLE,
+  errorMessage,
+  formatSize,
+  isAnilistConnected,
+  isTextInputTarget,
+  shortenForOsTitle,
+} from "./utils";
 import "./App.css";
 
 type View =
@@ -784,6 +793,14 @@ function App() {
     });
   }, [runAction]);
 
+  const handlePreferAnilistDisplayTitle = useCallback(
+    async (enabled: boolean) => {
+      const state = await setPreferAnilistDisplayTitle(enabled);
+      setLibrary(state);
+    },
+    [],
+  );
+
   const handleSearchAnilist = useCallback((query: string): Promise<AnilistSearchResult[]> => {
     return searchAnilistAnime(query);
   }, []);
@@ -807,8 +824,8 @@ function App() {
       const currentAnime = selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
       let didMutate = false;
       if (currentAnime && title.trim() !== currentAnime.title) {
+        await stopMpv().catch(() => undefined);
         if (selectedEpisode?.anime_id === animeId) {
-          await stopMpv().catch(() => undefined);
           setSelectedEpisode(null);
         }
         await renameAnime(animeId, title);
@@ -1023,7 +1040,8 @@ function App() {
       selectedAnime?.id === selectedEpisode.anime_id
         ? selectedAnime
         : library.anime.find((a) => a.id === selectedEpisode.anime_id);
-    const label = anime?.anilist_title?.trim() || anime?.title?.trim();
+    if (!anime) return null;
+    const label = animeDisplayTitle(anime, library.prefer_anilist_display_title).trim();
     return label || null;
   }, [library, selectedAnime, selectedEpisode]);
 
@@ -1211,6 +1229,7 @@ function App() {
             <AnimeGrid
               category={selectedCategory}
               anime={animeInCategory}
+              preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               onBack={() => navigateToView("categories", "restore")}
               onOpenAnime={(anime) => void openAnime(anime, "anime")}
               onOpenSettings={() => navigateToView("settings")}
@@ -1220,6 +1239,7 @@ function App() {
           {view === "search" ? (
             <SearchScreen
               anime={library.anime}
+              preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               query={searchQuery}
               focusToken={searchFocusToken}
               onQueryChange={setSearchQuery}
@@ -1243,7 +1263,10 @@ function App() {
           ) : null}
 
           {view === "missing" ? (
-            <MissingScreen anime={library.missing_anime} />
+            <MissingScreen
+              anime={library.missing_anime}
+              preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+            />
           ) : null}
 
           {view === "episodes" && selectedAnime ? (
@@ -1266,6 +1289,7 @@ function App() {
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
               anilistConnected={isAnilistConnected(anilistAuth)}
+              preferAnilistDisplayTitle={library.prefer_anilist_display_title}
             />
           ) : null}
 
@@ -1303,6 +1327,7 @@ function App() {
               onSaveAnilistClientId={(clientId) => void handleSaveAnilistClientId(clientId)}
               onLoginAnilist={() => void handleLoginAnilist()}
               onLogoutAnilist={() => void handleLogoutAnilist()}
+              onPreferAnilistDisplayTitle={(enabled) => void handlePreferAnilistDisplayTitle(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
             />
           ) : null}

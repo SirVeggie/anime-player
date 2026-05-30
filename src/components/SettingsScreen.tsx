@@ -44,6 +44,7 @@ export function SettingsScreen(props: {
   onSaveAnilistClientId: (clientId: string) => void;
   onLoginAnilist: () => void;
   onLogoutAnilist: () => void;
+  onPreferAnilistDisplayTitle: (enabled: boolean) => void;
   onCleanLocalData: () => void;
 }) {
   const {
@@ -71,6 +72,7 @@ export function SettingsScreen(props: {
     onSaveAnilistClientId,
     onLoginAnilist,
     onLogoutAnilist,
+    onPreferAnilistDisplayTitle,
     onCleanLocalData,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
@@ -120,6 +122,18 @@ export function SettingsScreen(props: {
           The default client ID works for normal use, so you can press Login with AniList without changing it.
           If you create your own AniList app, set its redirect URL to <code>anime-player://anilist-auth</code>.
         </p>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.prefer_anilist_display_title}
+            disabled={busy}
+            onChange={onPreferAnilistDisplayTitle}
+            label="Use AniList title in the library when linked"
+          />
+          <p className="muted">
+            Linked titles show the AniList name in grids, search, and episode headers. Unlinked titles always use the
+            detected name from your files.
+          </p>
+        </div>
       </section>
 
       <section className="panel">

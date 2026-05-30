@@ -1,4 +1,4 @@
-﻿export type RootFolder = {
+export type RootFolder = {
   id: number;
   path: string;
 };
@@ -98,6 +98,8 @@ export type LibraryState = {
   recent_anime: AnimeSummary[];
   missing_anime: MissingAnimeSummary[];
   unmatched_count: number;
+  /** When true, linked titles use AniList name in library UI; unlinked titles always use the detected name. */
+  prefer_anilist_display_title: boolean;
 };
 
 export type ScanSummary = {

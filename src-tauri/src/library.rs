@@ -11,8 +11,13 @@ use tauri_plugin_opener::OpenerExt;
 use crate::db::{refresh_anime_latest_episode_at, AppDatabase};
 use crate::scanner::{self, DetectionRule};
 
+#[cfg(windows)]
+use crate::AppState;
+
 /// Saved positions below this are stored as 0 (avoid sticky resume after brief opens).
 const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
+
+const PREFER_ANILIST_DISPLAY_TITLE_KEY: &str = "prefer_anilist_display_title";
 
 #[derive(Debug, Serialize)]
 pub struct VideoFile {
@@ -116,6 +121,7 @@ pub struct LibraryState {
     recent_anime: Vec<AnimeSummary>,
     missing_anime: Vec<MissingAnimeSummary>,
     unmatched_count: i64,
+    prefer_anilist_display_title: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -266,19 +272,58 @@ fn scan_video_files_in_root(root: &Path) -> Result<Vec<VideoFile>, String> {
     Ok(results)
 }
 
+fn read_prefer_anilist_display_title(conn: &Connection) -> Result<bool, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![PREFER_ANILIST_DISPLAY_TITLE_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(matches!(value.as_deref(), Some("1" | "true" | "yes")))
+}
+
+fn write_prefer_anilist_display_title(conn: &Connection, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![
+            PREFER_ANILIST_DISPLAY_TITLE_KEY,
+            if enabled { "1" } else { "0" }
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_library_state(db: State<'_, AppDatabase>) -> Result<LibraryState, String> {
+    db.with_conn(|conn| build_library_state(conn, &db))
+}
+
+fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibraryState, String> {
+    Ok(LibraryState {
+        db_path: db.path().to_string_lossy().to_string(),
+        root_folders: list_root_folders(conn)?,
+        regex_rules: list_regex_rules(conn)?,
+        categories: list_categories(conn)?,
+        anime: list_anime(conn, None, false)?,
+        recent_anime: list_anime(conn, None, true)?,
+        missing_anime: list_missing_anime(conn)?,
+        unmatched_count: count_unmatched(conn)?,
+        prefer_anilist_display_title: read_prefer_anilist_display_title(conn)?,
+    })
+}
+
+#[tauri::command]
+pub fn set_prefer_anilist_display_title(
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
     db.with_conn(|conn| {
-        Ok(LibraryState {
-            db_path: db.path().to_string_lossy().to_string(),
-            root_folders: list_root_folders(conn)?,
-            regex_rules: list_regex_rules(conn)?,
-            categories: list_categories(conn)?,
-            anime: list_anime(conn, None, false)?,
-            recent_anime: list_anime(conn, None, true)?,
-            missing_anime: list_missing_anime(conn)?,
-            unmatched_count: count_unmatched(conn)?,
-        })
+        write_prefer_anilist_display_title(conn, enabled)?;
+        build_library_state(conn, &db)
     })
 }
 
@@ -729,12 +774,22 @@ pub fn rename_files(
 
 #[tauri::command]
 pub fn rename_anime(
+    #[cfg(windows)] mpv_state: State<'_, AppState>,
     db: State<'_, AppDatabase>,
     anime_id: i64,
     new_title: String,
 ) -> Result<RenameAnimeSummary, String> {
     let new_title = normalize_anime_rename_title(&new_title)?;
     let plans = db.with_conn(|conn| build_anime_rename_plan(conn, anime_id, &new_title))?;
+    #[cfg(windows)]
+    {
+        let paths = plans
+            .iter()
+            .map(|plan| plan.old_path_string.clone())
+            .collect::<Vec<_>>();
+        let guard = mpv_state.mpv.lock().map_err(|e| e.to_string())?;
+        crate::mpv::unload_if_loading_any_of(guard.as_ref(), &paths)?;
+    }
     let temp_moves = move_episode_sources_to_temps(&plans)?;
 
     if let Err(error) = move_episode_temps_to_destinations(&temp_moves) {

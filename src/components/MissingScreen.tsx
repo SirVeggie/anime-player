@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { loadAnimePosterUrls } from "../animePoster";
 import type { MissingAnimeSummary } from "../types";
+import { animeDisplayTitle, animeTooltipTitle } from "../utils";
+import { AnimeCardLabel } from "./AnimeCardLabel";
 import { ViewHeader } from "./ViewHeader";
 
 export function MissingScreen(props: {
   anime: MissingAnimeSummary[];
+  preferAnilistDisplayTitle: boolean;
 }) {
-  const { anime } = props;
+  const { anime, preferAnilistDisplayTitle } = props;
   const [covers, setCovers] = useState<Record<number, string>>({});
 
   useEffect(() => {
@@ -39,18 +42,18 @@ export function MissingScreen(props: {
         <div className="anime-grid">
           {anime.map((item) => {
             const cover = covers[item.id];
+            const displayTitle = animeDisplayTitle(item, preferAnilistDisplayTitle);
+            const tooltipTitle = animeTooltipTitle(item);
             return (
               <article className="anime-card missing-card" key={item.id}>
                 <div className={`poster-placeholder${cover ? " poster-placeholder--image" : ""}`}>
-                  {cover ? <img src={cover} alt="" loading="lazy" /> : item.title.slice(0, 2).toUpperCase()}
+                  {cover ? <img src={cover} alt="" loading="lazy" /> : displayTitle.slice(0, 2).toUpperCase()}
                 </div>
-                <div className="anime-card-body">
-                  <div className="anime-card-title" title={item.title}>
-                    {item.title}
-                  </div>
-                  <div className="anime-card-meta">{missingMeta(item)}</div>
-                </div>
-                <div className="anime-tooltip">{item.anilist_title ?? item.title}</div>
+                <AnimeCardLabel
+                  displayTitle={displayTitle}
+                  tooltipTitle={tooltipTitle}
+                  meta={<div className="anime-card-meta">{missingMeta(item)}</div>}
+                />
               </article>
             );
           })}

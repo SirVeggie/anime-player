@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { loadAnimePosterUrls } from "../animePoster";
 import type { AnimeSummary, Category } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
+import { animeDisplayTitle, animeTooltipTitle } from "../utils";
+import { AnimeCardLabel } from "./AnimeCardLabel";
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
@@ -28,10 +30,18 @@ function readStoredGridSort(): number {
   }
 }
 
-function sortAnimeForGrid(anime: AnimeSummary[], sortValue: number): AnimeSummary[] {
+function sortAnimeForGrid(
+  anime: AnimeSummary[],
+  sortValue: number,
+  preferAnilistDisplayTitle: boolean,
+): AnimeSummary[] {
   const copy = [...anime];
   const byTitle = (a: AnimeSummary, b: AnimeSummary) =>
-    a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    animeDisplayTitle(a, preferAnilistDisplayTitle).localeCompare(
+      animeDisplayTitle(b, preferAnilistDisplayTitle),
+      undefined,
+      { sensitivity: "base" },
+    );
 
   copy.sort((a, b) => {
     let cmp = 0;
@@ -102,14 +112,18 @@ function sortAnimeForGrid(anime: AnimeSummary[], sortValue: number): AnimeSummar
 export function AnimeGrid(props: {
   category: Category | null;
   anime: AnimeSummary[];
+  preferAnilistDisplayTitle: boolean;
   onBack: () => void;
   onOpenAnime: (anime: AnimeSummary) => void;
   onOpenSettings: () => void;
 }) {
-  const { category, anime, onBack, onOpenAnime, onOpenSettings } = props;
+  const { category, anime, preferAnilistDisplayTitle, onBack, onOpenAnime, onOpenSettings } = props;
   const [sortValue, setSortValue] = useState(readStoredGridSort);
 
-  const sortedAnime = useMemo(() => sortAnimeForGrid(anime, sortValue), [anime, sortValue]);
+  const sortedAnime = useMemo(
+    () => sortAnimeForGrid(anime, sortValue, preferAnilistDisplayTitle),
+    [anime, preferAnilistDisplayTitle, sortValue],
+  );
 
   const sortLabel = GRID_SORT_OPTIONS.find((o) => o.value === sortValue)?.label ?? "Alphabetical";
 
@@ -148,7 +162,11 @@ export function AnimeGrid(props: {
           </button>
         </div>
       ) : (
-        <AnimeCardGrid anime={sortedAnime} onOpenAnime={onOpenAnime} />
+        <AnimeCardGrid
+          anime={sortedAnime}
+          preferAnilistDisplayTitle={preferAnilistDisplayTitle}
+          onOpenAnime={onOpenAnime}
+        />
       )}
     </>
   );
@@ -156,9 +174,10 @@ export function AnimeGrid(props: {
 
 export function AnimeCardGrid(props: {
   anime: AnimeSummary[];
+  preferAnilistDisplayTitle: boolean;
   onOpenAnime: (anime: AnimeSummary) => void;
 }) {
-  const { anime, onOpenAnime } = props;
+  const { anime, preferAnilistDisplayTitle, onOpenAnime } = props;
   const [covers, setCovers] = useState<Record<number, string>>({});
   const getRovingItemProps = useRovingListNavigation(anime.length);
 
@@ -181,6 +200,8 @@ export function AnimeCardGrid(props: {
     <div className="anime-grid">
       {anime.map((item, index) => {
         const cover = covers[item.id];
+        const displayTitle = animeDisplayTitle(item, preferAnilistDisplayTitle);
+        const tooltipTitle = animeTooltipTitle(item);
         return (
           <button
             type="button"
@@ -190,21 +211,26 @@ export function AnimeCardGrid(props: {
             {...getRovingItemProps(index)}
           >
             <div className={`poster-placeholder${cover ? " poster-placeholder--image" : ""}`}>
-              {cover ? <img src={cover} alt="" loading="lazy" /> : item.title.slice(0, 2).toUpperCase()}
+              {cover ? <img src={cover} alt="" loading="lazy" /> : displayTitle.slice(0, 2).toUpperCase()}
             </div>
-            <div className="anime-card-body">
-              <div className="anime-card-title" title={item.title}>
-                {item.title}
-              </div>
-              <div className="anime-card-meta">
-                {item.unwatched_count > 0
-                  ? `${item.episode_count} eps · ${item.unwatched_count} remaining`
-                  : item.gap_episode_count > 0
-                  ? <>{item.episode_count} eps · <span className="stat-warning">{item.gap_episode_count} missing</span></>
-                  : `${item.episode_count} eps`}
-              </div>
-            </div>
-            <div className="anime-tooltip">{item.anilist_title ?? item.title}</div>
+            <AnimeCardLabel
+              displayTitle={displayTitle}
+              tooltipTitle={tooltipTitle}
+              meta={
+                <div className="anime-card-meta">
+                  {item.unwatched_count > 0
+                    ? `${item.episode_count} eps · ${item.unwatched_count} remaining`
+                    : item.gap_episode_count > 0
+                      ? (
+                          <>
+                            {item.episode_count} eps ·{" "}
+                            <span className="stat-warning">{item.gap_episode_count} missing</span>
+                          </>
+                        )
+                      : `${item.episode_count} eps`}
+                </div>
+              }
+            />
           </button>
         );
       })}

@@ -81,7 +81,11 @@ view components. Per-screen UI lives in `src/components/`:
   command still exists for compatibility.
 - AniList integration is a mature optional tracker layer. Settings exposes a
   default OAuth client ID (`40455`) that works without custom setup, plus an
-  override field for users with their own AniList app. Login uses the implicit
+  override field for users with their own AniList app. A **Use AniList title in
+  the library when linked** toggle (`prefer_anilist_display_title` in SQLite
+  `settings`) switches grids, search, continue watching, episode headers, and
+  the player window title to the linked AniList name; unlinked titles always use
+  the detected filesystem name. Login uses the implicit
   OAuth flow with the `anime-player://anilist-auth` deep-link callback;
   `App.tsx` handles the callback, validates/stores the token through Rust, and
   refreshes auth state in the UI.

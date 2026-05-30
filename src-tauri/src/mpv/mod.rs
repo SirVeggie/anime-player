@@ -20,3 +20,25 @@ mod ffi;
 mod handle;
 
 pub use handle::{MpvHandle, MpvTrack, MpvVideoGeometry};
+
+fn windows_path_key(path: &str) -> String {
+    path.replace('/', "\\").to_ascii_lowercase()
+}
+
+/// Release mpv's handle when it has one of the given paths open (e.g. before a rename).
+pub fn unload_if_loading_any_of(mpv: Option<&MpvHandle>, paths: &[String]) -> Result<(), String> {
+    let Some(handle) = mpv else {
+        return Ok(());
+    };
+    let Some(loaded) = handle.loaded_path() else {
+        return Ok(());
+    };
+    let loaded_key = windows_path_key(&loaded);
+    if paths
+        .iter()
+        .any(|path| windows_path_key(path) == loaded_key)
+    {
+        handle.unload()?;
+    }
+    Ok(())
+}

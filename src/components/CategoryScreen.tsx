@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { loadAnimePosterUrls } from "../animePoster";
 import type { AnimeSummary, LibraryState } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
+import { animeDisplayTitle } from "../utils";
 import { ViewHeader } from "./ViewHeader";
 
 export function CategoryScreen(props: {
@@ -93,7 +94,7 @@ export function CategoryScreen(props: {
                     <img className="continue-card-cover" src={cover} alt="" loading="lazy" />
                   ) : null}
                   <div className="continue-card-body">
-                    <strong>{anime.title}</strong>
+                    <strong>{animeDisplayTitle(anime, library.prefer_anilist_display_title)}</strong>
                     <span>{anime.episode_count} episode{anime.episode_count === 1 ? "" : "s"}</span>
                   </div>
                 </button>

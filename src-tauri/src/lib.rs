@@ -28,7 +28,7 @@ const DEFAULT_SIDEBAR_PX: f64 = 360.0;
 
 #[cfg(windows)]
 struct AppState {
-    mpv: Mutex<Option<MpvHandle>>,
+    pub(crate) mpv: Mutex<Option<MpvHandle>>,
     /// Last sidebar width (CSS px) the frontend asked us to apply. Read
     /// by the native resize handler so it can re-issue
     /// `video-margin-ratio-left` on every WM_SIZE without needing a JS
@@ -324,6 +324,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         library::scan_videos,
         library::get_library_state,
+        library::set_prefer_anilist_display_title,
         library::add_root_folder,
         library::remove_root_folder,
         library::create_category,
@@ -396,6 +397,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         library::scan_videos,
         library::get_library_state,
+        library::set_prefer_anilist_display_title,
         library::add_root_folder,
         library::remove_root_folder,
         library::create_category,

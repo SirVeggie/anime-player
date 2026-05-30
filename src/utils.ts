@@ -1,7 +1,30 @@
-import type { AnilistAuthState, Episode } from "./types";
+import type { AnilistAuthState, AnimeSummary, Episode } from "./types";
 
 export function isAnilistConnected(auth: AnilistAuthState | null): boolean {
   return auth?.authenticated === true;
+}
+
+/** Library display name: detected title unless the user prefers AniList and the title is linked. */
+export function animeDisplayTitle(
+  anime: Pick<AnimeSummary, "title" | "anilist_id" | "anilist_title">,
+  preferAnilistDisplayTitle: boolean,
+): string {
+  const anilistTitle = anime.anilist_title?.trim();
+  if (preferAnilistDisplayTitle && anime.anilist_id != null && anilistTitle) {
+    return anilistTitle;
+  }
+  return anime.title;
+}
+
+/** Grid hover tooltip: AniList name when linked, otherwise the detected filesystem title. */
+export function animeTooltipTitle(
+  anime: Pick<AnimeSummary, "title" | "anilist_id" | "anilist_title">,
+): string {
+  if (anime.anilist_id != null) {
+    const anilistTitle = anime.anilist_title?.trim();
+    if (anilistTitle) return anilistTitle;
+  }
+  return anime.title;
 }
 
 export function formatSize(bytes: number): string {

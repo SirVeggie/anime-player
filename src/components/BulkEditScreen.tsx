@@ -408,7 +408,11 @@ export function BulkEditScreen(props: {
               </p>
             </div>
           ) : (
-            <AnimeCardGrid anime={matchingAnime} onOpenAnime={onOpenAnime} />
+            <AnimeCardGrid
+              anime={matchingAnime}
+              preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+              onOpenAnime={onOpenAnime}
+            />
           )}
         </>
       ) : (

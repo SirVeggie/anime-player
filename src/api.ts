@@ -1,4 +1,4 @@
-﻿import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   AnilistAuthState,
   AnilistLocalProgressApplyResult,
@@ -31,6 +31,10 @@ import type {
 
 export function getLibraryState(): Promise<LibraryState> {
   return invoke("get_library_state");
+}
+
+export function setPreferAnilistDisplayTitle(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_prefer_anilist_display_title", { enabled });
 }
 
 export function addRootFolder(path: string): Promise<RootFolder> {

@@ -10,7 +10,16 @@ import {
 import { pickQuickPlayEpisode } from "../quickPlay";
 import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
-import { computeGapEpisodeCount, errorMessage, formatEpisodeNumber, formatSize, formatTime, isEpisodeNumberKnown, progressPercent } from "../utils";
+import {
+  animeDisplayTitle,
+  computeGapEpisodeCount,
+  errorMessage,
+  formatEpisodeNumber,
+  formatSize,
+  formatTime,
+  isEpisodeNumberKnown,
+  progressPercent,
+} from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
 import { FolderOpenIcon, SettingsIcon } from "./Icons";
 import { ViewHeader } from "./ViewHeader";
@@ -104,11 +113,13 @@ export function EpisodeScreen(props: {
   onUnlinkAnilist: (animeId: number) => void;
   onOpenAnilist: (url: string) => void;
   anilistConnected: boolean;
+  preferAnilistDisplayTitle: boolean;
 }) {
   const {
     anime,
     episodes,
     categories,
+    preferAnilistDisplayTitle,
     onBack,
     onPlay,
     onMoveAnime,
@@ -553,7 +564,7 @@ export function EpisodeScreen(props: {
   return (
     <>
       <ViewHeader
-        title={anime.title}
+        title={animeDisplayTitle(anime, preferAnilistDisplayTitle)}
         subtitle={
           <>
             {episodes.length} episode{episodes.length === 1 ? "" : "s"} · {remainingCount} remaining

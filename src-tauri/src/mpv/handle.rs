@@ -209,7 +209,19 @@ impl MpvHandle {
     }
 
     pub fn stop(&self) -> Result<(), String> {
+        self.unload()
+    }
+
+    /// Stops playback and clears the current file so the path is no longer open.
+    pub fn unload(&self) -> Result<(), String> {
         self.command(&["stop"])
+    }
+
+    /// Absolute path of the file mpv currently has open, if any.
+    pub fn loaded_path(&self) -> Option<String> {
+        self.get_property_string("path")
+            .ok()
+            .filter(|path| !path.is_empty())
     }
 
     pub fn time_pos(&self) -> Result<f64, String> {
@@ -265,6 +277,30 @@ impl MpvHandle {
             mpv_free_node_contents(&mut node);
         }
         value
+    }
+
+    fn get_property_string(&self, name: &str) -> Result<String, String> {
+        let ctx = self.ctx()?;
+        let c_name = cstring(name)?;
+        let mut ptr: *const c_char = std::ptr::null();
+        let rc = unsafe {
+            mpv_get_property(
+                ctx,
+                c_name.as_ptr(),
+                mpv_format::MPV_FORMAT_STRING,
+                (&mut ptr as *mut *const c_char).cast(),
+            )
+        };
+        if rc < 0 {
+            return Err(format!("mpv_get_property({name}) failed: {rc}"));
+        }
+        if ptr.is_null() {
+            return Ok(String::new());
+        }
+        unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| format!("mpv property {name} was not valid UTF-8"))
     }
 }
 
