@@ -204,7 +204,8 @@ view components. Per-screen UI lives in `src/components/`:
 - Scrubber hover shows a floating thumbnail plus timestamp. Sprite sheets live
   under `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
   every five seconds capped at 120). **Scrub thumbnail** work runs as background
-  jobs (`jobs_enqueue_scrub_sprite`): opening an anime’s episode list queues
+  jobs (`jobs_enqueue_scrub_sprite`): a rescan that imports ≤20 episodes
+  auto-queues scrub jobs (low priority); opening an anime’s episode list queues
   **medium**-priority jobs for uncached episodes and downgrades them to **low**
   when leaving that page (`jobs_set_scrub_sprite_priority_for_paths`); opening
   the player upgrades the current file’s queued job to **high** (starts
@@ -273,7 +274,9 @@ view components. Per-screen UI lives in `src/components/`:
   (re-runs filename matching against enabled rules for the episode list; the
   episode page shows the resulting rule name without persisting it),
   `save_episode_progress`, `rename_anime`, `get_local_data_stats`, `clean_local_data`,
-  and `rescan_library`. `rescan_library` commits one SQLite transaction per
+  and `rescan_library`. On Windows, when a rescan imports at most 20 episodes
+  (new or updated paths), it enqueues low-priority scrub-thumbnail jobs for
+  those files. `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
   series is upserted once per scan instead of once per file. The upserts are
   idempotent: unchanged anime, episode, and unmatched-file rows are not
@@ -502,8 +505,11 @@ npm run tauri build
 
 # Portable release: `tauri build` then versioned folder + zip under `releases/`
 # (that directory is listed in `.gitignore` so build artifacts stay local).
-# Package includes update.bat, _update.ps1, and VERSION.txt. Publish GitHub
-# release with the zip, standalone anime-player.exe, and anime-player.exe.sha256.
+# Package includes libmpv-2.dll, ffmpeg.exe, ffprobe.exe, update.bat,
+# _update.ps1, and VERSION.txt (release only). Scrub thumbnails prefer
+# ffmpeg beside the exe; PATH is a fallback if those files are removed.
+# Publish GitHub release with the zip, standalone anime-player.exe, and
+# anime-player.exe.sha256.
 npm run release
 
 # Local dev portable only (no tag, zip, or publish artifacts): `releases/dev/`

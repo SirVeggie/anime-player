@@ -36,6 +36,21 @@ pub fn notify_job_step(app: &AppHandle, job_id: &str, current: u32, total: u32, 
 }
 
 #[cfg(windows)]
+pub use manager::RescanScrubImport;
+
+#[cfg(windows)]
+pub fn enqueue_scrub_for_rescan_imports(
+    jobs: &JobsState,
+    imports: &[RescanScrubImport],
+) -> Result<(), String> {
+    if imports.len() > manager::RESCAN_AUTO_SCRUB_MAX {
+        return Ok(());
+    }
+    let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+    guard.enqueue_scrub_for_rescan_imports(imports)
+}
+
+#[cfg(windows)]
 fn with_manager<T>(
     jobs: State<'_, JobsState>,
     db: State<'_, AppDatabase>,

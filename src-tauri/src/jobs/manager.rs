@@ -17,6 +17,17 @@ use super::types::{
     JobView, JobsSnapshot, TypeMaxParallel,
 };
 
+/// Episode newly imported during `rescan_library` (auto scrub enqueue).
+#[derive(Debug, Clone)]
+pub struct RescanScrubImport {
+    pub path: String,
+    pub anime_title: String,
+    pub episode_label: String,
+}
+
+/// When a rescan imports at most this many episodes, queue scrub thumbnails for them.
+pub const RESCAN_AUTO_SCRUB_MAX: usize = 20;
+
 const MAX_PARALLEL_SETTING: &str = "jobs_max_parallel";
 const TYPE_MAX_PARALLEL_SETTING_PREFIX: &str = "jobs_max_parallel_type_";
 const DEFAULT_MAX_PARALLEL: u32 = 5;
@@ -246,6 +257,25 @@ impl JobManager {
             {
                 let _ = self.set_job_priority(&job_id, priority);
             }
+        }
+        Ok(())
+    }
+
+    pub fn enqueue_scrub_for_rescan_imports(
+        &mut self,
+        imports: &[RescanScrubImport],
+    ) -> Result<(), String> {
+        if imports.len() > RESCAN_AUTO_SCRUB_MAX {
+            return Ok(());
+        }
+        for item in imports {
+            let _ = self.enqueue_scrub_sprite(EnqueueScrubSpriteJob {
+                path: item.path.clone(),
+                priority: JobPriority::Low,
+                anime_title: Some(item.anime_title.clone()),
+                episode_label: Some(item.episode_label.clone()),
+                follow_up: Vec::new(),
+            })?;
         }
         Ok(())
     }

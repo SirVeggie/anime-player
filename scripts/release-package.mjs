@@ -13,6 +13,10 @@ async function packageRelease() {
   const root = process.cwd();
   const exePath = path.join(root, 'src-tauri', 'target', 'release', 'anime-player.exe');
   const dllPath = path.join(root, 'src-tauri', 'libs', 'mpv', 'libmpv-2.dll');
+  const ffmpegDir = path.join(root, 'src-tauri', 'libs', 'ffmpeg');
+  const ffmpegPaths = ['ffmpeg.exe', 'ffprobe.exe'].map((name) =>
+    path.join(ffmpegDir, name),
+  );
   const updateBat = path.join(root, 'scripts', 'update.bat');
   const updatePs1 = path.join(root, 'scripts', '_update.ps1');
 
@@ -30,6 +34,16 @@ async function packageRelease() {
     console.error('Error: libmpv-2.dll not found in src-tauri/libs/mpv.');
     console.error('Please run `npm run setup:mpv` first.');
     process.exit(1);
+  }
+
+  for (const toolPath of ffmpegPaths) {
+    try {
+      await fs.access(toolPath);
+    } catch {
+      console.error(`Error: ${path.basename(toolPath)} not found in src-tauri/libs/ffmpeg.`);
+      console.error('Please run `npm run setup:ffmpeg` first.');
+      process.exit(1);
+    }
   }
 
   for (const scriptPath of [updateBat, updatePs1]) {
@@ -62,6 +76,9 @@ async function packageRelease() {
   console.log('Copying files...');
   await fs.copyFile(exePath, destExe);
   await fs.copyFile(dllPath, destDll);
+  for (const toolPath of ffmpegPaths) {
+    await fs.copyFile(toolPath, path.join(destDir, path.basename(toolPath)));
+  }
   await fs.copyFile(updateBat, path.join(destDir, 'update.bat'));
   await fs.copyFile(updatePs1, path.join(destDir, '_update.ps1'));
   await fs.writeFile(destVersion, version, 'utf8');

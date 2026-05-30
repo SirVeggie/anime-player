@@ -58,6 +58,29 @@ fn portable_data_dir() -> Result<PathBuf, String> {
     Ok(dir.join("data"))
 }
 
+/// GUI release builds have no console; without this, ffmpeg/ffprobe flash CMD windows.
+fn hidden_command(program: &Path) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+fn find_on_path(file_name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(file_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn ffmpeg_path() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe
@@ -72,16 +95,30 @@ fn ffmpeg_path() -> Result<PathBuf, String> {
     if dev.is_file() {
         return Ok(dev);
     }
-    Err("ffmpeg.exe not found — run: npm run setup:ffmpeg".to_string())
+    if let Some(path_ffmpeg) = find_on_path("ffmpeg.exe") {
+        return Ok(path_ffmpeg);
+    }
+    Err(
+        "ffmpeg.exe not found beside the app, in the dev tree, or on PATH — \
+         run: npm run setup:ffmpeg, or install ffmpeg and add it to PATH"
+            .to_string(),
+    )
 }
 
 fn ffprobe_path() -> Result<PathBuf, String> {
     let ffmpeg = ffmpeg_path()?;
-    let probe = ffmpeg.with_file_name("ffprobe.exe");
-    if probe.is_file() {
-        return Ok(probe);
+    let beside_ffmpeg = ffmpeg.with_file_name("ffprobe.exe");
+    if beside_ffmpeg.is_file() {
+        return Ok(beside_ffmpeg);
     }
-    Err("ffprobe.exe not found — run: npm run setup:ffmpeg".to_string())
+    if let Some(path_probe) = find_on_path("ffprobe.exe") {
+        return Ok(path_probe);
+    }
+    Err(
+        "ffprobe.exe not found beside ffmpeg or on PATH — \
+         run: npm run setup:ffmpeg, or install ffmpeg and add it to PATH"
+            .to_string(),
+    )
 }
 
 pub fn normalized_video_path(path: &str) -> Result<PathBuf, String> {
@@ -135,7 +172,7 @@ pub fn scrub_sprite_is_cached(path: &str) -> Result<bool, String> {
 
 fn probe_duration(path: &Path) -> Result<f64, String> {
     let ffprobe = ffprobe_path()?;
-    let output = Command::new(&ffprobe)
+    let output = hidden_command(&ffprobe)
         .args([
             "-v",
             "error",
@@ -242,7 +279,7 @@ fn generate_sprite(
     );
 
     let ffmpeg = ffmpeg_path()?;
-    let output = Command::new(&ffmpeg)
+    let output = hidden_command(&ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y"])
         .args(["-hwaccel", "auto"])
         .args(["-skip_frame", "nokey"])

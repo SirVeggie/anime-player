@@ -889,79 +889,127 @@ pub fn save_episode_progress(
     })
 }
 
-#[tauri::command]
-pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String> {
-    db.with_conn(|conn| {
-        refresh_anime_latest_episode_at(conn)?;
+#[derive(Debug, Clone)]
+struct RescanImportedEpisode {
+    path: String,
+    anime_title: String,
+    episode_label: String,
+}
 
-        let roots = list_root_folders(conn)?;
-        let rules = list_enabled_detection_rules(conn)?;
-        let default_category = default_category_id(conn)?;
-
-        let mut summary = ScanSummary {
-            roots_scanned: 0,
-            episodes_imported: 0,
-            episodes_removed: 0,
-            unmatched_files: 0,
-        };
-
-        for root in roots {
-            let scan = scanner::scan_root(Path::new(&root.path), &rules)?;
-            summary.roots_scanned += 1;
-            summary.unmatched_files += scan.unmatched.len() as i64;
-
-            let tx = conn.transaction().map_err(|e| e.to_string())?;
-            let mut anime_cache: HashMap<String, i64> = HashMap::new();
-
-            mark_episodes_missing_not_in_scan(&tx, root.id, &scan.episodes)?;
-            delete_unmatched_files_now_matched(&tx, root.id, &scan.episodes)?;
-
-            for episode in scan.episodes {
-                let anime_id = cached_anime_id(
-                    &tx,
-                    &mut anime_cache,
-                    &episode.title,
-                    &episode.title_key,
-                    default_category,
-                )?;
-                if upsert_episode(&tx, root.id, anime_id, &episode)? {
-                    summary.episodes_imported += 1;
-                }
+fn scrub_episode_label(episode: &scanner::ScannedEpisode) -> String {
+    match episode.episode_number {
+        Some(n) if n.is_finite() => {
+            if n.fract() == 0.0 {
+                format!("Episode {}", n as i64)
+            } else {
+                format!("Episode {n:.1}")
             }
+        }
+        _ => episode.file_name.clone(),
+    }
+}
 
-            for file in scan.unmatched {
-                tx.execute(
-                    "INSERT INTO unmatched_files
-                        (root_folder_id, path, relative_path, file_name, reason, detected_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
-                     ON CONFLICT(path) DO UPDATE SET
-                        root_folder_id = excluded.root_folder_id,
-                        relative_path = excluded.relative_path,
-                        file_name = excluded.file_name,
-                        reason = excluded.reason,
-                        detected_at = CURRENT_TIMESTAMP
-                     WHERE unmatched_files.root_folder_id IS NOT excluded.root_folder_id
-                        OR unmatched_files.relative_path IS NOT excluded.relative_path
-                        OR unmatched_files.file_name IS NOT excluded.file_name
-                        OR unmatched_files.reason IS NOT excluded.reason",
-                    params![
-                        root.id,
-                        file.path,
-                        file.relative_path,
-                        file.file_name,
-                        file.reason
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
+fn rescan_library_in_conn(conn: &mut Connection) -> Result<(ScanSummary, Vec<RescanImportedEpisode>), String> {
+    refresh_anime_latest_episode_at(conn)?;
+
+    let roots = list_root_folders(conn)?;
+    let rules = list_enabled_detection_rules(conn)?;
+    let default_category = default_category_id(conn)?;
+
+    let mut summary = ScanSummary {
+        roots_scanned: 0,
+        episodes_imported: 0,
+        episodes_removed: 0,
+        unmatched_files: 0,
+    };
+    let mut new_imports = Vec::new();
+
+    for root in roots {
+        let scan = scanner::scan_root(Path::new(&root.path), &rules)?;
+        summary.roots_scanned += 1;
+        summary.unmatched_files += scan.unmatched.len() as i64;
+
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let mut anime_cache: HashMap<String, i64> = HashMap::new();
+
+        mark_episodes_missing_not_in_scan(&tx, root.id, &scan.episodes)?;
+        delete_unmatched_files_now_matched(&tx, root.id, &scan.episodes)?;
+
+        for episode in scan.episodes {
+            let anime_id = cached_anime_id(
+                &tx,
+                &mut anime_cache,
+                &episode.title,
+                &episode.title_key,
+                default_category,
+            )?;
+            if upsert_episode(&tx, root.id, anime_id, &episode)? {
+                summary.episodes_imported += 1;
+                new_imports.push(RescanImportedEpisode {
+                    path: episode.path.clone(),
+                    anime_title: episode.title.clone(),
+                    episode_label: scrub_episode_label(&episode),
+                });
             }
-
-            tx.commit().map_err(|e| e.to_string())?;
         }
 
-        refresh_anime_latest_episode_at(conn)?;
+        for file in scan.unmatched {
+            tx.execute(
+                "INSERT INTO unmatched_files
+                    (root_folder_id, path, relative_path, file_name, reason, detected_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+                 ON CONFLICT(path) DO UPDATE SET
+                    root_folder_id = excluded.root_folder_id,
+                    relative_path = excluded.relative_path,
+                    file_name = excluded.file_name,
+                    reason = excluded.reason,
+                    detected_at = CURRENT_TIMESTAMP
+                 WHERE unmatched_files.root_folder_id IS NOT excluded.root_folder_id
+                    OR unmatched_files.relative_path IS NOT excluded.relative_path
+                    OR unmatched_files.file_name IS NOT excluded.file_name
+                    OR unmatched_files.reason IS NOT excluded.reason",
+                params![
+                    root.id,
+                    file.path,
+                    file.relative_path,
+                    file.file_name,
+                    file.reason
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
 
-        Ok(summary)
-    })
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    refresh_anime_latest_episode_at(conn)?;
+
+    Ok((summary, new_imports))
+}
+
+#[tauri::command]
+#[cfg(windows)]
+pub fn rescan_library(
+    db: State<'_, AppDatabase>,
+    jobs: State<'_, crate::jobs::JobsState>,
+) -> Result<ScanSummary, String> {
+    let (summary, new_imports) = db.with_conn(rescan_library_in_conn)?;
+    let scrub_imports: Vec<crate::jobs::RescanScrubImport> = new_imports
+        .into_iter()
+        .map(|item| crate::jobs::RescanScrubImport {
+            path: item.path,
+            anime_title: item.anime_title,
+            episode_label: item.episode_label,
+        })
+        .collect();
+    crate::jobs::enqueue_scrub_for_rescan_imports(&jobs, &scrub_imports)?;
+    Ok(summary)
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String> {
+    db.with_conn(|conn| rescan_library_in_conn(conn).map(|(summary, _)| summary))
 }
 
 #[tauri::command]
