@@ -293,9 +293,10 @@ view components. Per-screen UI lives in `src/components/`:
   deletes unreferenced saved covers. The episode page's `delete_anime_files`
   command deletes/trashes the currently visible episode files for an anime,
   removes any now-empty parent folders up to (but not including) the matching
-  configured root folder, marks those episode rows missing, and removes that
-  anime's cached AniList cover path/file while leaving the database rows for
-  Settings cleanup.
+  configured root folder, removes scrub sprite cache and that anime's cached
+  AniList cover (and custom thumbnail when the title is removed), and deletes
+  the corresponding SQLite rows (whole title when every targeted file succeeds,
+  otherwise only the removed episode rows).
   `set_anime_custom_thumbnail_path` updates/clears the optional per-title
   custom poster file path on `anime.custom_thumbnail_path`.
   `save_episode_progress` stores `position_seconds`

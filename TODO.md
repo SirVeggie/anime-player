@@ -13,7 +13,7 @@ Episode selection page features
 - [x] ~~Show anime title, current progress~~
 - [x] ~~Add slight tint to already watched episodes~~
 - [x] ~~Show thumbnail also on this page (if available)~~
-- [x] ~~Delete anime files from the episode page, mark rows missing, and leave database cleanup to Settings~~
+- [x] ~~Delete anime files from the episode page and clear related local data~~
 - [ ] Delete episode (maybe context menu)
 
 ## Page transitions

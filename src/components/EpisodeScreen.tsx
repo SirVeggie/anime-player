@@ -763,8 +763,8 @@ export function EpisodeScreen(props: {
               </div>
             </div>
             <p className="delete-confirm-warning">
-              Files will be moved to the trash when possible. The database entries stay until you run cleanup in
-              Settings, but the local episode files will no longer be available.
+              Files will be moved to the trash when possible. Library progress, cached covers, and scrub
+              thumbnails for this title will also be removed.
             </p>
             <div className="modal-actions">
               <button type="button" onClick={() => setDeleteConfirmOpen(false)}>

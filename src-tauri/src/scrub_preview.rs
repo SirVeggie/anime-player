@@ -170,6 +170,73 @@ pub fn scrub_sprite_is_cached(path: &str) -> Result<bool, String> {
     Ok(jpg_path.is_file() && json_path.is_file())
 }
 
+fn normalize_path_for_match(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
+}
+
+fn remove_sprite_cache_files(key: &str) -> Result<u64, String> {
+    let cache_dir = sprite_cache_dir()?;
+    let mut bytes = 0_u64;
+    for ext in ["jpg", "json", "tmp.jpg"] {
+        let file_path = cache_dir.join(format!("{key}.{ext}"));
+        if !file_path.is_file() {
+            continue;
+        }
+        bytes += fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+        fs::remove_file(&file_path)
+            .map_err(|e| format!("failed to remove {}: {e}", file_path.display()))?;
+    }
+    Ok(bytes)
+}
+
+fn remove_sprite_cache_by_source_path(path: &str) -> Result<u64, String> {
+    let target = normalize_path_for_match(path);
+    let cache_dir = sprite_cache_dir()?;
+    if !cache_dir.is_dir() {
+        return Ok(0);
+    }
+
+    let mut bytes = 0_u64;
+    for entry in fs::read_dir(&cache_dir).map_err(|e| format!("failed to read {cache_dir:?}: {e}"))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let json_path = entry.path();
+        if json_path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(meta) = fs::read_to_string(&json_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<ScrubSpriteMeta>(&content).ok())
+        else {
+            continue;
+        };
+        if normalize_path_for_match(&meta.source_path) != target {
+            continue;
+        }
+        let Some(key) = json_path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        bytes += remove_sprite_cache_files(key)?;
+    }
+    Ok(bytes)
+}
+
+/// Removes cached scrub sprite files for a video path. Best-effort when the file is gone.
+pub fn remove_scrub_sprite_cache(path: &str) -> Result<u64, String> {
+    let mut bytes = 0_u64;
+    let path_buf = PathBuf::from(path);
+    if path_buf.is_file() {
+        if let Ok(canonical) = path_buf.canonicalize() {
+            if let Ok(key) = cache_key(&canonical) {
+                bytes += remove_sprite_cache_files(&key)?;
+            }
+            let canonical_str = canonical.to_string_lossy();
+            bytes += remove_sprite_cache_by_source_path(&canonical_str)?;
+        }
+    }
+    bytes += remove_sprite_cache_by_source_path(path)?;
+    Ok(bytes)
+}
+
 fn probe_duration(path: &Path) -> Result<f64, String> {
     let ffprobe = ffprobe_path()?;
     let output = hidden_command(&ffprobe)
