@@ -136,6 +136,10 @@ export function SettingsScreen(props: {
             <span>Saved thumbnails</span>
             <strong>{localDataStats ? formatBytes(localDataStats.thumbnails_bytes) : "-"}</strong>
           </div>
+          <div className="local-data-stat">
+            <span>Scrub sprites</span>
+            <strong>{localDataStats ? formatBytes(localDataStats.scrub_sprites_bytes) : "-"}</strong>
+          </div>
         </div>
         <p className="muted">
           Rescans keep temporarily missing or unmatched episodes so links, categories, and progress are not lost.

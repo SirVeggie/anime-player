@@ -288,9 +288,10 @@ view components. Per-screen UI lives in `src/components/`:
   regular library summaries and `list_episodes` filter to `missing = 0`, while
   `LibraryState.missing_anime` drives the Missing sidebar page with
   `missing/total` counts. Settings shows database and saved AniList cover sizes via
-  `get_local_data_stats`; the explicit `clean_local_data` action prunes stale
-  episodes/unmatched rows, removes anime with no episodes, vacuums SQLite, and
-  deletes unreferenced saved covers. The episode page's `delete_anime_files`
+  `get_local_data_stats` (database, AniList covers, and scrub-sprite cache sizes);
+  the explicit `clean_local_data` action prunes stale episodes/unmatched rows,
+  removes anime with no episodes, vacuums SQLite, and deletes unreferenced saved
+  covers and scrub sprites (matched by episode path keys in sprite metadata). The episode page's `delete_anime_files`
   command deletes/trashes the currently visible episode files for an anime,
   removes any now-empty parent folders up to (but not including) the matching
   configured root folder (including sibling empty folders such as an unused

@@ -539,7 +539,7 @@ function App() {
 
   const handleCleanLocalData = useCallback(async () => {
     const confirmed = window.confirm(
-      "Clean local data now? This removes database entries for episodes that are missing or no longer match your current detection rules, plus unused saved thumbnails.",
+      "Clean local data now? This removes database entries for episodes that are missing or no longer match your current detection rules, plus unused saved thumbnails and scrub sprites.",
     );
     if (!confirmed) return;
 
@@ -550,7 +550,8 @@ function App() {
       const staleEpisodes = `${summary.stale_episodes_removed} stale episode${summary.stale_episodes_removed === 1 ? "" : "s"}`;
       const emptyAnime = `${summary.empty_anime_removed} empty title entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
       const thumbnails = `${summary.thumbnails_removed} unused thumbnail${summary.thumbnails_removed === 1 ? "" : "s"}`;
-      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, and ${thumbnails}.`;
+      const scrubSprites = `${summary.scrub_sprites_removed} unused scrub sprite${summary.scrub_sprites_removed === 1 ? "" : "s"}`;
+      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, and ${scrubSprites}.`;
     });
   }, [reloadLibrary, reloadLocalDataStats, runAction]);
 

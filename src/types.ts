@@ -115,6 +115,7 @@ export type ProgressOverrideSummary = {
 export type LocalDataStats = {
   database_bytes: number;
   thumbnails_bytes: number;
+  scrub_sprites_bytes: number;
   total_bytes: number;
 };
 
@@ -124,6 +125,7 @@ export type LocalDataCleanupSummary = {
   empty_anime_removed: number;
   unmatched_files_removed: number;
   thumbnails_removed: number;
+  scrub_sprites_removed: number;
   bytes_removed: number;
 };
 

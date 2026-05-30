@@ -1,4 +1,5 @@
-﻿use std::fs;
+﻿use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -170,8 +171,13 @@ pub fn scrub_sprite_is_cached(path: &str) -> Result<bool, String> {
     Ok(jpg_path.is_file() && json_path.is_file())
 }
 
-fn normalize_path_for_match(path: &str) -> String {
+/// Normalized path key used to match episode rows with scrub sprite metadata.
+pub fn normalized_video_path_key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
+}
+
+fn normalize_path_for_match(path: &str) -> String {
+    normalized_video_path_key(path)
 }
 
 fn remove_sprite_cache_files(key: &str) -> Result<u64, String> {
@@ -218,6 +224,66 @@ fn remove_sprite_cache_by_source_path(path: &str) -> Result<u64, String> {
         bytes += remove_sprite_cache_files(key)?;
     }
     Ok(bytes)
+}
+
+/// Deletes scrub sprite cache entries whose `source_path` is not in `referenced_paths`.
+pub fn delete_unreferenced_scrub_sprites(
+    referenced_paths: &HashSet<String>,
+) -> Result<(usize, u64), String> {
+    let cache_dir = sprite_cache_dir()?;
+    if !cache_dir.is_dir() {
+        return Ok((0, 0));
+    }
+
+    let mut removed_count = 0_usize;
+    let mut removed_bytes = 0_u64;
+
+    for entry in fs::read_dir(&cache_dir).map_err(|e| format!("failed to read {cache_dir:?}: {e}"))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_path = entry.path();
+        if file_path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(meta) = fs::read_to_string(&file_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<ScrubSpriteMeta>(&content).ok())
+        else {
+            continue;
+        };
+        if referenced_paths.contains(&normalize_path_for_match(&meta.source_path)) {
+            continue;
+        }
+        let Some(key) = file_path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        removed_bytes += remove_sprite_cache_files(key)?;
+        removed_count += 1;
+    }
+
+    for entry in fs::read_dir(&cache_dir).map_err(|e| format!("failed to read {cache_dir:?}: {e}"))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_path = entry.path();
+        let Some(ext) = file_path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        if ext != "jpg" && ext != "tmp" {
+            continue;
+        }
+        let Some(stem) = file_path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let key = stem.strip_suffix(".tmp").unwrap_or(stem);
+        let json_path = cache_dir.join(format!("{key}.json"));
+        if json_path.is_file() {
+            continue;
+        }
+        if file_path.is_file() {
+            removed_bytes += fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+            let _ = fs::remove_file(&file_path);
+        }
+    }
+
+    Ok((removed_count, removed_bytes))
 }
 
 /// Removes cached scrub sprite files for a video path. Best-effort when the file is gone.

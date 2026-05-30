@@ -136,6 +136,7 @@ pub struct ProgressOverrideSummary {
 pub struct LocalDataStats {
     database_bytes: u64,
     thumbnails_bytes: u64,
+    scrub_sprites_bytes: u64,
     total_bytes: u64,
 }
 
@@ -146,6 +147,7 @@ pub struct LocalDataCleanupSummary {
     empty_anime_removed: i64,
     unmatched_files_removed: i64,
     thumbnails_removed: i64,
+    scrub_sprites_removed: i64,
     bytes_removed: u64,
 }
 
@@ -1078,6 +1080,7 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
             empty_anime_removed: 0,
             unmatched_files_removed: 0,
             thumbnails_removed: 0,
+            scrub_sprites_removed: 0,
             bytes_removed: 0,
         };
 
@@ -1105,10 +1108,15 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
     })?;
 
     let database_bytes_after = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
+    let referenced_scrub_paths = db.with_conn(|conn| list_referenced_scrub_paths(conn))?;
     let (removed, thumbnail_bytes_removed) = delete_unreferenced_thumbnails(&db)?;
     summary.thumbnails_removed = removed as i64;
-    summary.bytes_removed =
-        database_bytes_before.saturating_sub(database_bytes_after) + thumbnail_bytes_removed;
+    let (scrub_removed, scrub_bytes_removed) =
+        crate::scrub_preview::delete_unreferenced_scrub_sprites(&referenced_scrub_paths)?;
+    summary.scrub_sprites_removed = scrub_removed as i64;
+    summary.bytes_removed = database_bytes_before.saturating_sub(database_bytes_after)
+        + thumbnail_bytes_removed
+        + scrub_bytes_removed;
     Ok(summary)
 }
 
@@ -1897,16 +1905,18 @@ fn delete_unmatched_files_not_in_scan(
 
 fn local_data_stats(db: &AppDatabase) -> Result<LocalDataStats, String> {
     let database_bytes = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
-    let thumbnails_bytes = db
-        .path()
-        .parent()
-        .map(|data_dir| directory_size(&data_dir.join("anilist-covers")))
-        .transpose()?
-        .unwrap_or(0);
+    let (thumbnails_bytes, scrub_sprites_bytes) = match db.path().parent() {
+        Some(data_dir) => (
+            directory_size(&data_dir.join("anilist-covers"))?,
+            directory_size(&data_dir.join("scrub-sprites"))?,
+        ),
+        None => (0, 0),
+    };
     Ok(LocalDataStats {
         database_bytes,
         thumbnails_bytes,
-        total_bytes: database_bytes + thumbnails_bytes,
+        scrub_sprites_bytes,
+        total_bytes: database_bytes + thumbnails_bytes + scrub_sprites_bytes,
     })
 }
 
@@ -1965,6 +1975,30 @@ fn data_file_path(db: &AppDatabase, stored_path: &str) -> PathBuf {
     } else {
         path
     }
+}
+
+fn list_referenced_scrub_paths(conn: &mut Connection) -> Result<HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT path FROM episodes")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let paths = collect_rows(rows)?;
+
+    let mut keys = HashSet::new();
+    for path in paths {
+        keys.insert(crate::scrub_preview::normalized_video_path_key(&path));
+        let path_buf = PathBuf::from(&path);
+        if path_buf.is_file() {
+            if let Ok(canonical) = path_buf.canonicalize() {
+                keys.insert(crate::scrub_preview::normalized_video_path_key(
+                    &canonical.to_string_lossy(),
+                ));
+            }
+        }
+    }
+    Ok(keys)
 }
 
 fn list_referenced_thumbnail_paths(
