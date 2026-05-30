@@ -143,6 +143,14 @@ To build and package the portable release folder/zip (includes `update.bat` for 
 npm run release
 ```
 
+For a local-only portable build from the latest code (no git tag, zip, or publish artifacts):
+
+```powershell
+npm run portable
+```
+
+Output goes to `releases/dev/` (`anime-player.exe`, `libmpv-2.dll`, `update.bat`, `_update.ps1`).
+
 When publishing a GitHub release, attach the versioned zip, a standalone `anime-player.exe`, and `anime-player.exe.sha256` (written under `releases/` by the package script).
 
 ### Publishing to GitHub

@@ -25,7 +25,7 @@ published with the `gh` CLI.
 npm run release
 ```
 
-This runs `tauri build` then `package:portable`, which:
+This runs `tauri build` then `release:package`, which:
 
 - Creates an annotated tag `vMAJOR.MINOR` at HEAD (or reuses the tag already
   on HEAD).
@@ -127,10 +127,10 @@ GitHub release assets must include exactly what `_update.ps1` expects:
 - `anime-player.exe.sha256` (uppercase hex, `hash anime-player.exe` format)
 
 The portable zip must include `update.bat`, `_update.ps1`, `libmpv-2.dll`, and
-`VERSION.txt` (handled by `package-portable.mjs`).
+`VERSION.txt` (handled by `release-package.mjs`).
 
 ## Reference
 
 - User-facing steps: `README.md` → **Publishing to GitHub**
 - Scripts: `scripts/release-version.mjs`, `release-notes.mjs`,
-  `publish-github-release.mjs`, `package-portable.mjs`
+  `publish-github-release.mjs`, `release-package.mjs`

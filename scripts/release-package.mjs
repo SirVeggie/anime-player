@@ -9,7 +9,7 @@ async function sha256File(filePath) {
   return createHash('sha256').update(data).digest('hex').toUpperCase();
 }
 
-async function packagePortable() {
+async function packageRelease() {
   const root = process.cwd();
   const exePath = path.join(root, 'src-tauri', 'target', 'release', 'anime-player.exe');
   const dllPath = path.join(root, 'src-tauri', 'libs', 'mpv', 'libmpv-2.dll');
@@ -97,7 +97,7 @@ async function packagePortable() {
   console.log('  - anime-player.exe.sha256');
 }
 
-packagePortable().catch((err) => {
+packageRelease().catch((err) => {
   console.error(err);
   process.exit(1);
 });

@@ -505,6 +505,9 @@ npm run tauri build
 # Package includes update.bat, _update.ps1, and VERSION.txt. Publish GitHub
 # release with the zip, standalone anime-player.exe, and anime-player.exe.sha256.
 npm run release
+
+# Local dev portable only (no tag, zip, or publish artifacts): `releases/dev/`
+npm run portable
 ```
 
 A full `cargo check` from cold is ~25s on the user's machine; warm is <2s.

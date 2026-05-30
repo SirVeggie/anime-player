@@ -12,8 +12,9 @@
     "setup:ffmpeg": "node scripts/download-ffmpeg.mjs",
     "icon:setup": "node scripts/setup-icon.mjs",
     "update:mpv": "node scripts/update-mpv-libs.mjs",
-    "package:portable": "node scripts/package-portable.mjs",
-    "release": "npm run tauri build && npm run package:portable",
+    "portable": "npm run tauri build && node scripts/portable.mjs",
+    "release": "npm run tauri build && npm run release:package",
+    "release:package": "node scripts/release-package.mjs",
     "release:notes": "node scripts/release-notes.mjs",
     "release:publish": "node scripts/publish-github-release.mjs"
   },
