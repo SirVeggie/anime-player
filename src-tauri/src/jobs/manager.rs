@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,13 +13,18 @@ use crate::scrub_preview::{
 };
 
 use super::types::{
-    EnqueueJobResult, EnqueueScrubSpriteJob, JobPriority, JobProgress, JobStatus, JobView, JobsSnapshot,
+    EnqueueJobResult, EnqueueScrubSpriteJob, JobPriority, JobProgress, JobResourceType, JobStatus,
+    JobView, JobsSnapshot, TypeMaxParallel,
 };
 
 const MAX_PARALLEL_SETTING: &str = "jobs_max_parallel";
+const TYPE_MAX_PARALLEL_SETTING_PREFIX: &str = "jobs_max_parallel_type_";
 const DEFAULT_MAX_PARALLEL: u32 = 2;
+const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
 const MAX_PARALLEL_CAP: u32 = 8;
 const HISTORY_CAP: usize = 200;
+
+const MANAGED_RESOURCE_TYPES: &[JobResourceType] = &[JobResourceType::Ffmpeg];
 
 static JOB_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -48,6 +54,7 @@ struct JobRecord {
 pub struct JobManager {
     app: AppHandle,
     max_parallel: u32,
+    type_max_parallel: HashMap<String, u32>,
     queued_ids: Vec<String>,
     records: HashMap<String, JobRecord>,
     identity_to_id: HashMap<String, String>,
@@ -57,9 +64,11 @@ pub struct JobManager {
 impl JobManager {
     pub fn new(app: AppHandle, db: &AppDatabase) -> Self {
         let max_parallel = load_max_parallel(db);
+        let type_max_parallel = load_type_max_parallel(db);
         Self {
             app,
             max_parallel,
+            type_max_parallel,
             queued_ids: Vec::new(),
             records: HashMap::new(),
             identity_to_id: HashMap::new(),
@@ -84,6 +93,33 @@ impl JobManager {
         Ok(())
     }
 
+    pub fn set_type_max_parallel(
+        &mut self,
+        db: &AppDatabase,
+        resource_type: &str,
+        value: u32,
+    ) -> Result<(), String> {
+        let parsed = JobResourceType::parse(resource_type)
+            .filter(|t| *t != JobResourceType::None)
+            .ok_or_else(|| format!("unknown resource type: {resource_type}"))?;
+        let clamped = value.clamp(1, MAX_PARALLEL_CAP);
+        self.type_max_parallel
+            .insert(parsed.as_str().to_string(), clamped);
+        let setting_key = type_max_parallel_setting_key(parsed.as_str());
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![setting_key, clamped.to_string()],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })?;
+        self.pump();
+        self.emit_snapshot();
+        Ok(())
+    }
+
     pub fn snapshot(&self) -> JobsSnapshot {
         let mut active: Vec<JobView> = self
             .records
@@ -99,8 +135,23 @@ impl JobManager {
             active,
             history: self.history.iter().cloned().collect(),
             max_parallel: self.max_parallel,
+            type_max_parallel: self.type_max_parallel_snapshot(),
             active_count,
         }
+    }
+
+    fn type_max_parallel_snapshot(&self) -> Vec<TypeMaxParallel> {
+        MANAGED_RESOURCE_TYPES
+            .iter()
+            .map(|resource_type| TypeMaxParallel {
+                resource_type: resource_type.as_str().to_string(),
+                max_parallel: self
+                    .type_max_parallel
+                    .get(resource_type.as_str())
+                    .copied()
+                    .unwrap_or(default_type_max_parallel(*resource_type)),
+            })
+            .collect()
     }
 
     pub fn emit_snapshot(&self) {
@@ -148,7 +199,8 @@ impl JobManager {
         }
     }
 
-    /// Changes priority for a **queued** job. High starts immediately; upgrades call `pump`.
+    /// Changes priority for a **queued** job. High starts when limits allow (type caps
+    /// always apply); upgrades call `pump`.
     pub fn set_job_priority(&mut self, job_id: &str, priority: JobPriority) -> Result<(), String> {
         let Some(record) = self.records.get(job_id) else {
             return Err(format!("job not found: {job_id}"));
@@ -165,7 +217,8 @@ impl JobManager {
         }
 
         if priority == JobPriority::High {
-            self.start_job(job_id);
+            self.try_start_or_queue(job_id, true);
+            self.pump();
         } else if priority_rank(priority) > priority_rank(old) {
             self.pump();
         }
@@ -230,6 +283,7 @@ impl JobManager {
             desc,
             identity: identity.clone(),
             job_type: "scrub_sprite".to_string(),
+            resource_type: JobResourceType::Ffmpeg,
             priority: request.priority,
             status: JobStatus::Queued,
             cancelable: true,
@@ -255,7 +309,8 @@ impl JobManager {
         self.identity_to_id.insert(identity, id.clone());
 
         if request.priority == JobPriority::High {
-            self.start_job(&id);
+            self.try_start_or_queue(&id, true);
+            self.pump();
         } else {
             self.queued_ids.push(id.clone());
             self.pump();
@@ -275,21 +330,80 @@ impl JobManager {
             .count() as u32
     }
 
+    fn running_count_for_resource_type(&self, resource_type: JobResourceType) -> u32 {
+        if resource_type == JobResourceType::None {
+            return 0;
+        }
+        let key = resource_type.as_str();
+        self.records
+            .values()
+            .filter(|r| {
+                r.view.status == JobStatus::Running && r.view.resource_type.as_str() == key
+            })
+            .count() as u32
+    }
+
+    fn type_max_for(&self, resource_type: JobResourceType) -> Option<u32> {
+        if resource_type == JobResourceType::None {
+            return None;
+        }
+        Some(
+            self.type_max_parallel
+                .get(resource_type.as_str())
+                .copied()
+                .unwrap_or(default_type_max_parallel(resource_type)),
+        )
+    }
+
+    /// Global cap applies to low/medium only (high may bypass). Resource-type caps apply to all.
+    fn can_start(&self, job_id: &str) -> bool {
+        let Some(record) = self.records.get(job_id) else {
+            return false;
+        };
+        if record.view.status != JobStatus::Queued {
+            return false;
+        }
+        let is_high = record.view.priority == JobPriority::High;
+        if !is_high && self.running_count() >= self.max_parallel {
+            return false;
+        }
+        if let Some(type_limit) = self.type_max_for(record.view.resource_type) {
+            if self.running_count_for_resource_type(record.view.resource_type) >= type_limit {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn try_start_or_queue(&mut self, job_id: &str, queue_front: bool) {
+        if self.can_start(job_id) {
+            self.start_job(job_id);
+            return;
+        }
+        self.ensure_queued(job_id, queue_front);
+    }
+
+    fn ensure_queued(&mut self, job_id: &str, front: bool) {
+        self.queued_ids.retain(|id| id != job_id);
+        if front {
+            self.queued_ids.insert(0, job_id.to_string());
+        } else {
+            self.queued_ids.push(job_id.to_string());
+        }
+    }
+
     /// Low/medium jobs respect `max_parallel` against **all** running jobs (including high).
-    /// High-priority jobs always start on enqueue and are not gated by the limit.
+    /// High-priority jobs bypass the global cap but not per-resource-type caps.
     fn pump(&mut self) {
         loop {
-            if self.running_count() >= self.max_parallel {
-                break;
-            }
-            let Some(next_id) = self.pick_next_queued_id() else {
+            let Some(next_id) = self.pick_startable_queued_id() else {
                 break;
             };
             self.start_job(&next_id);
         }
     }
 
-    fn pick_next_queued_id(&self) -> Option<String> {
+    fn pick_startable_queued_id(&self) -> Option<String> {
         let has_medium = self.queued_ids.iter().any(|id| {
             self.records
                 .get(id)
@@ -305,7 +419,9 @@ impl JobManager {
             if has_medium && record.view.priority == JobPriority::Low {
                 continue;
             }
-            return Some(id.clone());
+            if self.can_start(id) {
+                return Some(id.clone());
+            }
         }
         None
     }
@@ -430,10 +546,7 @@ pub fn run_scrub_job_worker(
         return WorkerOutcome::Canceled(Some(path.to_string()));
     }
     match run_scrub_sprite_job(path, cancel, |step, total, label| on_step(step, total, label)) {
-        Ok(ready) => WorkerOutcome::Done(
-            format!("Sprite sheet ready for {}", ready.path),
-            Some(ready),
-        ),
+        Ok(ready) => WorkerOutcome::Done("Sprite sheet ready".to_string(), Some(ready)),
         Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled(Some(path.to_string())),
         Err(e) => WorkerOutcome::Failed(e, Some(path.to_string())),
     }
@@ -461,10 +574,14 @@ fn build_scrub_desc(request: &EnqueueScrubSpriteJob) -> String {
             parts.push(l.to_string());
         }
     }
-    if parts.is_empty() {
-        request.path.clone()
+    if !parts.is_empty() {
+        parts.join(" — ")
     } else {
-        format!("{} — {}", parts.join(" — "), request.path)
+        Path::new(&request.path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&request.path)
+            .to_string()
     }
 }
 
@@ -484,4 +601,40 @@ fn load_max_parallel(db: &AppDatabase) -> u32 {
             .clamp(1, MAX_PARALLEL_CAP))
     })
     .unwrap_or(DEFAULT_MAX_PARALLEL)
+}
+
+fn type_max_parallel_setting_key(resource_type: &str) -> String {
+    format!("{TYPE_MAX_PARALLEL_SETTING_PREFIX}{resource_type}")
+}
+
+fn default_type_max_parallel(resource_type: JobResourceType) -> u32 {
+    match resource_type {
+        JobResourceType::Ffmpeg => DEFAULT_FFMPEG_MAX_PARALLEL,
+        JobResourceType::None => MAX_PARALLEL_CAP,
+    }
+}
+
+fn load_type_max_parallel(db: &AppDatabase) -> HashMap<String, u32> {
+    let mut limits = HashMap::new();
+    for resource_type in MANAGED_RESOURCE_TYPES {
+        let key = type_max_parallel_setting_key(resource_type.as_str());
+        let value = db
+            .with_conn(|conn| {
+                let value: Option<String> = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = ?1",
+                        rusqlite::params![key],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())?;
+                Ok(value
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(default_type_max_parallel(*resource_type))
+                    .clamp(1, MAX_PARALLEL_CAP))
+            })
+            .unwrap_or(default_type_max_parallel(*resource_type));
+        limits.insert(resource_type.as_str().to_string(), value);
+    }
+    limits
 }

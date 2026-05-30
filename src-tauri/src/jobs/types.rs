@@ -18,6 +18,32 @@ pub enum JobStatus {
     Canceled,
 }
 
+/// Resource pool for parallel scheduling (`none` = only the global cap applies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobResourceType {
+    #[default]
+    None,
+    Ffmpeg,
+}
+
+impl JobResourceType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Ffmpeg => "ffmpeg",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "ffmpeg" => Some(Self::Ffmpeg),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobProgress {
@@ -33,6 +59,8 @@ pub struct JobView {
     pub desc: String,
     pub identity: String,
     pub job_type: String,
+    #[serde(default)]
+    pub resource_type: JobResourceType,
     pub priority: JobPriority,
     pub status: JobStatus,
     pub cancelable: bool,
@@ -46,10 +74,18 @@ pub struct JobView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TypeMaxParallel {
+    pub resource_type: String,
+    pub max_parallel: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JobsSnapshot {
     pub active: Vec<JobView>,
     pub history: Vec<JobView>,
     pub max_parallel: u32,
+    pub type_max_parallel: Vec<TypeMaxParallel>,
     pub active_count: u32,
 }
 

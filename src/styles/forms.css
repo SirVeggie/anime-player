@@ -171,6 +171,20 @@
   gap: 12px;
 }
 
+.jobs-parallel-limits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.jobs-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
 .jobs-cancel-all {
   align-self: flex-end;
 }
@@ -235,6 +249,21 @@
 .job-priority-pill--high {
   background: rgba(88, 166, 255, 0.14);
   color: rgba(155, 190, 230, 0.95);
+}
+
+.job-resource-type-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.job-resource-type-pill--ffmpeg {
+  background: rgba(163, 113, 247, 0.14);
+  color: rgba(190, 165, 235, 0.95);
 }
 
 .job-row-desc {

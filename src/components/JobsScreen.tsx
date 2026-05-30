@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { jobsCancel, jobsCancelAll, jobsSetMaxParallel } from "../api";
+import { jobsCancel, jobsCancelAll, jobsSetMaxParallel, jobsSetTypeMaxParallel } from "../api";
 import { subscribeJobsSnapshot } from "../jobs/jobClient";
-import type { JobPriority, JobRecord, JobsSnapshot } from "../types";
+import type { JobPriority, JobRecord, JobResourceType, JobsSnapshot } from "../types";
 import { errorMessage, formatDurationMs } from "../utils";
 import { ViewHeader } from "./ViewHeader";
 
 type JobsTab = "active" | "history";
+
+const PARALLEL_LIMIT_DEBOUNCE_MS = 500;
 
 function useNowMs(tick: boolean) {
   const [now, setNow] = useState(() => Date.now());
@@ -37,6 +39,52 @@ function priorityLabel(priority: JobPriority) {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
 }
 
+function resourceTypeLabel(resourceType: JobResourceType) {
+  return resourceType.charAt(0).toUpperCase() + resourceType.slice(1);
+}
+
+function ParallelLimitStepper(props: {
+  value: number;
+  disabled: boolean;
+  ariaLabel: string;
+  onChange: (value: number) => void;
+}) {
+  const { value, disabled, ariaLabel, onChange } = props;
+  return (
+    <div className="score-stepper">
+      <input
+        type="number"
+        min={1}
+        max={8}
+        value={value}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onChange={(e) => {
+          const parsed = Number(e.currentTarget.value);
+          if (!Number.isFinite(parsed)) return;
+          onChange(Math.min(8, Math.max(1, Math.trunc(parsed))));
+        }}
+      />
+      <div className="score-stepper-buttons">
+        <button
+          type="button"
+          className="score-stepper-button score-stepper-button--up"
+          aria-label={`Increase ${ariaLabel}`}
+          disabled={disabled || value >= 8}
+          onClick={() => onChange(Math.min(8, value + 1))}
+        />
+        <button
+          type="button"
+          className="score-stepper-button score-stepper-button--down"
+          aria-label={`Decrease ${ariaLabel}`}
+          disabled={disabled || value <= 1}
+          onClick={() => onChange(Math.max(1, value - 1))}
+        />
+      </div>
+    </div>
+  );
+}
+
 function progressPercent(job: JobRecord) {
   if (job.progress.totalSteps <= 0) return 0;
   return Math.round((job.progress.currentStep / job.progress.totalSteps) * 100);
@@ -62,6 +110,11 @@ function JobRow(props: {
         <div className="job-row-titles">
           <div className="job-row-name-line">
             <strong>{job.name}</strong>
+            {job.resourceType !== "none" ?
+              <span className={`job-resource-type-pill job-resource-type-pill--${job.resourceType}`}>
+                {resourceTypeLabel(job.resourceType)}
+              </span>
+            : null}
             <span className={`job-priority-pill job-priority-pill--${job.priority}`}>
               {priorityLabel(job.priority)}
             </span>
@@ -101,13 +154,76 @@ export function JobsScreen(props: {
   const { snapshot, onBack, onError } = props;
   const [activeTab, setActiveTab] = useState<JobsTab>("active");
   const [maxParallelDraft, setMaxParallelDraft] = useState(2);
-  const [busy, setBusy] = useState(false);
+  const [typeMaxParallelDraft, setTypeMaxParallelDraft] = useState<Record<string, number>>({});
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [limitsSaving, setLimitsSaving] = useState(false);
+
+  const maxParallelSaved = snapshot?.maxParallel;
+  const typeMaxParallelSaved = snapshot?.typeMaxParallel;
+  const typeMaxParallelSavedKey =
+    typeMaxParallelSaved?.map((entry) => `${entry.resourceType}:${entry.maxParallel}`).join("|") ?? "";
+
+  const savedLimits = useMemo(() => {
+    if (maxParallelSaved == null || !typeMaxParallelSaved) return null;
+    return {
+      maxParallel: maxParallelSaved,
+      typeMaxParallel: Object.fromEntries(
+        typeMaxParallelSaved.map((entry) => [entry.resourceType, entry.maxParallel]),
+      ),
+      entries: typeMaxParallelSaved,
+    };
+  }, [maxParallelSaved, typeMaxParallelSavedKey]);
 
   useEffect(() => {
-    if (snapshot) {
-      setMaxParallelDraft(snapshot.maxParallel);
-    }
-  }, [snapshot?.maxParallel]);
+    if (!savedLimits) return;
+    setMaxParallelDraft(savedLimits.maxParallel);
+    setTypeMaxParallelDraft({ ...savedLimits.typeMaxParallel });
+  }, [savedLimits]);
+
+  useEffect(() => {
+    if (!savedLimits) return;
+
+    const globalChanged = maxParallelDraft !== savedLimits.maxParallel;
+    const typeChanged = savedLimits.entries.some(
+      (entry) => (typeMaxParallelDraft[entry.resourceType] ?? entry.maxParallel) !== entry.maxParallel,
+    );
+    if (!globalChanged && !typeChanged) return;
+
+    const timeoutId = window.setTimeout(() => {
+      if (!Number.isInteger(maxParallelDraft) || maxParallelDraft < 1 || maxParallelDraft > 8) {
+        onError("Max parallel jobs must be an integer from 1 to 8.");
+        return;
+      }
+      for (const entry of savedLimits.entries) {
+        const value = typeMaxParallelDraft[entry.resourceType] ?? entry.maxParallel;
+        if (!Number.isInteger(value) || value < 1 || value > 8) {
+          onError(`Max parallel ${entry.resourceType} jobs must be an integer from 1 to 8.`);
+          return;
+        }
+      }
+
+      void (async () => {
+        setLimitsSaving(true);
+        try {
+          if (globalChanged) {
+            await jobsSetMaxParallel(maxParallelDraft);
+          }
+          for (const entry of savedLimits.entries) {
+            const value = typeMaxParallelDraft[entry.resourceType] ?? entry.maxParallel;
+            if (value !== entry.maxParallel) {
+              await jobsSetTypeMaxParallel(entry.resourceType, value);
+            }
+          }
+        } catch (e) {
+          onError(errorMessage(e));
+        } finally {
+          setLimitsSaving(false);
+        }
+      })();
+    }, PARALLEL_LIMIT_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [maxParallelDraft, onError, savedLimits, typeMaxParallelDraft]);
 
   const activeJobs = useMemo(
     () =>
@@ -120,43 +236,28 @@ export function JobsScreen(props: {
 
   const handleCancel = useCallback(
     async (jobId: string) => {
-      setBusy(true);
+      setCancelBusy(true);
       try {
         await jobsCancel(jobId);
       } catch (e) {
         onError(errorMessage(e));
       } finally {
-        setBusy(false);
+        setCancelBusy(false);
       }
     },
     [onError],
   );
 
   const handleCancelAll = useCallback(async () => {
-    setBusy(true);
+    setCancelBusy(true);
     try {
       await jobsCancelAll();
     } catch (e) {
       onError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setCancelBusy(false);
     }
   }, [onError]);
-
-  const handleSaveMaxParallel = useCallback(async () => {
-    if (!Number.isInteger(maxParallelDraft) || maxParallelDraft < 1 || maxParallelDraft > 8) {
-      onError("Max parallel jobs must be an integer from 1 to 8.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await jobsSetMaxParallel(maxParallelDraft);
-    } catch (e) {
-      onError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [maxParallelDraft, onError]);
 
   return (
     <>
@@ -186,50 +287,43 @@ export function JobsScreen(props: {
       {activeTab === "active" ?
         <section className="panel bulk-edit-panel jobs-panel">
           <div className="jobs-toolbar">
-            <label className="stacked-field">
-              <span>Max parallel jobs</span>
-              <div className="score-stepper">
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
+            <div className="jobs-parallel-limits">
+              <label className="stacked-field">
+                <span>Max parallel jobs</span>
+                <ParallelLimitStepper
                   value={maxParallelDraft}
-                  disabled={busy}
-                  onChange={(e) => {
-                    const parsed = Number(e.currentTarget.value);
-                    if (!Number.isFinite(parsed)) return;
-                    setMaxParallelDraft(Math.min(8, Math.max(1, Math.trunc(parsed))));
-                  }}
+                  disabled={limitsSaving}
+                  ariaLabel="max parallel jobs"
+                  onChange={setMaxParallelDraft}
                 />
-                <div className="score-stepper-buttons">
-                  <button
-                    type="button"
-                    className="score-stepper-button score-stepper-button--up"
-                    aria-label="Increase max parallel jobs"
-                    disabled={busy || maxParallelDraft >= 8}
-                    onClick={() => setMaxParallelDraft((value) => Math.min(8, value + 1))}
+              </label>
+              {(snapshot?.typeMaxParallel ?? []).map((entry) => (
+                <label key={entry.resourceType} className="stacked-field">
+                  <span>Max parallel {entry.resourceType}</span>
+                  <ParallelLimitStepper
+                    value={typeMaxParallelDraft[entry.resourceType] ?? entry.maxParallel}
+                    disabled={limitsSaving}
+                    ariaLabel={`max parallel ${entry.resourceType} jobs`}
+                    onChange={(value) => {
+                      setTypeMaxParallelDraft((current) => ({
+                        ...current,
+                        [entry.resourceType]: value,
+                      }));
+                    }}
                   />
-                  <button
-                    type="button"
-                    className="score-stepper-button score-stepper-button--down"
-                    aria-label="Decrease max parallel jobs"
-                    disabled={busy || maxParallelDraft <= 1}
-                    onClick={() => setMaxParallelDraft((value) => Math.max(1, value - 1))}
-                  />
-                </div>
-              </div>
-            </label>
-            <button type="button" disabled={busy} onClick={() => void handleSaveMaxParallel()}>
-              Apply
-            </button>
-            <button
-              type="button"
-              className="jobs-cancel-all"
-              disabled={busy || activeJobs.length === 0}
-              onClick={() => void handleCancelAll()}
-            >
-              Cancel all
-            </button>
+                </label>
+              ))}
+            </div>
+            <div className="jobs-toolbar-actions">
+              <button
+                type="button"
+                className="jobs-cancel-all"
+                disabled={cancelBusy || activeJobs.length === 0}
+                onClick={() => void handleCancelAll()}
+              >
+                Cancel all
+              </button>
+            </div>
           </div>
 
           {activeJobs.length === 0 ?

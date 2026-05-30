@@ -210,12 +210,15 @@ export type JobProgress = {
   totalSteps: number;
 };
 
+export type JobResourceType = "none" | "ffmpeg";
+
 export type JobRecord = {
   id: string;
   name: string;
   desc: string;
   identity: string;
   jobType: string;
+  resourceType: JobResourceType;
   priority: JobPriority;
   status: JobStatus;
   cancelable: boolean;
@@ -227,10 +230,16 @@ export type JobRecord = {
   finishedAt: number | null;
 };
 
+export type TypeMaxParallel = {
+  resourceType: string;
+  maxParallel: number;
+};
+
 export type JobsSnapshot = {
   active: JobRecord[];
   history: JobRecord[];
   maxParallel: number;
+  typeMaxParallel: TypeMaxParallel[];
   activeCount: number;
 };
 

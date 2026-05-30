@@ -369,6 +369,7 @@ pub fn run() {
         scrub_preview::scrub_sprite_is_cached_cmd,
         jobs::jobs_get_snapshot,
         jobs::jobs_set_max_parallel,
+        jobs::jobs_set_type_max_parallel,
         jobs::jobs_cancel,
         jobs::jobs_cancel_all,
         jobs::jobs_enqueue_scrub_sprite,

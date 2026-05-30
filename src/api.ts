@@ -150,6 +150,13 @@ export function jobsSetMaxParallel(maxParallel: number): Promise<void> {
   return invoke("jobs_set_max_parallel", { maxParallel });
 }
 
+export function jobsSetTypeMaxParallel(
+  resourceType: string,
+  maxParallel: number,
+): Promise<void> {
+  return invoke("jobs_set_type_max_parallel", { resourceType, maxParallel });
+}
+
 export function jobsCancel(jobId: string): Promise<void> {
   return invoke("jobs_cancel", { jobId });
 }

@@ -53,7 +53,11 @@ view components. Per-screen UI lives in `src/components/`:
   default 2, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
   jobs may run at once for scheduling low/medium work (high-priority jobs count
   toward that cap but are never blocked by it—e.g. six low jobs at the limit can
-  still be joined by a seventh high job). Jobs dedupe by `identity`, support cancel/cancel-all,
+  still be joined by a seventh high job). Jobs also have a **resource type**
+  (`none` by default; scrub thumbnails use `ffmpeg`) with its own max-parallel
+  limit (`jobs_max_parallel_type_ffmpeg`, default 1). A job starts only when
+  both caps allow it: low/medium respect `min(global, type)`; high bypasses the
+  global cap but **not** the type cap. Jobs dedupe by `identity`, support cancel/cancel-all,
   progress steps, and emit `jobs://updated` / `jobs://finished`. Frontend
   helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
   `onJobIdentityFinished`).

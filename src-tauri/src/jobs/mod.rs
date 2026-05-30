@@ -66,6 +66,19 @@ pub fn jobs_set_max_parallel(
 
 #[cfg(windows)]
 #[tauri::command]
+pub fn jobs_set_type_max_parallel(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    resource_type: String,
+    max_parallel: u32,
+) -> Result<(), String> {
+    with_manager(jobs, db, |manager, db| {
+        manager.set_type_max_parallel(db, &resource_type, max_parallel)
+    })
+}
+
+#[cfg(windows)]
+#[tauri::command]
 pub fn jobs_cancel(
     jobs: State<'_, JobsState>,
     db: State<'_, AppDatabase>,

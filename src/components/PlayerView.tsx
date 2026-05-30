@@ -368,6 +368,7 @@ export function PlayerView(props: {
   // real false -> true transition (returning to the player), not on every
   // re-run from unrelated state changes.
   const wasVisibleRef = useRef(false);
+  const visibleRef = useRef(visible);
   const minPositionSecondsToPersistRef = useRef(60);
   const sessionOpenedAtMsRef = useRef(Date.now());
   const sessionOpenedAsWatchedRef = useRef(episode.watched);
@@ -377,6 +378,10 @@ export function PlayerView(props: {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  useEffect(() => {
+    visibleRef.current = visible;
+  }, [visible]);
 
   useEffect(() => {
     void getMinPositionSecondsToPersist().then((seconds) => {
@@ -722,6 +727,7 @@ export function PlayerView(props: {
               void refreshVideoGeometry();
               return;
             }
+            if (!visibleRef.current) return;
             setPaused(false);
             setVideoCompositorRevealed(true);
             void refreshVideoGeometry();
@@ -872,6 +878,18 @@ export function PlayerView(props: {
   const onTogglePause = useCallback(() => {
     void invoke("mpv_cycle_pause").catch((e) => onError(errorMessage(e)));
   }, [onError]);
+
+  const cancelScrubSession = useCallback(() => {
+    scrubEndIdRef.current += 1;
+    scrubSeekEpochRef.current += 1;
+    scrubSessionRef.current = null;
+    seekInteractingRef.current = false;
+    setSeekInteracting(false);
+  }, []);
+
+  useEffect(() => {
+    if (!visible) cancelScrubSession();
+  }, [cancelScrubSession, visible]);
 
   const onScrubStart = useCallback(() => {
     scrubEndIdRef.current += 1;
@@ -1078,6 +1096,7 @@ export function PlayerView(props: {
   }, []);
 
   const hidePlayer = useCallback(async () => {
+    cancelScrubSession();
     try {
       await invoke("mpv_set_pause", { paused: true });
       setPaused(true);
@@ -1086,7 +1105,7 @@ export function PlayerView(props: {
     } catch (e) {
       onError(errorMessage(e));
     }
-  }, [onBack, onError, persistProgress]);
+  }, [cancelScrubSession, onBack, onError, persistProgress]);
 
   const loadSibling = useCallback(
     (delta: number) => {
