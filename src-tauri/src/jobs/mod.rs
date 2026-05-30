@@ -148,7 +148,6 @@ fn complete_worker_task(app: AppHandle, job_id: String, outcome: WorkerOutcome) 
 #[cfg(windows)]
 pub fn spawn_scrub_worker(app: AppHandle, job_id: String, path: String, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     tauri::async_runtime::spawn(async move {
-        let path_for_outcome = path.clone();
         let job_id_for_step = job_id.clone();
         let app_for_step = app.clone();
         let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -160,7 +159,7 @@ pub fn spawn_scrub_worker(app: AppHandle, job_id: String, path: String, cancel: 
 
         let outcome = match outcome {
             Ok(o) => o,
-            Err(e) => WorkerOutcome::Failed(e.to_string(), Some(path_for_outcome)),
+            Err(e) => WorkerOutcome::Failed(e.to_string()),
         };
         complete_worker_task(app, job_id, outcome);
     });

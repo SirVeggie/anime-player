@@ -469,7 +469,7 @@ impl JobManager {
                     let _ = self.enqueue_scrub_sprite(follow);
                 }
             }
-            WorkerOutcome::Failed(message, _) => {
+            WorkerOutcome::Failed(message) => {
                 if let Some(path) = path_for_emit {
                     emit_scrub_sprite_status(
                         &self.app,
@@ -478,7 +478,7 @@ impl JobManager {
                 }
                 self.finish_job(job_id, JobStatus::Failed, Some(message));
             }
-            WorkerOutcome::Canceled(_) => {
+            WorkerOutcome::Canceled => {
                 if let Some(path) = path_for_emit {
                     emit_scrub_sprite_status(
                         &self.app,
@@ -533,8 +533,8 @@ impl JobManager {
 
 pub enum WorkerOutcome {
     Done(String, Option<scrub_preview::ScrubSpriteReady>),
-    Failed(String, Option<String>),
-    Canceled(Option<String>),
+    Failed(String),
+    Canceled,
 }
 
 pub fn run_scrub_job_worker(
@@ -543,12 +543,12 @@ pub fn run_scrub_job_worker(
     on_step: impl Fn(u32, u32, &str),
 ) -> WorkerOutcome {
     if cancel.load(Ordering::Relaxed) {
-        return WorkerOutcome::Canceled(Some(path.to_string()));
+        return WorkerOutcome::Canceled;
     }
     match run_scrub_sprite_job(path, cancel, |step, total, label| on_step(step, total, label)) {
         Ok(ready) => WorkerOutcome::Done("Sprite sheet ready".to_string(), Some(ready)),
-        Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled(Some(path.to_string())),
-        Err(e) => WorkerOutcome::Failed(e, Some(path.to_string())),
+        Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
+        Err(e) => WorkerOutcome::Failed(e),
     }
 }
 
