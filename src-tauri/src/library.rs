@@ -1578,6 +1578,8 @@ fn remove_empty_parent_dirs(start: &Path, roots: &[PathBuf]) {
     };
 
     while !paths_equal(&dir, root) {
+        remove_empty_folder_children_when_only_empty_folders_remain(&dir);
+
         if !is_directory_empty(&dir) {
             break;
         }
@@ -1588,6 +1590,61 @@ fn remove_empty_parent_dirs(start: &Path, roots: &[PathBuf]) {
             Some(parent) => parent.to_path_buf(),
             None => break,
         };
+    }
+}
+
+/// True when `path` has no files and every subdirectory is empty or file-free.
+fn directory_only_contains_empty_folders(path: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if entry_path.is_file() {
+            return false;
+        }
+        if entry_path.is_dir() && directory_tree_has_files(&entry_path) {
+            return false;
+        }
+    }
+    true
+}
+
+fn directory_tree_has_files(path: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return true;
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if entry_path.is_file() {
+            return true;
+        }
+        if entry_path.is_dir() && directory_tree_has_files(&entry_path) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Removes child directories when the parent has no files and every child is an empty folder tree.
+fn remove_empty_folder_children_when_only_empty_folders_remain(parent: &Path) {
+    if !directory_only_contains_empty_folders(parent) {
+        return;
+    }
+
+    let child_dirs: Vec<PathBuf> = fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            path.is_dir().then_some(path)
+        })
+        .collect();
+
+    for child in child_dirs {
+        remove_empty_folder_children_when_only_empty_folders_remain(&child);
+        let _ = fs::remove_dir(&child);
     }
 }
 

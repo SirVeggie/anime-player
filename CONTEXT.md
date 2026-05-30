@@ -293,7 +293,9 @@ view components. Per-screen UI lives in `src/components/`:
   deletes unreferenced saved covers. The episode page's `delete_anime_files`
   command deletes/trashes the currently visible episode files for an anime,
   removes any now-empty parent folders up to (but not including) the matching
-  configured root folder, removes scrub sprite cache and that anime's cached
+  configured root folder (including sibling empty folders such as an unused
+  `Watched` directory when the season folder has no files and no other content),
+  removes scrub sprite cache and that anime's cached
   AniList cover (and custom thumbnail when the title is removed), and deletes
   the corresponding SQLite rows (whole title when every targeted file succeeds,
   otherwise only the removed episode rows).
