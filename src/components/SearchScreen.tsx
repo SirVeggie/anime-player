@@ -1,33 +1,26 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { AnimeSummary } from "../types";
+import { matchingAnimeIds, parseSearchQuery } from "../search";
+import type { AnimeSearchEntry, AnimeSummary } from "../types";
 import { AnimeCardGrid } from "./AnimeGrid";
 import { ViewHeader } from "./ViewHeader";
 
-function normalizeSearchText(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function matchesAnime(anime: AnimeSummary, query: string) {
-  const normalizedTitle = anime.title.toLowerCase();
-  const normalizedAnilistTitle = anime.anilist_title?.toLowerCase() ?? "";
-  return normalizedTitle.includes(query) || normalizedAnilistTitle.includes(query);
-}
-
 export function SearchScreen(props: {
   anime: AnimeSummary[];
+  searchIndex: AnimeSearchEntry[];
   preferAnilistDisplayTitle: boolean;
   query: string;
   focusToken: number;
   onQueryChange: (query: string) => void;
   onOpenAnime: (anime: AnimeSummary) => void;
 }) {
-  const { anime, preferAnilistDisplayTitle, query, focusToken, onQueryChange, onOpenAnime } = props;
+  const { anime, searchIndex, preferAnilistDisplayTitle, query, focusToken, onQueryChange, onOpenAnime } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const normalizedQuery = normalizeSearchText(query);
+  const searchBranches = useMemo(() => parseSearchQuery(query), [query]);
   const matchingAnime = useMemo(() => {
-    if (!normalizedQuery) return [];
-    return anime.filter((item) => matchesAnime(item, normalizedQuery));
-  }, [anime, normalizedQuery]);
+    if (searchBranches.length === 0) return [];
+    const ids = matchingAnimeIds(searchIndex, query);
+    return anime.filter((item) => ids.has(item.id));
+  }, [anime, query, searchIndex]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -36,36 +29,36 @@ export function SearchScreen(props: {
     input.select();
   }, [focusToken]);
 
-  const subtitle = normalizedQuery
+  const subtitle = searchBranches.length
     ? `${matchingAnime.length} matching title${matchingAnime.length === 1 ? "" : "s"}.`
-    : "Search your local library.";
+    : "Search titles, AniList names, or episode file names.";
 
   return (
     <>
       <ViewHeader title="Search" subtitle={subtitle} />
       <form className="search-panel" onSubmit={(event) => event.preventDefault()}>
         <label className="stacked-field">
-          <span>Title</span>
+          <span>Query</span>
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(event) => onQueryChange(event.currentTarget.value)}
-            placeholder="Search titles..."
-            aria-label="Search titles"
+            placeholder="Words match anywhere; use | or OR between alternatives"
+            aria-label="Search library"
           />
         </label>
       </form>
 
-      {!normalizedQuery ? (
+      {searchBranches.length === 0 ? (
         <div className="empty empty--wide">
           <h2>Start typing to search</h2>
-          <p className="muted">Press Ctrl+F anytime to return here and keep searching.</p>
+          <p className="muted">Press Ctrl+F anytime to return here. Separate alternatives with | or OR.</p>
         </div>
       ) : matchingAnime.length === 0 ? (
         <div className="empty empty--wide">
           <h2>No matches found</h2>
-          <p className="muted">Try a different title or AniList name.</p>
+          <p className="muted">Try other words, a filename fragment, or an alternate OR branch.</p>
         </div>
       ) : (
         <AnimeCardGrid

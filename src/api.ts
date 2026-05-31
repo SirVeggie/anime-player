@@ -5,6 +5,7 @@ import type {
   AnilistMediaStatus,
   AnilistProgressSyncResult,
   AnilistSearchResult,
+  AnimeSearchEntry,
   Category,
   DeleteAnimeFilesSummary,
   Episode,
@@ -31,6 +32,10 @@ import type {
 
 export function getLibraryState(): Promise<LibraryState> {
   return invoke("get_library_state");
+}
+
+export function getAnimeSearchIndex(): Promise<AnimeSearchEntry[]> {
+  return invoke("get_anime_search_index");
 }
 
 export function setPreferAnilistDisplayTitle(enabled: boolean): Promise<LibraryState> {

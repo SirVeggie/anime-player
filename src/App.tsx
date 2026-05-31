@@ -17,6 +17,7 @@ import {
   getAnilistAuthState,
   getAnilistLoginUrl,
   getAnilistMediaStatus,
+  getAnimeSearchIndex,
   getLibraryState,
   getLocalDataStats,
   linkAnimeAnilist,
@@ -66,6 +67,7 @@ import { type Toast, ToastStack } from "./components/ToastStack";
 import { WindowTitleBar } from "./components/WindowTitleBar";
 import { pickQuickPlayEpisode } from "./quickPlay";
 import type {
+  AnimeSearchEntry,
   AnimeSummary,
   AnilistAuthState,
   AnilistMediaStatus,
@@ -139,6 +141,7 @@ function hasEpisodeProgress(episode: Episode): boolean {
 
 function App() {
   const [library, setLibrary] = useState<LibraryState | null>(null);
+  const [animeSearchIndex, setAnimeSearchIndex] = useState<AnimeSearchEntry[]>([]);
   const [view, setView] = useState<View>("categories");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
@@ -179,8 +182,9 @@ function App() {
   }, []);
 
   const reloadLibrary = useCallback(async () => {
-    const state = await getLibraryState();
+    const [state, searchIndex] = await Promise.all([getLibraryState(), getAnimeSearchIndex()]);
     setLibrary(state);
+    setAnimeSearchIndex(searchIndex);
     setSelectedCategoryId((current) => current ?? state.categories[0]?.id ?? null);
     return state;
   }, []);
@@ -1286,6 +1290,7 @@ function App() {
           {view === "search" ? (
             <SearchScreen
               anime={library.anime}
+              searchIndex={animeSearchIndex}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               query={searchQuery}
               focusToken={searchFocusToken}

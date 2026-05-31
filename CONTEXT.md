@@ -42,6 +42,10 @@ view components. Per-screen UI lives in `src/components/`:
   page appears only when the database has episodes that the latest scan could
   not currently match. Normal library/search/episode views hide missing rows so
   rule mistakes are obvious without deleting saved metadata.
+- **Search** (Ctrl+F) matches local title, linked AniList title, and episode
+  **file names** (not paths). Space-separated words are ANDed (any order); `|`,
+  `||`, or `OR` split alternatives (no nested grouping). Index comes from
+  `get_anime_search_index`; matching runs in `src/search.ts`.
 - Bulk Edit can filter anime by source category and by a case-insensitive regex
   matched against full episode paths, then move the affected anime to another
   category. Its filename replacer tab scans all video files under configured

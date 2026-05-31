@@ -56,6 +56,14 @@ export type AnimeSummary = {
   first_episode_path: string | null;
 };
 
+/** Per-title text used by library search (titles + episode file names, not paths). */
+export type AnimeSearchEntry = {
+  id: number;
+  title: string;
+  anilist_title: string | null;
+  file_names: string[];
+};
+
 export type MissingAnimeSummary = AnimeSummary & {
   missing_episode_count: number;
   total_episode_count: number;

@@ -112,6 +112,14 @@ pub struct Episode {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AnimeSearchEntry {
+    id: i64,
+    title: String,
+    anilist_title: Option<String>,
+    file_names: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct LibraryState {
     db_path: String,
     root_folders: Vec<RootFolder>,
@@ -300,6 +308,11 @@ fn write_prefer_anilist_display_title(conn: &Connection, enabled: bool) -> Resul
 #[tauri::command]
 pub fn get_library_state(db: State<'_, AppDatabase>) -> Result<LibraryState, String> {
     db.with_conn(|conn| build_library_state(conn, &db))
+}
+
+#[tauri::command]
+pub fn get_anime_search_index(db: State<'_, AppDatabase>) -> Result<Vec<AnimeSearchEntry>, String> {
+    db.with_conn(|conn| list_anime_search_index(conn))
 }
 
 fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibraryState, String> {
@@ -1357,6 +1370,49 @@ fn get_category(conn: &Connection, id: i64) -> Result<Category, String> {
         },
     )
     .map_err(|e| e.to_string())
+}
+
+fn list_anime_search_index(conn: &mut Connection) -> Result<Vec<AnimeSearchEntry>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.id, a.title, a.anilist_title, e.file_name
+             FROM anime a
+             JOIN episodes e ON e.anime_id = a.id AND e.missing = 0
+             WHERE EXISTS (
+                 SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0
+             )
+             ORDER BY a.id, e.file_name COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut entries: Vec<AnimeSearchEntry> = Vec::new();
+    for row in rows {
+        let (id, title, anilist_title, file_name) = row.map_err(|e| e.to_string())?;
+        if let Some(entry) = entries.last_mut() {
+            if entry.id == id {
+                entry.file_names.push(file_name);
+                continue;
+            }
+        }
+        entries.push(AnimeSearchEntry {
+            id,
+            title,
+            anilist_title,
+            file_names: vec![file_name],
+        });
+    }
+    Ok(entries)
 }
 
 fn list_anime(

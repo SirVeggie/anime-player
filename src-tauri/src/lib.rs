@@ -324,6 +324,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         library::scan_videos,
         library::get_library_state,
+        library::get_anime_search_index,
         library::set_prefer_anilist_display_title,
         library::add_root_folder,
         library::remove_root_folder,
@@ -397,6 +398,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         library::scan_videos,
         library::get_library_state,
+        library::get_anime_search_index,
         library::set_prefer_anilist_display_title,
         library::add_root_folder,
         library::remove_root_folder,
