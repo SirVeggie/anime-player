@@ -6,7 +6,15 @@ import {
   sortAnimeForGrid,
   storeGridSort,
 } from "../animeGridSort";
-import { hasActiveSearch, isValidSearchRegex, matchingAnimeIds } from "../search";
+import {
+  hasActiveSearch,
+  isValidSearchRegex,
+  matchingAnimeIds,
+  readStoredSearchIncludeFilenames,
+  readStoredSearchUseRegex,
+  storeSearchIncludeFilenames,
+  storeSearchUseRegex,
+} from "../search";
 import type { AnimeSearchEntry, AnimeSummary } from "../types";
 import { AnimeCardGrid } from "./AnimeGrid";
 import { CustomCheckbox } from "./CustomCheckbox";
@@ -24,8 +32,8 @@ export function SearchScreen(props: {
 }) {
   const { anime, searchIndex, preferAnilistDisplayTitle, query, focusToken, onQueryChange, onOpenAnime } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [includeFilenames, setIncludeFilenames] = useState(true);
-  const [useRegex, setUseRegex] = useState(false);
+  const [includeFilenames, setIncludeFilenames] = useState(readStoredSearchIncludeFilenames);
+  const [useRegex, setUseRegex] = useState(readStoredSearchUseRegex);
   const [sortValue, setSortValue] = useState(readStoredGridSort);
 
   const searchOptions = useMemo(
@@ -89,10 +97,20 @@ export function SearchScreen(props: {
           <div className="search-panel__options-left">
             <CustomCheckbox
               checked={includeFilenames}
-              onChange={setIncludeFilenames}
+              onChange={(checked) => {
+                setIncludeFilenames(checked);
+                storeSearchIncludeFilenames(checked);
+              }}
               label="Include filenames"
             />
-            <CustomCheckbox checked={useRegex} onChange={setUseRegex} label="Regular expression" />
+            <CustomCheckbox
+              checked={useRegex}
+              onChange={(checked) => {
+                setUseRegex(checked);
+                storeSearchUseRegex(checked);
+              }}
+              label="Regular expression"
+            />
           </div>
           {showSort ? (
             <div className="search-panel__sort">

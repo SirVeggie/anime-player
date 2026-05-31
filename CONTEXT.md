@@ -43,7 +43,8 @@ view components. Per-screen UI lives in `src/components/`:
   not currently match. Normal library/search/episode views hide missing rows so
   rule mistakes are obvious without deleting saved metadata.
 - **Search** (Ctrl+F) matches local title and linked AniList title; optional
-  **Include filenames** checkbox adds episode file names (not paths). Default mode:
+  **Include filenames** checkbox adds episode file names (not paths); both search
+  checkboxes persist in `localStorage`. Default mode:
   space-separated words are ANDed (any order); `|`, `||`, or `OR` split
   alternatives. **Regular expression** mode (off by default) replaces that syntax
   with a case-insensitive `RegExp` against the same fields. Results use the same

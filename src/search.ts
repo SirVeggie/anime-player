@@ -5,6 +5,43 @@ export type SearchOptions = {
   useRegex: boolean;
 };
 
+export const SEARCH_INCLUDE_FILENAMES_KEY = "animePlayer.searchIncludeFilenames";
+export const SEARCH_USE_REGEX_KEY = "animePlayer.searchUseRegex";
+
+function readStoredBoolean(key: string, defaultValue: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    return raw === "1" || raw === "true";
+  } catch {
+    return defaultValue;
+  }
+}
+
+function storeBoolean(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readStoredSearchIncludeFilenames(): boolean {
+  return readStoredBoolean(SEARCH_INCLUDE_FILENAMES_KEY, true);
+}
+
+export function storeSearchIncludeFilenames(value: boolean): void {
+  storeBoolean(SEARCH_INCLUDE_FILENAMES_KEY, value);
+}
+
+export function readStoredSearchUseRegex(): boolean {
+  return readStoredBoolean(SEARCH_USE_REGEX_KEY, false);
+}
+
+export function storeSearchUseRegex(value: boolean): void {
+  storeBoolean(SEARCH_USE_REGEX_KEY, value);
+}
+
 /** Split the query into OR branches; each branch is a list of AND terms (lowercased). */
 export function parseSearchQuery(query: string): string[][] {
   const trimmed = query.trim();
