@@ -60,8 +60,21 @@
 .search-panel__options {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px 20px;
   margin-bottom: 12px;
+}
+
+.search-panel__options-left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.search-panel__sort {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .search-panel input {

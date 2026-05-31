@@ -46,8 +46,10 @@ view components. Per-screen UI lives in `src/components/`:
   **Include filenames** checkbox adds episode file names (not paths). Default mode:
   space-separated words are ANDed (any order); `|`, `||`, or `OR` split
   alternatives. **Regular expression** mode (off by default) replaces that syntax
-  with a case-insensitive `RegExp` against the same fields. Index from
-  `get_anime_search_index`; matching in `src/search.ts`.
+  with a case-insensitive `RegExp` against the same fields. Results use the same
+  grid sort dropdown as category views (`animePlayer.animeGridSort` in
+  `src/animeGridSort.ts`). Index from `get_anime_search_index`; matching in
+  `src/search.ts`.
 - Bulk Edit can filter anime by source category and by a case-insensitive regex
   matched against full episode paths, then move the affected anime to another
   category. Its filename replacer tab scans all video files under configured

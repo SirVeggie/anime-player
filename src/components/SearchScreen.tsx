@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  GRID_SORT_OPTIONS,
+  gridSortLabel,
+  readStoredGridSort,
+  sortAnimeForGrid,
+  storeGridSort,
+} from "../animeGridSort";
 import { hasActiveSearch, isValidSearchRegex, matchingAnimeIds } from "../search";
 import type { AnimeSearchEntry, AnimeSummary } from "../types";
 import { AnimeCardGrid } from "./AnimeGrid";
 import { CustomCheckbox } from "./CustomCheckbox";
+import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
 
 export function SearchScreen(props: {
@@ -18,6 +26,7 @@ export function SearchScreen(props: {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [includeFilenames, setIncludeFilenames] = useState(true);
   const [useRegex, setUseRegex] = useState(false);
+  const [sortValue, setSortValue] = useState(readStoredGridSort);
 
   const searchOptions = useMemo(
     () => ({ includeFilenames, useRegex }),
@@ -32,6 +41,19 @@ export function SearchScreen(props: {
     const ids = matchingAnimeIds(searchIndex, query, searchOptions);
     return anime.filter((item) => ids.has(item.id));
   }, [activeSearch, anime, query, regexInvalid, searchIndex, searchOptions]);
+
+  const sortedMatchingAnime = useMemo(
+    () => sortAnimeForGrid(matchingAnime, sortValue, preferAnilistDisplayTitle),
+    [matchingAnime, preferAnilistDisplayTitle, sortValue],
+  );
+
+  const showSort = activeSearch && !regexInvalid && matchingAnime.length > 0;
+  const sortLabel = gridSortLabel(sortValue);
+
+  const handleSortChange = (value: number) => {
+    setSortValue(value);
+    storeGridSort(value);
+  };
 
   useEffect(() => {
     const input = inputRef.current;
@@ -59,12 +81,24 @@ export function SearchScreen(props: {
       <ViewHeader title="Search" subtitle={subtitle} />
       <form className="search-panel" onSubmit={(event) => event.preventDefault()}>
         <div className="search-panel__options">
-          <CustomCheckbox
-            checked={includeFilenames}
-            onChange={setIncludeFilenames}
-            label="Include filenames"
-          />
-          <CustomCheckbox checked={useRegex} onChange={setUseRegex} label="Regular expression" />
+          <div className="search-panel__options-left">
+            <CustomCheckbox
+              checked={includeFilenames}
+              onChange={setIncludeFilenames}
+              label="Include filenames"
+            />
+            <CustomCheckbox checked={useRegex} onChange={setUseRegex} label="Regular expression" />
+          </div>
+          {showSort ? (
+            <div className="search-panel__sort">
+              <CustomDropdown
+                label={`Sort: ${sortLabel}`}
+                options={[...GRID_SORT_OPTIONS]}
+                value={sortValue}
+                onChange={handleSortChange}
+              />
+            </div>
+          ) : null}
         </div>
         <label className="stacked-field">
           <span>Query</span>
@@ -107,7 +141,7 @@ export function SearchScreen(props: {
         </div>
       ) : (
         <AnimeCardGrid
-          anime={matchingAnime}
+          anime={sortedMatchingAnime}
           preferAnilistDisplayTitle={preferAnilistDisplayTitle}
           onOpenAnime={onOpenAnime}
         />
