@@ -159,7 +159,7 @@ export type EpisodeListItem =
 
 export function formatMissingEpisodesLabel(missingCount: number): string {
   const noun = missingCount === 1 ? "episode" : "episodes";
-  return `— missing ${missingCount} ${noun} —`;
+  return `missing ${missingCount} ${noun}`;
 }
 
 /**

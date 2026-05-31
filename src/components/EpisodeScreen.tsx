@@ -963,7 +963,11 @@ export function EpisodeScreen(props: {
           if (item.kind === "gap") {
             return (
               <div key={item.key} className="episode-gap-separator stat-warning" role="presentation">
-                {formatMissingEpisodesLabel(item.missingCount)}
+                <span className="episode-gap-separator__line" aria-hidden="true" />
+                <span className="episode-gap-separator__label">
+                  {formatMissingEpisodesLabel(item.missingCount)}
+                </span>
+                <span className="episode-gap-separator__line" aria-hidden="true" />
               </div>
             );
           }
