@@ -31,6 +31,7 @@ Episode selection page features
 - [ ] Auto-detect OP/ED by finding common audio signatures across episodes
     - [ ] Skip detected regions automatically
     - [ ] Option in settings to not skip on the first episode, so you get to watch them once
+- [ ] View that lists all titles at once
 
 ## Video Player
 
