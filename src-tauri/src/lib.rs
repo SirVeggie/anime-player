@@ -90,30 +90,10 @@ fn mpv_init(
 
 #[cfg(windows)]
 #[tauri::command]
-fn mpv_load(state: State<'_, AppState>, path: String, mode: Option<String>) -> Result<(), String> {
+fn mpv_load(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
-    if mode.as_deref() == Some("append") {
-        m.load_append(&path)
-    } else {
-        m.load_replace(&path)
-    }
-}
-
-#[cfg(windows)]
-#[tauri::command]
-fn mpv_playlist_next(state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
-    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
-    m.playlist_next_with_cleanup()
-}
-
-#[cfg(windows)]
-#[tauri::command]
-fn mpv_sync_prefetch_next(state: State<'_, AppState>, next_path: Option<String>) -> Result<(), String> {
-    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
-    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
-    m.sync_prefetch_next(next_path.as_deref())
+    m.load(&path)
 }
 
 #[cfg(windows)]
@@ -399,8 +379,6 @@ pub fn run() {
         jobs::jobs_set_scrub_sprite_priority_for_paths,
         mpv_init,
         mpv_load,
-        mpv_playlist_next,
-        mpv_sync_prefetch_next,
         mpv_cycle_pause,
         mpv_set_pause,
         mpv_get_tracks,

@@ -12,9 +12,6 @@ import {
   getMpvTimePos,
   getMpvTracks,
   getMpvVideoGeometry,
-  mpvLoad,
-  mpvPlaylistNext,
-  mpvSyncPrefetchNext,
   saveEpisodeProgress,
   selectMpvAudioTrack,
   selectMpvSubtitleTrack,
@@ -366,9 +363,6 @@ export function PlayerView(props: {
   const volumeRef = useRef(volume);
   const mpvReadyRef = useRef(false);
   const loadedPathRef = useRef<string | null>(null);
-  /** Path appended to mpv's playlist for sequential prefetch; cleared on replace load or playlist-next. */
-  const prefetchedNextPathRef = useRef<string | null>(null);
-  const prefetchSyncGenerationRef = useRef(0);
   const playbackRef = useRef({ episode, position, duration });
   const pendingResumeSecondsRef = useRef<number | null>(null);
   const controlsHideTimerRef = useRef<number | null>(null);
@@ -660,43 +654,6 @@ export function PlayerView(props: {
     }
   }, []);
 
-  const playlistSuccessor = useCallback((): Episode | null => {
-    const index = selectedIndexRef.current;
-    const list = playlistRef.current;
-    if (index < 0 || index >= list.length - 1) return null;
-    return list[index + 1] ?? null;
-  }, []);
-
-  const syncPrefetchNext = useCallback(async () => {
-    if (!mpvReadyRef.current || !eventListenersReadyRef.current) return;
-    const currentPath = loadedPathRef.current ?? playbackRef.current.episode.path;
-    if (!currentPath) return;
-
-    const successor = playlistSuccessor();
-    const generation = (prefetchSyncGenerationRef.current += 1);
-
-    try {
-      await mpvSyncPrefetchNext(successor?.path ?? null);
-      if (generation !== prefetchSyncGenerationRef.current) return;
-      prefetchedNextPathRef.current = successor?.path ?? null;
-    } catch (err) {
-      if (generation !== prefetchSyncGenerationRef.current) return;
-      prefetchedNextPathRef.current = null;
-      propsRef.current.onError(errorMessage(err));
-    }
-  }, [playlistSuccessor]);
-
-  const canAdvanceViaPrefetchedPlaylist = useCallback(
-    (target: Episode, startFromBeginning: boolean) => {
-      if (!startFromBeginning) return false;
-      const successor = playlistSuccessor();
-      if (!successor || successor.id !== target.id) return false;
-      const prefetched = prefetchedNextPathRef.current;
-      return prefetched !== null && mediaPathsEqual(prefetched, target.path);
-    },
-    [playlistSuccessor],
-  );
-
   const handlePlaybackFinished = useCallback(() => {
     if (handlingEofRef.current) return;
     handlingEofRef.current = true;
@@ -711,25 +668,16 @@ export function PlayerView(props: {
           // the next file.
           seamlessAdvanceRef.current = true;
           pendingResumeSecondsRef.current = null;
-          const usePrefetch = canAdvanceViaPrefetchedPlaylist(next, true);
           try {
             const [saved] = await Promise.all([
               saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
-              usePrefetch ? mpvPlaylistNext() : mpvLoad(next.path, "replace"),
+              invoke("mpv_load", { path: next.path }),
             ]);
             loadedPathRef.current = next.path;
-            prefetchedNextPathRef.current = null;
             propsRef.current.onProgressSaved(saved);
             propsRef.current.onSelectEpisode(saved);
           } catch (err) {
             propsRef.current.onError(errorMessage(err));
-            prefetchedNextPathRef.current = null;
-            try {
-              await mpvLoad(next.path, "replace");
-              loadedPathRef.current = next.path;
-            } catch (loadErr) {
-              propsRef.current.onError(errorMessage(loadErr));
-            }
             propsRef.current.onSelectEpisode(next);
           }
           return;
@@ -737,8 +685,6 @@ export function PlayerView(props: {
 
         await invoke("mpv_stop").catch((err) => propsRef.current.onError(errorMessage(err)));
         handlingEofRef.current = false;
-        prefetchSyncGenerationRef.current += 1;
-        prefetchedNextPathRef.current = null;
         loadedPathRef.current = null;
         setPosition(0);
         setDuration(0);
@@ -748,7 +694,7 @@ export function PlayerView(props: {
         propsRef.current.onError(errorMessage(err));
       }
     })();
-  }, [canAdvanceViaPrefetchedPlaylist, persistProgress]);
+  }, [persistProgress]);
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -791,19 +737,16 @@ export function PlayerView(props: {
           "mpv://file-loaded",
           () => {
             handlingEofRef.current = false;
-            loadedPathRef.current = playbackRef.current.episode.path;
             void refreshTracks();
             void refreshVideoGeometry();
             const seconds = pendingResumeSecondsRef.current;
             pendingResumeSecondsRef.current = null;
-            if (seconds !== null) {
-              window.setTimeout(() => {
-                void invoke("mpv_seek", { seconds }).catch((err) =>
-                  propsRef.current.onError(errorMessage(err)),
-                );
-              }, 0);
-            }
-            void syncPrefetchNext();
+            if (seconds === null) return;
+            window.setTimeout(() => {
+              void invoke("mpv_seek", { seconds }).catch((err) =>
+                propsRef.current.onError(errorMessage(err)),
+              );
+            }, 0);
           },
         ],
         [
@@ -846,11 +789,7 @@ export function PlayerView(props: {
     // this effect runs exactly once per mount. That avoids the listener
     // detach/re-attach storm that used to drop file-loaded events and
     // re-trigger the visible-effect's auto-unpause on every App render.
-  }, [handlePlaybackFinished, refreshTracks, refreshVideoGeometry, syncPrefetchNext]);
-
-  useEffect(() => {
-    void syncPrefetchNext();
-  }, [episode.path, playlist, selectedIndex, eventListenersReadyVersion, syncPrefetchNext]);
+  }, [handlePlaybackFinished, refreshTracks, refreshVideoGeometry]);
 
   // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
   // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
@@ -917,9 +856,7 @@ export function PlayerView(props: {
         pendingResumeSecondsRef.current =
           episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
         setPaused(false);
-        prefetchSyncGenerationRef.current += 1;
-        prefetchedNextPathRef.current = null;
-        await mpvLoad(episode.path, "replace");
+        await invoke("mpv_load", { path: episode.path });
         loadedPathRef.current = episode.path;
       } catch (e) {
         handlingEofRef.current = false;
@@ -1213,43 +1150,24 @@ export function PlayerView(props: {
               cur.duration > 0 && cur.position / cur.duration >= NEAR_END_PROGRESS_RATIO;
             if (nearEnd) {
               pendingResumeSecondsRef.current = null;
-              const usePrefetch = canAdvanceViaPrefetchedPlaylist(next, true);
               try {
                 const [saved] = await Promise.all([
                   saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
-                  usePrefetch ? mpvPlaylistNext() : mpvLoad(next.path, "replace"),
+                  invoke("mpv_load", { path: next.path }),
                 ]);
                 loadedPathRef.current = next.path;
-                prefetchedNextPathRef.current = null;
                 onProgressSaved(saved);
                 onSelectEpisode(saved);
                 return;
               } catch (e) {
                 onError(errorMessage(e));
-                prefetchedNextPathRef.current = null;
-                try {
-                  await mpvLoad(next.path, "replace");
-                  loadedPathRef.current = next.path;
-                  onSelectEpisode(next);
-                } catch (loadErr) {
-                  onError(errorMessage(loadErr));
-                }
-                return;
               }
             }
           }
           onSelectEpisode(next);
         });
     },
-    [
-      canAdvanceViaPrefetchedPlaylist,
-      onError,
-      onProgressSaved,
-      onSelectEpisode,
-      persistProgress,
-      playlist,
-      selectedIndex,
-    ],
+    [onError, onProgressSaved, onSelectEpisode, persistProgress, playlist, selectedIndex],
   );
 
   const onCanvasMouseDown = useCallback(

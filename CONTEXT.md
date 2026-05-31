@@ -119,9 +119,8 @@ view components. Per-screen UI lives in `src/components/`:
   `syncAnilistEpisodeProgress` when leaving the player (Q/back, window close,
   flush-on-exit). EOF auto-advance, near-end **Next**, and other episode
   switches defer AniList to the background after the local SQLite save so
-  playback can advance immediately (playlist-next when prefetched, else
-  replace `mpv_load`, often in parallel with saving the next episode's
-  position). Reopening an
+  `mpv_load` can start immediately (often in parallel with saving the next
+  episode's position). Reopening an
   episode that was already watched does not write new progress if the player
   session lasts under five minutes, unless the user seeks into the start
   period (`MIN_POSITION_SECONDS_TO_PERSIST`, exposed to the UI via
@@ -196,13 +195,9 @@ view components. Per-screen UI lives in `src/components/`:
   to register the initial sidebar width.
 - `src/components/PlayerView.tsx` owns mpv playback UI/state. libmpv is
   initialized lazily on the first episode selection via `mpv_init` and
-  then remains alive for the app session. Opening or switching files uses
-  `mpv_load` (`loadfile replace` + **`set pause no`**) so each new file
-  autoplays. While a file plays, `mpv_sync_prefetch_next` appends the
-  next list episode (`loadfile append`) with **`prefetch-playlist=yes`**
-  so libmpv can open its demuxer early; EOF / near-end **Next** use
-  `mpv_playlist_next` when that prefetch matches the target, otherwise
-  replace-load. Non-sequential jumps replace-load and rebuild prefetch. The
+  then remains alive for the app session. Opening or switching files is
+  `mpv_load`, which runs `loadfile` then **`set pause no`** so each new
+  file autoplays instead of inheriting the previous pause state. The
   player view is mounted as the loaded playback session even when hidden
   behind the episode list.
   Player-internal reset for a new file keys off `episode.id` only (not
@@ -364,8 +359,7 @@ view components. Per-screen UI lives in `src/components/`:
     `eof-reached` and republishes each property change as a Tauri
     event named `mpv://<property>`.
 - Exposed mpv Tauri commands: `mpv_init(window_width, sidebar_px)`,
-  `mpv_load(path, mode?)` (`replace` | `append`), `mpv_playlist_next()`,
-  `mpv_sync_prefetch_next(next_path)`, `mpv_cycle_pause()`, `mpv_set_pause(paused)`,
+  `mpv_load(path)`, `mpv_cycle_pause()`, `mpv_set_pause(paused)`,
   `mpv_seek(seconds, keyframe?)` (`keyframe: true` → `absolute+keyframes`;
   default exact), `mpv_seek_relative(delta)`,
   `mpv_set_layout(window_width, sidebar_px)`, `mpv_get_tracks()`,

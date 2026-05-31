@@ -221,21 +221,6 @@ export function stopMpv(): Promise<void> {
   return invoke("mpv_stop");
 }
 
-export type MpvLoadMode = "replace" | "append";
-
-export function mpvLoad(path: string, mode: MpvLoadMode = "replace"): Promise<void> {
-  return invoke("mpv_load", { path, mode });
-}
-
-export function mpvPlaylistNext(): Promise<void> {
-  return invoke("mpv_playlist_next");
-}
-
-/** Trim stale prefetch rows and append the next episode when provided. */
-export function mpvSyncPrefetchNext(nextPath: string | null): Promise<void> {
-  return invoke("mpv_sync_prefetch_next", { nextPath });
-}
-
 let minPositionSecondsToPersistCache: number | null = null;
 let minPositionSecondsToPersistPromise: Promise<number> | null = null;
 
