@@ -57,6 +57,13 @@
   background: var(--surface-grad);
 }
 
+.search-panel__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 12px;
+}
+
 .search-panel input {
   font-size: 15px;
 }
