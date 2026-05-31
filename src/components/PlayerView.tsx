@@ -567,49 +567,66 @@ export function PlayerView(props: {
     return () => root.removeEventListener("pointerleave", onPointerLeaveWindow);
   }, [clearControlsHideTimer, controlsPinned, visible]);
 
-  const persistProgress = useCallback(async (forceWatched = false) => {
-    const current = playbackRef.current;
+  const syncAnilistProgressInBackground = useCallback((episodeId: number, animeId: number) => {
+    void syncAnilistEpisodeProgress(episodeId)
+      .then((result) => {
+        propsRef.current.onAnilistProgressSynced?.(animeId, result);
+      })
+      .catch((err) => {
+        propsRef.current.onError(errorMessage(err));
+      });
+  }, []);
 
-    if (userRequestedStartResetRef.current) {
+  const persistProgress = useCallback(
+    async (forceWatched = false, options?: { deferAnilistSync?: boolean }) => {
+      const current = playbackRef.current;
+
+      if (userRequestedStartResetRef.current) {
+        const saved = await saveEpisodeProgress(
+          current.episode.id,
+          current.position,
+          current.duration,
+          false,
+        );
+        propsRef.current.onProgressSaved(saved);
+        return saved;
+      }
+
+      if (
+        !forceWatched &&
+        sessionOpenedAsWatchedRef.current &&
+        Date.now() - sessionOpenedAtMsRef.current < WATCHED_PEEK_MAX_MS
+      ) {
+        return sessionEpisodeSnapshotRef.current;
+      }
+
+      const watched =
+        forceWatched ||
+        (current.duration > 0 &&
+          current.position / current.duration >= NEAR_END_PROGRESS_RATIO);
       const saved = await saveEpisodeProgress(
         current.episode.id,
         current.position,
         current.duration,
-        false,
+        watched,
       );
       propsRef.current.onProgressSaved(saved);
-      return saved;
-    }
-
-    if (
-      !forceWatched &&
-      sessionOpenedAsWatchedRef.current &&
-      Date.now() - sessionOpenedAtMsRef.current < WATCHED_PEEK_MAX_MS
-    ) {
-      return sessionEpisodeSnapshotRef.current;
-    }
-
-    const watched =
-      forceWatched ||
-      (current.duration > 0 &&
-        current.position / current.duration >= NEAR_END_PROGRESS_RATIO);
-    const saved = await saveEpisodeProgress(
-      current.episode.id,
-      current.position,
-      current.duration,
-      watched,
-    );
-    propsRef.current.onProgressSaved(saved);
-    if (watched) {
-      try {
-        const result = await syncAnilistEpisodeProgress(saved.id);
-        propsRef.current.onAnilistProgressSynced?.(saved.anime_id, result);
-      } catch (err) {
-        propsRef.current.onError(errorMessage(err));
+      if (watched) {
+        if (options?.deferAnilistSync) {
+          syncAnilistProgressInBackground(saved.id, saved.anime_id);
+        } else {
+          try {
+            const result = await syncAnilistEpisodeProgress(saved.id);
+            propsRef.current.onAnilistProgressSynced?.(saved.anime_id, result);
+          } catch (err) {
+            propsRef.current.onError(errorMessage(err));
+          }
+        }
       }
-    }
-    return saved;
-  }, []);
+      return saved;
+    },
+    [syncAnilistProgressInBackground],
+  );
 
   useEffect(() => {
     const r = playbackProgressFlushRef;
@@ -641,22 +658,22 @@ export function PlayerView(props: {
     if (handlingEofRef.current) return;
     handlingEofRef.current = true;
     const next = playlistRef.current[selectedIndexRef.current + 1];
-    void persistProgress(true)
-      .catch((err) => propsRef.current.onError(errorMessage(err)))
-      .then(async () => {
+    void (async () => {
+      try {
+        await persistProgress(true, { deferAnilistSync: true });
         if (next) {
           // Skip the load-fade between episodes — the previous episode's
           // outro/credits already ended on a clean note, so flashing to
           // black is more disruptive than just transitioning straight into
           // the next file.
           seamlessAdvanceRef.current = true;
+          pendingResumeSecondsRef.current = null;
           try {
-            const saved = await saveEpisodeProgress(
-              next.id,
-              0,
-              next.duration_seconds,
-              false,
-            );
+            const [saved] = await Promise.all([
+              saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
+              invoke("mpv_load", { path: next.path }),
+            ]);
+            loadedPathRef.current = next.path;
             propsRef.current.onProgressSaved(saved);
             propsRef.current.onSelectEpisode(saved);
           } catch (err) {
@@ -666,16 +683,17 @@ export function PlayerView(props: {
           return;
         }
 
-        void invoke("mpv_stop")
-          .catch((err) => propsRef.current.onError(errorMessage(err)))
-          .finally(() => {
-            loadedPathRef.current = null;
-            setPosition(0);
-            setDuration(0);
-            setPaused(true);
-            propsRef.current.onClose();
-          });
-      });
+        await invoke("mpv_stop").catch((err) => propsRef.current.onError(errorMessage(err)));
+        handlingEofRef.current = false;
+        loadedPathRef.current = null;
+        setPosition(0);
+        setDuration(0);
+        setPaused(true);
+        propsRef.current.onClose();
+      } catch (err) {
+        propsRef.current.onError(errorMessage(err));
+      }
+    })();
   }, [persistProgress]);
 
   useEffect(() => {
@@ -718,6 +736,7 @@ export function PlayerView(props: {
         [
           "mpv://file-loaded",
           () => {
+            handlingEofRef.current = false;
             void refreshTracks();
             void refreshVideoGeometry();
             const seconds = pendingResumeSecondsRef.current;
@@ -776,7 +795,6 @@ export function PlayerView(props: {
   // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
   // while mpv still had the file loaded, which broke reopening the same episode from the list.
   useEffect(() => {
-    handlingEofRef.current = false;
     sessionOpenedAtMsRef.current = Date.now();
     sessionOpenedAsWatchedRef.current = episode.watched;
     sessionEpisodeSnapshotRef.current = episode;
@@ -841,6 +859,7 @@ export function PlayerView(props: {
         await invoke("mpv_load", { path: episode.path });
         loadedPathRef.current = episode.path;
       } catch (e) {
+        handlingEofRef.current = false;
         if (!cancelled) propsRef.current.onError(errorMessage(e));
       }
     })();
@@ -1122,7 +1141,7 @@ export function PlayerView(props: {
     (delta: number) => {
       const next = playlist[selectedIndex + delta];
       if (!next) return;
-      void persistProgress()
+      void persistProgress(false, { deferAnilistSync: true })
         .catch((e) => onError(errorMessage(e)))
         .then(async () => {
           if (delta === 1) {
@@ -1130,13 +1149,13 @@ export function PlayerView(props: {
             const nearEnd =
               cur.duration > 0 && cur.position / cur.duration >= NEAR_END_PROGRESS_RATIO;
             if (nearEnd) {
+              pendingResumeSecondsRef.current = null;
               try {
-                const saved = await saveEpisodeProgress(
-                  next.id,
-                  0,
-                  next.duration_seconds,
-                  false,
-                );
+                const [saved] = await Promise.all([
+                  saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
+                  invoke("mpv_load", { path: next.path }),
+                ]);
+                loadedPathRef.current = next.path;
                 onProgressSaved(saved);
                 onSelectEpisode(saved);
                 return;

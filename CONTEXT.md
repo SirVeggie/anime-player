@@ -108,9 +108,12 @@ view components. Per-screen UI lives in `src/components/`:
   `Progress: current/total`, and includes a debounced score input that writes
   back to AniList. Local watched progress syncs on EOF / near-end saves only
   when the adjusted local episode number is ahead of the viewer's current
-  AniList progress; `persistProgress` in `PlayerView` awaits
-  `syncAnilistEpisodeProgress` in that case (Q/back, EOF advance, episode
-  switches, and natural window close all use the same path). Reopening an
+  AniList progress. `persistProgress` in `PlayerView` awaits
+  `syncAnilistEpisodeProgress` when leaving the player (Q/back, window close,
+  flush-on-exit). EOF auto-advance, near-end **Next**, and other episode
+  switches defer AniList to the background after the local SQLite save so
+  `mpv_load` can start immediately (often in parallel with saving the next
+  episode's position). Reopening an
   episode that was already watched does not write new progress if the player
   session lasts under five minutes, unless the user seeks into the start
   period (`MIN_POSITION_SECONDS_TO_PERSIST`, exposed to the UI via
