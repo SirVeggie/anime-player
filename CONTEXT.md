@@ -48,8 +48,9 @@ view components. Per-screen UI lives in `src/components/`:
   space-separated words are ANDed (any order); `|`, `||`, or uppercase `OR` split
   alternatives (lowercase `or` is a normal search word). **Regular expression** mode (off by default) replaces that syntax
   with a case-insensitive `RegExp` against the same fields. Results use the same
-  grid sort dropdown as category views (`animePlayer.animeGridSort` in
-  `src/animeGridSort.ts`). Clear with the × control or Esc (clears query first;
+  grid sort dropdown (always visible; `animePlayer.searchGridSort` in
+  `localStorage`, separate from category `animePlayer.animeGridSort`). Clear with the ×
+  control or Esc (clears query first;
   Esc again leaves search). Index from `get_anime_search_index`; matching in
   `src/search.ts`.
 - Bulk Edit can filter anime by source category and by a case-insensitive regex

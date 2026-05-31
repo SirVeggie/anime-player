@@ -2,6 +2,7 @@ import type { AnimeSummary } from "./types";
 import { animeDisplayTitle } from "./utils";
 
 export const GRID_SORT_STORAGE_KEY = "animePlayer.animeGridSort";
+export const SEARCH_GRID_SORT_STORAGE_KEY = "animePlayer.searchGridSort";
 
 export const GRID_SORT_OPTIONS = [
   { value: 0, label: "Alphabetical" },
@@ -12,24 +13,42 @@ export const GRID_SORT_OPTIONS = [
   { value: 5, label: "Watch progress" },
 ] as const;
 
-export function readStoredGridSort(): number {
+const SORT_VALUE_MAX = GRID_SORT_OPTIONS.length - 1;
+
+function readStoredSort(storageKey: string): number {
   try {
-    const raw = localStorage.getItem(GRID_SORT_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (raw === null) return 0;
     const n = Number.parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 0 || n > 5) return 0;
+    if (!Number.isFinite(n) || n < 0 || n > SORT_VALUE_MAX) return 0;
     return n;
   } catch {
     return 0;
   }
 }
 
-export function storeGridSort(value: number): void {
+function storeSort(storageKey: string, value: number): void {
   try {
-    localStorage.setItem(GRID_SORT_STORAGE_KEY, String(value));
+    localStorage.setItem(storageKey, String(value));
   } catch {
     /* ignore */
   }
+}
+
+export function readStoredGridSort(): number {
+  return readStoredSort(GRID_SORT_STORAGE_KEY);
+}
+
+export function storeGridSort(value: number): void {
+  storeSort(GRID_SORT_STORAGE_KEY, value);
+}
+
+export function readStoredSearchGridSort(): number {
+  return readStoredSort(SEARCH_GRID_SORT_STORAGE_KEY);
+}
+
+export function storeSearchGridSort(value: number): void {
+  storeSort(SEARCH_GRID_SORT_STORAGE_KEY, value);
 }
 
 export function gridSortLabel(sortValue: number): string {

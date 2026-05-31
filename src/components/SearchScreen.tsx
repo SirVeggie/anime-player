@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GRID_SORT_OPTIONS,
   gridSortLabel,
-  readStoredGridSort,
+  readStoredSearchGridSort,
   sortAnimeForGrid,
-  storeGridSort,
+  storeSearchGridSort,
 } from "../animeGridSort";
 import {
   hasActiveSearch,
@@ -34,7 +34,7 @@ export function SearchScreen(props: {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [includeFilenames, setIncludeFilenames] = useState(readStoredSearchIncludeFilenames);
   const [useRegex, setUseRegex] = useState(readStoredSearchUseRegex);
-  const [sortValue, setSortValue] = useState(readStoredGridSort);
+  const [sortValue, setSortValue] = useState(readStoredSearchGridSort);
 
   const searchOptions = useMemo(
     () => ({ includeFilenames, useRegex }),
@@ -55,12 +55,11 @@ export function SearchScreen(props: {
     [matchingAnime, preferAnilistDisplayTitle, sortValue],
   );
 
-  const showSort = activeSearch && !regexInvalid && matchingAnime.length > 0;
   const sortLabel = gridSortLabel(sortValue);
 
   const handleSortChange = (value: number) => {
     setSortValue(value);
-    storeGridSort(value);
+    storeSearchGridSort(value);
   };
 
   const clearQuery = () => {
@@ -112,16 +111,14 @@ export function SearchScreen(props: {
               label="Regular expression"
             />
           </div>
-          {showSort ? (
-            <div className="search-panel__sort">
-              <CustomDropdown
-                label={`Sort: ${sortLabel}`}
-                options={[...GRID_SORT_OPTIONS]}
-                value={sortValue}
-                onChange={handleSortChange}
-              />
-            </div>
-          ) : null}
+          <div className="search-panel__sort">
+            <CustomDropdown
+              label={`Sort: ${sortLabel}`}
+              options={[...GRID_SORT_OPTIONS]}
+              value={sortValue}
+              onChange={handleSortChange}
+            />
+          </div>
         </div>
         <label className="stacked-field">
           <span>Query</span>
