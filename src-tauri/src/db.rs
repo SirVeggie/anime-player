@@ -56,6 +56,10 @@ fn ensure_schema_updates(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE anime ADD COLUMN custom_thumbnail_path TEXT", [])
             .map_err(|e| e.to_string())?;
     }
+    if !table_has_column(conn, "anime", "anilist_cached_status")? {
+        conn.execute("ALTER TABLE anime ADD COLUMN anilist_cached_status TEXT", [])
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -211,6 +215,7 @@ CREATE TABLE IF NOT EXISTS anime (
   anilist_cached_progress INTEGER,
   anilist_cached_episodes INTEGER,
   anilist_cached_score REAL,
+  anilist_cached_status TEXT,
   anilist_status_fetched_at INTEGER,
   tracker_offset INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

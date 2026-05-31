@@ -264,6 +264,15 @@
   gap: 6px;
 }
 
+.episode-gap-separator {
+  margin: 2px 0;
+  padding: 2px 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+}
+
 .episode-row {
   display: flex;
   align-items: center;

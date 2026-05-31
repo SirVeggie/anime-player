@@ -91,33 +91,130 @@ export function playerNowPlayingLabel(
   return `${displayTitle} — ${formatEpisodeNumber(displayEpisodeNumber)}`;
 }
 
-/**
- * Count integer episode numbers missing from the range [min_local .. effective_max].
- * Decimal episode numbers are excluded. If `anilistTotalEpisodes` is set and positive,
- * effective_max is extended to `anilistTotalEpisodes + trackerOffset`.
- */
-export function computeGapEpisodeCount(
-  episodes: Episode[],
-  anilistTotalEpisodes: number | null | undefined,
-  trackerOffset: number,
-): number {
+/** True when AniList reports the title is still airing (skip trailing gap count). */
+export function isAnilistReleasing(status: string | null | undefined): boolean {
+  return status?.toUpperCase() === "RELEASING";
+}
+
+function collectIntegerEpisodeNumbers(episodes: Episode[]): Set<number> {
   const intEpisodes = new Set<number>();
   for (const ep of episodes) {
     if (ep.episode_number !== null && Number.isInteger(ep.episode_number)) {
       intEpisodes.add(ep.episode_number);
     }
   }
-  if (intEpisodes.size === 0) return 0;
+  return intEpisodes;
+}
+
+function integerEpisodeRange(intEpisodes: Set<number>): { min: number; max: number } | null {
+  if (intEpisodes.size === 0) return null;
   let min = Number.MAX_SAFE_INTEGER;
   let max = 0;
   for (const n of intEpisodes) {
     if (n < min) min = n;
     if (n > max) max = n;
   }
+  return { min, max };
+}
+
+function effectiveMaxEpisodeNumber(
+  maxLocal: number,
+  anilistTotalEpisodes: number | null | undefined,
+  anilistStatus: string | null | undefined,
+  trackerOffset: number,
+): number {
+  if (isAnilistReleasing(anilistStatus)) return maxLocal;
   if (anilistTotalEpisodes != null && anilistTotalEpisodes > 0) {
-    max = Math.max(max, anilistTotalEpisodes + trackerOffset);
+    return Math.max(maxLocal, anilistTotalEpisodes + trackerOffset);
   }
-  return max - min + 1 - intEpisodes.size;
+  return maxLocal;
+}
+
+/**
+ * Count integer episode numbers missing from the range [min_local .. effective_max].
+ * Decimal episode numbers are excluded. If `anilistTotalEpisodes` is set and positive,
+ * effective_max is extended to `anilistTotalEpisodes + trackerOffset` unless status is RELEASING.
+ */
+export function computeGapEpisodeCount(
+  episodes: Episode[],
+  anilistTotalEpisodes: number | null | undefined,
+  trackerOffset: number,
+  anilistStatus?: string | null,
+): number {
+  const intEpisodes = collectIntegerEpisodeNumbers(episodes);
+  const range = integerEpisodeRange(intEpisodes);
+  if (!range) return 0;
+  const max = effectiveMaxEpisodeNumber(
+    range.max,
+    anilistTotalEpisodes,
+    anilistStatus,
+    trackerOffset,
+  );
+  return max - range.min + 1 - intEpisodes.size;
+}
+
+export type EpisodeListItem =
+  | { kind: "episode"; episode: Episode; episodeIndex: number }
+  | { kind: "gap"; missingCount: number; key: string };
+
+export function formatMissingEpisodesLabel(missingCount: number): string {
+  const noun = missingCount === 1 ? "episode" : "episodes";
+  return `— missing ${missingCount} ${noun} —`;
+}
+
+/**
+ * Episode rows interleaved with gap separators for missing integer episode numbers.
+ */
+export function buildEpisodeListItems(
+  episodes: Episode[],
+  options: {
+    trackerOffset: number;
+    anilistTotalEpisodes?: number | null;
+    anilistStatus?: string | null;
+  },
+): EpisodeListItem[] {
+  const { trackerOffset, anilistTotalEpisodes, anilistStatus } = options;
+  const intEpisodes = collectIntegerEpisodeNumbers(episodes);
+  const range = integerEpisodeRange(intEpisodes);
+  if (!range) {
+    return episodes.map((episode, episodeIndex) => ({ kind: "episode", episode, episodeIndex }));
+  }
+
+  const effectiveMax = effectiveMaxEpisodeNumber(
+    range.max,
+    anilistTotalEpisodes,
+    anilistStatus,
+    trackerOffset,
+  );
+  const items: EpisodeListItem[] = [];
+  let lastInt: number | null = null;
+
+  const pushGap = (fromExclusive: number, toInclusive: number) => {
+    const missingCount = toInclusive - fromExclusive;
+    if (missingCount <= 0) return;
+    items.push({
+      kind: "gap",
+      missingCount,
+      key: `gap-${fromExclusive}-${toInclusive}`,
+    });
+  };
+
+  episodes.forEach((episode, episodeIndex) => {
+    const n = episode.episode_number;
+    if (n !== null && Number.isInteger(n)) {
+      if (lastInt !== null && n > lastInt + 1) {
+        pushGap(lastInt, n - 1);
+      }
+      lastInt = n;
+    }
+    items.push({ kind: "episode", episode, episodeIndex });
+  });
+
+  if (lastInt !== null && effectiveMax > lastInt) {
+    pushGap(lastInt, effectiveMax);
+  }
+
+  return items;
 }
 
 export function progressPercent(position: number, duration: number): number {

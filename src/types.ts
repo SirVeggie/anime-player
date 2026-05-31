@@ -191,6 +191,8 @@ export type AnilistMediaStatus = {
   progress: number | null;
   episodes: number | null;
   score: number | null;
+  /** AniList MediaStatus, e.g. RELEASING or FINISHED */
+  status: string | null;
 };
 
 export type AnilistLocalProgressApplyResult = {

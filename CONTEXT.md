@@ -113,7 +113,10 @@ view components. Per-screen UI lives in `src/components/`:
   re-downloading the cover from AniList.
 - The AniList card opens the linked AniList page, shows remote
   `Progress: current/total`, and includes a debounced score input that writes
-  back to AniList. Local watched progress syncs on EOF / near-end saves only
+  back to AniList. Cached media status includes `status` (e.g. `RELEASING`);
+  **missing episode** counts and episode-list gap separators use AniList total
+  episodes to fill holes in the local sequence, but skip trailing gaps while
+  status is `RELEASING` so unreleased episodes are not flagged. Local watched progress syncs on EOF / near-end saves only
   when the adjusted local episode number is ahead of the viewer's current
   AniList progress. `persistProgress` in `PlayerView` awaits
   `syncAnilistEpisodeProgress` when leaving the player (Q/back, window close,

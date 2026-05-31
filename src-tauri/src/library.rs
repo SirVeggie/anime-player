@@ -19,6 +19,31 @@ const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
 
 const PREFER_ANILIST_DISPLAY_TITLE_KEY: &str = "prefer_anilist_display_title";
 
+/// Gaps in the integer episode-number sequence, optionally extended to AniList total.
+/// When AniList status is `RELEASING`, trailing unreleased episodes are not counted.
+fn compute_gap_episode_count(
+    min_int_ep: i64,
+    max_int_ep: i64,
+    int_ep_count: i64,
+    anilist_cached_episodes: Option<i64>,
+    anilist_cached_status: Option<&str>,
+    tracker_offset: i64,
+) -> i64 {
+    let extend_to_anilist_total = !matches!(
+        anilist_cached_status,
+        Some(status) if status.eq_ignore_ascii_case("RELEASING")
+    );
+    let effective_max = if extend_to_anilist_total {
+        match anilist_cached_episodes {
+            Some(ae) if ae > 0 => max_int_ep.max(ae + tracker_offset),
+            _ => max_int_ep,
+        }
+    } else {
+        max_int_ep
+    };
+    effective_max - min_int_ep + 1 - int_ep_count
+}
+
 #[derive(Debug, Serialize)]
 pub struct VideoFile {
     path: String,
@@ -1442,6 +1467,7 @@ fn list_anime(
                                      AND e.episode_number = CAST(e.episode_number AS INTEGER)
                                 THEN CAST(e.episode_number AS INTEGER) END) AS int_ep_count,
                 a.anilist_cached_episodes,
+                a.anilist_cached_status,
                 a.last_watched_at,
                 a.created_at,
                 a.latest_episode_at,
@@ -1480,14 +1506,16 @@ fn list_anime(
         let max_int_ep: Option<i64> = row.get(12)?;
         let int_ep_count: i64 = row.get::<_, Option<i64>>(13)?.unwrap_or(0);
         let anilist_cached_episodes: Option<i64> = row.get(14)?;
+        let anilist_cached_status: Option<String> = row.get(15)?;
         let gap_episode_count = match (min_int_ep, max_int_ep) {
-            (Some(lo), Some(hi)) => {
-                let effective_max = match anilist_cached_episodes {
-                    Some(ae) if ae > 0 => hi.max(ae + tracker_offset),
-                    _ => hi,
-                };
-                (effective_max - lo + 1) - int_ep_count
-            }
+            (Some(lo), Some(hi)) => compute_gap_episode_count(
+                lo,
+                hi,
+                int_ep_count,
+                anilist_cached_episodes,
+                anilist_cached_status.as_deref(),
+                tracker_offset,
+            ),
             _ => 0,
         };
         Ok(AnimeSummary {
@@ -1503,10 +1531,10 @@ fn list_anime(
             episode_count: row.get(9)?,
             unwatched_count: row.get::<_, Option<i64>>(10)?.unwrap_or(0),
             gap_episode_count,
-            last_watched_at: row.get(15)?,
-            created_at: row.get(16)?,
-            latest_episode_at: row.get(17)?,
-            first_episode_path: row.get(18)?,
+            last_watched_at: row.get(16)?,
+            created_at: row.get(17)?,
+            latest_episode_at: row.get(18)?,
+            first_episode_path: row.get(19)?,
         })
     };
 

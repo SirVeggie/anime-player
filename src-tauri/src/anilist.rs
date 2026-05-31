@@ -57,6 +57,8 @@ pub struct AnilistMediaStatus {
     progress: Option<i64>,
     episodes: Option<i64>,
     score: Option<f64>,
+    /// AniList `MediaStatus` value, e.g. `RELEASING` or `FINISHED`.
+    status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -164,6 +166,7 @@ pub async fn link_anime_anilist(
                      anilist_cached_progress = NULL,
                      anilist_cached_episodes = NULL,
                      anilist_cached_score = NULL,
+                     anilist_cached_status = NULL,
                      anilist_status_fetched_at = NULL,
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?5",
@@ -189,6 +192,7 @@ pub fn unlink_anime_anilist(db: State<'_, AppDatabase>, anime_id: i64) -> Result
                  anilist_cached_progress = NULL,
                  anilist_cached_episodes = NULL,
                  anilist_cached_score = NULL,
+                 anilist_cached_status = NULL,
                  anilist_status_fetched_at = NULL,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
@@ -320,10 +324,14 @@ pub async fn set_anilist_media_progress(
     let progress = progress.max(0);
     let saved_progress = save_remote_progress(&token, anilist_id, progress).await?;
     db.with_conn(|conn| cache_anilist_progress(conn, anime_id, saved_progress))?;
+    if let Some(status) = fresh_cached_media_status(&db, anime_id)? {
+        return Ok(status);
+    }
     Ok(AnilistMediaStatus {
         progress: Some(saved_progress),
         episodes: None,
         score: None,
+        status: None,
     })
 }
 
@@ -531,6 +539,7 @@ fn cached_media_status(
             "SELECT anilist_cached_progress,
                     anilist_cached_episodes,
                     anilist_cached_score,
+                    anilist_cached_status,
                     anilist_status_fetched_at
              FROM anime
              WHERE id = ?1",
@@ -540,14 +549,15 @@ fn cached_media_status(
                     row.get::<_, Option<i64>>(0)?,
                     row.get::<_, Option<i64>>(1)?,
                     row.get::<_, Option<f64>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((progress, episodes, score, fetched_at)) = row else {
+    let Some((progress, episodes, score, status, fetched_at)) = row else {
         return Ok(None);
     };
     let Some(fetched_at) = fetched_at else {
@@ -560,6 +570,7 @@ fn cached_media_status(
         progress,
         episodes,
         score,
+        status,
     }))
 }
 
@@ -597,12 +608,14 @@ fn cache_anilist_media_status(
          SET anilist_cached_progress = ?1,
              anilist_cached_episodes = ?2,
              anilist_cached_score = ?3,
-             anilist_status_fetched_at = ?4
-         WHERE id = ?5",
+             anilist_cached_status = ?4,
+             anilist_status_fetched_at = ?5
+         WHERE id = ?6",
         params![
             status.progress,
             status.episodes,
             status.score,
+            status.status,
             fetched_at,
             anime_id
         ],
@@ -656,6 +669,7 @@ async fn get_media_status(token: &str, anilist_id: i64) -> Result<AnilistMediaSt
         r#"
         query MediaStatus($id: Int!) {
           Media(id: $id, type: ANIME) {
+            status
             episodes
             mediaListEntry {
               progress
@@ -740,6 +754,7 @@ async fn save_remote_score(
             .media
             .and_then(|media| media.episodes),
         score: data.save_media_list_entry.score,
+        status: None,
     })
 }
 
@@ -963,6 +978,7 @@ struct AnilistProgressTarget {
 
 #[derive(Debug, Deserialize)]
 struct StatusMedia {
+    status: Option<String>,
     episodes: Option<i64>,
     #[serde(rename = "mediaListEntry")]
     media_list_entry: Option<StatusMediaListEntry>,
@@ -981,6 +997,7 @@ impl From<StatusMedia> for AnilistMediaStatus {
             progress: entry.as_ref().and_then(|entry| entry.progress),
             episodes: media.episodes,
             score: entry.and_then(|entry| entry.score),
+            status: media.status,
         }
     }
 }

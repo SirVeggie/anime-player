@@ -12,9 +12,11 @@ import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, E
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import {
   animeDisplayTitle,
+  buildEpisodeListItems,
   computeGapEpisodeCount,
   errorMessage,
   formatEpisodeNumber,
+  formatMissingEpisodesLabel,
   formatSize,
   formatTime,
   isEpisodeNumberKnown,
@@ -168,7 +170,21 @@ export function EpisodeScreen(props: {
   const scoreSaveRequestRef = useRef(0);
   const progressOverrideDraftTouchedRef = useRef(false);
   const remainingCount = episodes.filter((episode) => !episode.watched).length;
-  const gapCount = computeGapEpisodeCount(episodes, anilistStatus?.episodes, anime.tracker_offset);
+  const gapCount = computeGapEpisodeCount(
+    episodes,
+    anilistStatus?.episodes,
+    anime.tracker_offset,
+    anilistStatus?.status,
+  );
+  const episodeListItems = useMemo(
+    () =>
+      buildEpisodeListItems(episodes, {
+        trackerOffset: anime.tracker_offset,
+        anilistTotalEpisodes: anilistStatus?.episodes,
+        anilistStatus: anilistStatus?.status,
+      }),
+    [anilistStatus?.episodes, anilistStatus?.status, anime.tracker_offset, episodes],
+  );
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
   const getRovingItemProps = useRovingListNavigation(episodes.length, {
     enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen,
@@ -241,14 +257,23 @@ export function EpisodeScreen(props: {
 
   useEffect(() => {
     if (!anilistProgressUpdate || anilistProgressUpdate.animeId !== anime.id) return;
-    setAnilistStatus((current) => ({
-      progress:
-        anilistProgressUpdate.forceReplace || current?.progress == null
-          ? anilistProgressUpdate.progress
-          : Math.max(current.progress, anilistProgressUpdate.progress),
-      episodes: current?.episodes ?? null,
-      score: current?.score ?? null,
-    }));
+    setAnilistStatus((current) => {
+      if (!current) {
+        return {
+          progress: anilistProgressUpdate.progress,
+          episodes: null,
+          score: null,
+          status: null,
+        };
+      }
+      return {
+        ...current,
+        progress:
+          anilistProgressUpdate.forceReplace || current.progress == null
+            ? anilistProgressUpdate.progress
+            : Math.max(current.progress, anilistProgressUpdate.progress),
+      };
+    });
   }, [anime.id, anilistProgressUpdate]);
 
   useEffect(() => {
@@ -934,7 +959,15 @@ export function EpisodeScreen(props: {
       ) : null}
 
       <section className="episode-list">
-        {episodes.map((episode, index) => {
+        {episodeListItems.map((item) => {
+          if (item.kind === "gap") {
+            return (
+              <div key={item.key} className="episode-gap-separator stat-warning" role="presentation">
+                {formatMissingEpisodesLabel(item.missingCount)}
+              </div>
+            );
+          }
+          const { episode, episodeIndex } = item;
           const percent = episode.watched ? 100 : progressPercent(episode.position_seconds, episode.duration_seconds);
           const thumbnail = episodeThumbnails[episode.id];
           const episodeTitle = isEpisodeNumberKnown(episode.episode_number)
@@ -947,7 +980,7 @@ export function EpisodeScreen(props: {
               className={`episode-row${episode.watched ? " episode-row--watched" : ""}${episode.id === quickPlayEpisodeId ? " episode-row--last" : ""}`}
               onClick={() => onPlay(episode)}
               title={episode.path}
-              {...getRovingItemProps(index)}
+              {...getRovingItemProps(episodeIndex)}
             >
               <div className={`episode-thumb${thumbnail ? " episode-thumb--image" : ""}`}>
                 {thumbnail ? <img src={thumbnail} alt="" loading="lazy" /> : episode.file_type.toUpperCase()}
