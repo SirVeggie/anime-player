@@ -87,7 +87,7 @@ export function SearchScreen(props: {
 
   const placeholder = useRegex
     ? "Regular expression (case-insensitive)"
-    : "Words match anywhere; use | or OR between alternatives";
+    : "Words match anywhere; use | or uppercase OR between alternatives";
 
   return (
     <>
@@ -162,8 +162,8 @@ export function SearchScreen(props: {
             {useRegex
               ? " Regular expression mode matches enabled fields."
               : includeFilenames
-                ? " Separate alternatives with | or OR; filenames are included."
-                : " Separate alternatives with | or OR."}
+                ? " Separate alternatives with | or uppercase OR; filenames are included."
+                : " Separate alternatives with | or uppercase OR."}
           </p>
         </div>
       ) : regexInvalid ? (

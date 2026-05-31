@@ -45,8 +45,8 @@ view components. Per-screen UI lives in `src/components/`:
 - **Search** (Ctrl+F) matches local title and linked AniList title; optional
   **Include filenames** checkbox adds episode file names (not paths); both search
   checkboxes persist in `localStorage`. Default mode:
-  space-separated words are ANDed (any order); `|`, `||`, or `OR` split
-  alternatives. **Regular expression** mode (off by default) replaces that syntax
+  space-separated words are ANDed (any order); `|`, `||`, or uppercase `OR` split
+  alternatives (lowercase `or` is a normal search word). **Regular expression** mode (off by default) replaces that syntax
   with a case-insensitive `RegExp` against the same fields. Results use the same
   grid sort dropdown as category views (`animePlayer.animeGridSort` in
   `src/animeGridSort.ts`). Clear with the × control or Esc (clears query first;

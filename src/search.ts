@@ -48,7 +48,7 @@ export function parseSearchQuery(query: string): string[][] {
   if (!trimmed) return [];
 
   return trimmed
-    .split(/\s*\|\|\s*|\s*\|\s*|\s+OR\s+/i)
+    .split(/\s*\|\|\s*|\s*\|\s*|\s+OR\s+/)
     .map((branch) =>
       branch
         .trim()
