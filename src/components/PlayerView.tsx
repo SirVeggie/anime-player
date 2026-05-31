@@ -557,6 +557,14 @@ export function PlayerView(props: {
   }, [controlsVisible, onControlsVisibilityChange]);
 
   useEffect(() => {
+    const compositing = visible && videoCompositorRevealed;
+    document.documentElement.classList.toggle("compositor-active", compositing);
+    return () => {
+      document.documentElement.classList.remove("compositor-active");
+    };
+  }, [visible, videoCompositorRevealed]);
+
+  useEffect(() => {
     const root = document.documentElement;
     const onPointerLeaveWindow = () => {
       if (!visible || controlsPinned) return;

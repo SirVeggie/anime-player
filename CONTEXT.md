@@ -178,6 +178,11 @@ view components. Per-screen UI lives in `src/components/`:
   already be torn down in Rust). Abrupt process death still skips this. That path needs
   **`core:window:allow-destroy`** in the default capability file in addition
   to `allow-close`.
+- `html` / `body` / `#root` use **`var(--app-bg)`** by default (and a matching
+  inline color in `index.html`) so the transparent Tauri window does not flash
+  the desktop on startup. **`PlayerView`** toggles **`html.compositor-active`**
+  only while the player is visible and **`videoCompositorRevealed`**, restoring
+  transparent document roots for mpv DComp.
 - The main grid (`.app`) stays **CSS-transparent** for compositing. The
   player column is **`var(--app-bg)`** when idle or while a new file is
   opening (**`.player--playback-pending`**); only after mpv emits

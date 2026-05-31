@@ -8,10 +8,19 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  background: transparent;
+  /* Opaque by default so the transparent Tauri window does not flash the
+     desktop before React paints. PlayerView toggles html.compositor-active
+     while mpv video is revealed so DComp can show through. */
+  background: var(--app-bg);
   color: var(--text-color);
   font-family: Roboto, Arial, sans-serif;
   font-size: 14px;
+}
+
+html.compositor-active,
+html.compositor-active body,
+html.compositor-active #root {
+  background: transparent;
 }
 
 h1,

@@ -103,6 +103,10 @@
   max-width: 360px;
 }
 
+.app--loading .empty {
+  background: none;
+}
+
 .empty--wide {
   max-width: 560px;
   margin: 24px 0;
