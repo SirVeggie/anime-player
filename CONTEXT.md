@@ -48,7 +48,8 @@ view components. Per-screen UI lives in `src/components/`:
   alternatives. **Regular expression** mode (off by default) replaces that syntax
   with a case-insensitive `RegExp` against the same fields. Results use the same
   grid sort dropdown as category views (`animePlayer.animeGridSort` in
-  `src/animeGridSort.ts`). Index from `get_anime_search_index`; matching in
+  `src/animeGridSort.ts`). Clear with the × control or Esc (clears query first;
+  Esc again leaves search). Index from `get_anime_search_index`; matching in
   `src/search.ts`.
 - Bulk Edit can filter anime by source category and by a case-insensitive regex
   matched against full episode paths, then move the affected anime to another

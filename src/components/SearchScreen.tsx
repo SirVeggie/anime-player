@@ -55,6 +55,11 @@ export function SearchScreen(props: {
     storeGridSort(value);
   };
 
+  const clearQuery = () => {
+    onQueryChange("");
+    inputRef.current?.focus();
+  };
+
   useEffect(() => {
     const input = inputRef.current;
     if (!input) return;
@@ -102,14 +107,32 @@ export function SearchScreen(props: {
         </div>
         <label className="stacked-field">
           <span>Query</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(event) => onQueryChange(event.currentTarget.value)}
-            placeholder={placeholder}
-            aria-label="Search library"
-          />
+          <div className="search-panel__query">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(event) => onQueryChange(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape" || !query.trim()) return;
+                event.preventDefault();
+                clearQuery();
+              }}
+              placeholder={placeholder}
+              aria-label="Search library"
+            />
+            {query ? (
+              <button
+                type="button"
+                className="search-panel__clear"
+                onClick={clearQuery}
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
         </label>
       </form>
 
@@ -117,7 +140,7 @@ export function SearchScreen(props: {
         <div className="empty empty--wide">
           <h2>Start typing to search</h2>
           <p className="muted">
-            Press Ctrl+F anytime to return here.
+            Press Ctrl+F anytime to return here. Esc clears the query.
             {useRegex
               ? " Regular expression mode matches enabled fields."
               : includeFilenames

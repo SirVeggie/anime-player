@@ -77,8 +77,41 @@
   margin-left: auto;
 }
 
-.search-panel input {
+.search-panel__query {
+  position: relative;
+}
+
+.search-panel__query input {
+  width: 100%;
+  padding-right: 36px;
   font-size: 15px;
+}
+
+.search-panel__clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.search-panel__clear:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.search-panel__clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .bulk-edit-tabs {

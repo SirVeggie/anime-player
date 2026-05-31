@@ -1045,6 +1045,11 @@ function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat || e.code !== "Escape") return;
+      if (view === "search" && searchQuery.trim()) {
+        e.preventDefault();
+        setSearchQuery("");
+        return;
+      }
       if (isTextInputTarget(e.target)) return;
       if (view === "player") return;
       if (view === "categories") return;
@@ -1075,7 +1080,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [episodeReturnView, navigateToView, selectedAnime, view]);
+  }, [episodeReturnView, navigateToView, searchQuery, selectedAnime, view]);
 
   const showPlayer = view === "player" && Boolean(selectedEpisode);
 
