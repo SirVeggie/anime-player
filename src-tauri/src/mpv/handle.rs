@@ -74,6 +74,8 @@ impl MpvHandle {
             // Keep the last frame visible after EOF; let us decide what
             // to do (instead of mpv tearing down the window).
             set_option(ctx, "keep-open", "yes")?;
+            // Open a demuxer for the next playlist entry while the current file plays.
+            set_option(ctx, "prefetch-playlist", "yes")?;
             // We render our own HTML controls; mpv's OSC would draw on
             // top of them.
             set_option(ctx, "osc", "no")?;
@@ -132,8 +134,65 @@ impl MpvHandle {
     }
 
     pub fn load(&self, path: &str) -> Result<(), String> {
-        self.command(&["loadfile", path])?;
+        self.load_replace(path)
+    }
+
+    /// Replace the playlist with a single file and start playback.
+    pub fn load_replace(&self, path: &str) -> Result<(), String> {
+        self.command(&["loadfile", path, "replace"])?;
         self.set_pause(false)?;
+        Ok(())
+    }
+
+    /// Append a file for prefetch; does not change the current playback item.
+    pub fn load_append(&self, path: &str) -> Result<(), String> {
+        self.command(&["loadfile", path, "append"])
+    }
+
+    pub fn playlist_pos(&self) -> Result<i64, String> {
+        self.get_property_i64("playlist-pos")
+    }
+
+    pub fn playlist_count(&self) -> Result<i64, String> {
+        self.get_property_i64("playlist-count")
+    }
+
+    pub fn playlist_remove(&self, index: i64) -> Result<(), String> {
+        self.command(&["playlist-remove", &index.to_string()])
+    }
+
+    /// Advance to the prefetched next entry (e.g. at EOF) and trim older playlist rows.
+    pub fn playlist_next_with_cleanup(&self) -> Result<(), String> {
+        self.command(&["playlist-next", "force"])?;
+        self.cleanup_playlist_before_current()?;
+        self.set_pause(false)?;
+        Ok(())
+    }
+
+    /// Drop playlist rows before the current index so only the playing file remains in history.
+    pub fn cleanup_playlist_before_current(&self) -> Result<(), String> {
+        let pos = self.playlist_pos()?;
+        for index in (0..pos).rev() {
+            self.playlist_remove(index)?;
+        }
+        Ok(())
+    }
+
+    /// Remove any prefetched row(s) after the current playlist position.
+    pub fn remove_prefetch_entries_after_current(&self) -> Result<(), String> {
+        let pos = self.playlist_pos()?;
+        while self.playlist_count()? > pos + 1 {
+            self.playlist_remove(pos + 1)?;
+        }
+        Ok(())
+    }
+
+    /// Keep at most one prefetched next file: trim stale rows, then append when given.
+    pub fn sync_prefetch_next(&self, next_path: Option<&str>) -> Result<(), String> {
+        self.remove_prefetch_entries_after_current()?;
+        if let Some(path) = next_path {
+            self.load_append(path)?;
+        }
         Ok(())
     }
 
