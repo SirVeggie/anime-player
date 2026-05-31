@@ -1241,6 +1241,12 @@ function App() {
       {selectedEpisode ? (
         <PlayerView
           episode={selectedEpisode}
+          anime={
+            selectedAnime?.id === selectedEpisode.anime_id
+              ? selectedAnime
+              : library.anime.find((a) => a.id === selectedEpisode.anime_id) ?? null
+          }
+          preferAnilistDisplayTitle={library.prefer_anilist_display_title}
           playlist={episodes}
           visible={Boolean(showPlayer)}
           playbackProgressFlushRef={playbackProgressFlushRef}

@@ -20,13 +20,20 @@ import {
 } from "../api";
 import type {
   AnilistProgressSyncResult,
+  AnimeSummary,
   Episode,
   MpvTrack,
   MpvVideoGeometry,
   ScrubSpriteReady,
   ScrubSpriteStatus,
 } from "../types";
-import { errorMessage, formatTime, isTextInputTarget, mediaPathsEqual } from "../utils";
+import {
+  errorMessage,
+  formatTime,
+  isTextInputTarget,
+  mediaPathsEqual,
+  playerNowPlayingLabel,
+} from "../utils";
 import { HOTKEY_STEP, MAX_VOLUME, clampVolume, loadVolume, saveVolume } from "../volume";
 
 const PLAYER_SIDEBAR_PX = 0;
@@ -300,6 +307,8 @@ function SeekBar(props: {
 
 export function PlayerView(props: {
   episode: Episode;
+  anime: Pick<AnimeSummary, "title" | "anilist_id" | "anilist_title" | "tracker_offset"> | null;
+  preferAnilistDisplayTitle: boolean;
   playlist: Episode[];
   visible: boolean;
   playbackProgressFlushRef: MutableRefObject<(() => Promise<void>) | null>;
@@ -314,6 +323,8 @@ export function PlayerView(props: {
 }) {
   const {
     episode,
+    anime,
+    preferAnilistDisplayTitle,
     playlist,
     visible,
     playbackProgressFlushRef,
@@ -1354,7 +1365,9 @@ export function PlayerView(props: {
         <ArrowLeftIcon />
       </button>
       <div className="now-playing" title={episode.path}>
-        {episode.file_name}
+        {anime
+          ? playerNowPlayingLabel(episode, anime, preferAnilistDisplayTitle)
+          : episode.file_name}
       </div>
       <div className="player-controls ui-surface">
         <div className="player-controls-content">

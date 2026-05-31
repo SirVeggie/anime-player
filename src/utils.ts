@@ -77,6 +77,20 @@ export function formatEpisodeNumber(value: number | null): string {
   return Number.isInteger(value) ? `Episode ${value}` : `Episode ${value.toFixed(1)}`;
 }
 
+/** Top overlay in the player when the episode number is known; otherwise the file name. */
+export function playerNowPlayingLabel(
+  episode: Pick<Episode, "episode_number" | "file_name">,
+  anime: Pick<AnimeSummary, "title" | "anilist_id" | "anilist_title" | "tracker_offset">,
+  preferAnilistDisplayTitle: boolean,
+): string {
+  if (!isEpisodeNumberKnown(episode.episode_number)) {
+    return episode.file_name;
+  }
+  const displayTitle = animeDisplayTitle(anime, preferAnilistDisplayTitle);
+  const displayEpisodeNumber = episode.episode_number - anime.tracker_offset;
+  return `${displayTitle} — ${formatEpisodeNumber(displayEpisodeNumber)}`;
+}
+
 /**
  * Count integer episode numbers missing from the range [min_local .. effective_max].
  * Decimal episode numbers are excluded. If `anilistTotalEpisodes` is set and positive,
