@@ -75,7 +75,10 @@ async function generateReleaseNotes() {
 `;
 
   if (filteredCommits) {
-    console.log('\nCommits to triage (rewrite into sections; omit docs/tooling):\n');
+    console.log(
+      '\nCommits to triage (rewrite into sections; omit docs/tooling;',
+      'combine same-feature follow-ups; omit intra-release fixes):\n',
+    );
     console.log(filteredCommits);
   }
 

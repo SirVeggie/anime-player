@@ -91,6 +91,25 @@ Rewrite commit subjects into plain, user-facing bullets. Drop or merge related
 items. If a section has no items after triage, remove the whole section (do not
 write “no changes”).
 
+#### Same-release follow-ups (combine, do not split)
+
+Commits in this release often include a feature and later commits that fix or
+refine that same feature before ship. Users never saw the intermediate bug or
+gap, so **do not** list those follow-up commits as separate bullets (especially
+not under **Fixes**).
+
+- **Combine** all commits that touch the same user-visible capability into **one**
+  bullet that describes the shipped behavior.
+- **Omit** intra-release fixes, polish, and “fix X introduced earlier in this
+  release” items entirely when the final state is already covered by the feature
+  bullet.
+- **Example:** commits “Add volume slider”, “Fix slider not updating on mute”,
+  “Clamp volume slider to 0–100” → one Features bullet: “Volume slider with mute
+  sync” (no Fixes entry for the mute bug).
+
+Only list something under **Fixes** when it corrects behavior users could have
+seen in a **previous** published release (or in production before this tag).
+
 Show the polished draft to the user (or save it) before publishing unless they
 explicitly asked you to publish without review.
 
