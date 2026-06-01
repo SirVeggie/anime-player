@@ -181,7 +181,19 @@ function App() {
     setToasts((current) => [...current, { id, kind, message }]);
   }, []);
 
+  const reloadSearchIndex = useCallback(async () => {
+    setAnimeSearchIndex(await getAnimeSearchIndex());
+  }, []);
+
   const reloadLibrary = useCallback(async () => {
+    const state = await getLibraryState();
+    setLibrary(state);
+    setSelectedCategoryId((current) => current ?? state.categories[0]?.id ?? null);
+    return state;
+  }, []);
+
+  /** Library plus filename/title search index — skip on progress-only updates. */
+  const reloadLibraryAndSearchIndex = useCallback(async () => {
     const [state, searchIndex] = await Promise.all([getLibraryState(), getAnimeSearchIndex()]);
     setLibrary(state);
     setAnimeSearchIndex(searchIndex);
@@ -208,13 +220,13 @@ function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const state = await reloadLibrary();
+        const state = await reloadLibraryAndSearchIndex();
         await reloadAnilistAuth();
         await reloadLocalDataStats();
         if (state.root_folders.length > 0) {
           try {
             await rescanLibrary();
-            await reloadLibrary();
+            await reloadLibraryAndSearchIndex();
             await reloadLocalDataStats();
           } catch (e) {
             showToast("error", errorMessage(e));
@@ -226,7 +238,7 @@ function App() {
         setLoading(false);
       }
     })();
-  }, [reloadAnilistAuth, reloadLibrary, reloadLocalDataStats, showToast]);
+  }, [reloadAnilistAuth, reloadLibraryAndSearchIndex, reloadLocalDataStats, showToast]);
 
   const handleAnilistCallback = useCallback(
     async (url: string) => {
@@ -504,11 +516,11 @@ function App() {
       await runAction(async () => {
         await addRootFolder(trimmed);
         setRootInput("");
-        await reloadLibrary();
+        await reloadLibraryAndSearchIndex();
         return "Root folder added.";
       });
     },
-    [reloadLibrary, runAction, showToast],
+    [reloadLibraryAndSearchIndex, runAction, showToast],
   );
 
   const handlePickFolder = useCallback(async () => {
@@ -523,17 +535,17 @@ function App() {
     async (root: RootFolder) => {
       await runAction(async () => {
         await removeRootFolder(root.id);
-        await reloadLibrary();
+        await reloadLibraryAndSearchIndex();
         return "Root folder removed; episodes from that folder were dropped from the library.";
       });
     },
-    [reloadLibrary, runAction],
+    [reloadLibraryAndSearchIndex, runAction],
   );
 
   const handleRescan = useCallback(async () => {
     await runAction(async () => {
       const summary = await rescanLibrary();
-      const state = await reloadLibrary();
+      const state = await reloadLibraryAndSearchIndex();
       if (view === "episodes" && selectedAnimeIdRef.current !== null) {
         const selectedId = selectedAnimeIdRef.current;
         const updated = state.anime.find((anime) => anime.id === selectedId);
@@ -550,7 +562,7 @@ function App() {
       await reloadLocalDataStats();
       return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} added or updated, ${summary.unmatched_files} unmatched.`;
     });
-  }, [navigateToView, reloadLibrary, reloadLocalDataStats, runAction, view]);
+  }, [navigateToView, reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction, view]);
 
   const handleCleanLocalData = useCallback(async () => {
     const confirmed = window.confirm(
@@ -560,7 +572,7 @@ function App() {
 
     await runAction(async () => {
       const summary = await cleanLocalData();
-      await reloadLibrary();
+      await reloadLibraryAndSearchIndex();
       await reloadLocalDataStats();
       const staleEpisodes = `${summary.stale_episodes_removed} stale episode${summary.stale_episodes_removed === 1 ? "" : "s"}`;
       const emptyAnime = `${summary.empty_anime_removed} empty title entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
@@ -568,7 +580,7 @@ function App() {
       const scrubSprites = `${summary.scrub_sprites_removed} unused scrub sprite${summary.scrub_sprites_removed === 1 ? "" : "s"}`;
       return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, and ${scrubSprites}.`;
     });
-  }, [reloadLibrary, reloadLocalDataStats, runAction]);
+  }, [reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction]);
 
   const handleCreateCategory = useCallback(async () => {
     const name = newCategoryName.trim();
@@ -703,7 +715,7 @@ function App() {
       }
 
       const summary = await deleteAnimeFiles(selectedAnime.id);
-      await reloadLibrary();
+      await reloadLibraryAndSearchIndex();
       await reloadLocalDataStats();
       setEpisodes([]);
       setSelectedAnime(null);
@@ -729,7 +741,7 @@ function App() {
     episodeReturnView,
     episodes.length,
     navigateToView,
-    reloadLibrary,
+    reloadLibraryAndSearchIndex,
     reloadLocalDataStats,
     selectedAnime,
     selectedEpisode?.anime_id,
@@ -760,7 +772,7 @@ function App() {
       await runAction(async () => {
         const summary = await renameFiles(renames);
         await rescanLibrary();
-        const state = await reloadLibrary();
+        const state = await reloadLibraryAndSearchIndex();
         if (selectedAnimeIdRef.current !== null) {
           const updated = state.anime.find((anime) => anime.id === selectedAnimeIdRef.current);
           if (updated) {
@@ -771,7 +783,7 @@ function App() {
         return `Renamed ${summary.files_renamed} file${summary.files_renamed === 1 ? "" : "s"}.`;
       });
     },
-    [reloadLibrary, runAction],
+    [reloadLibraryAndSearchIndex, runAction],
   );
 
   const handleSaveAnilistClientId = useCallback(
@@ -829,6 +841,7 @@ function App() {
     ) => {
       const currentAnime = selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
       let didMutate = false;
+      let searchFieldsChanged = false;
       if (currentAnime && title.trim() !== currentAnime.title) {
         await stopMpv().catch(() => undefined);
         if (selectedEpisode?.anime_id === animeId) {
@@ -836,6 +849,7 @@ function App() {
         }
         await renameAnime(animeId, title);
         didMutate = true;
+        searchFieldsChanged = true;
       }
       if (!currentAnime || trackerOffset !== currentAnime.tracker_offset) {
         await setAnimeTrackerOffset(animeId, trackerOffset);
@@ -863,9 +877,10 @@ function App() {
       }
       if (didMutate) {
         await refreshAnimePageData(animeId);
+        if (searchFieldsChanged) await reloadSearchIndex();
       }
     },
-    [library?.anime, refreshAnimePageData, selectedAnime, selectedEpisode?.anime_id],
+    [library?.anime, refreshAnimePageData, reloadSearchIndex, selectedAnime, selectedEpisode?.anime_id],
   );
 
   const handleClearAnimeCustomThumbnail = useCallback(
@@ -889,27 +904,28 @@ function App() {
         const result = await applyLocalAnilistProgress(animeId);
         if (result?.updated_episodes) {
           await refreshAnimePageData(animeId);
+          await reloadSearchIndex();
         } else {
-          const state = await reloadLibrary();
+          const state = await reloadLibraryAndSearchIndex();
           const updated = state.anime.find((anime) => anime.id === animeId);
           if (updated) setSelectedAnime(updated);
         }
       });
     },
-    [applyLocalAnilistProgress, refreshAnimePageData, reloadLibrary, runAction],
+    [applyLocalAnilistProgress, refreshAnimePageData, reloadLibraryAndSearchIndex, reloadSearchIndex, runAction],
   );
 
   const handleUnlinkAnilist = useCallback(
     async (animeId: number) => {
       await runAction(async () => {
         await unlinkAnimeAnilist(animeId);
-        const state = await reloadLibrary();
+        const state = await reloadLibraryAndSearchIndex();
         const updated = state.anime.find((anime) => anime.id === animeId);
         if (updated) setSelectedAnime(updated);
         return "Title unlinked from AniList.";
       });
     },
-    [reloadLibrary, runAction],
+    [reloadLibraryAndSearchIndex, runAction],
   );
 
   const handleOpenAnilist = useCallback(async (url: string) => {
