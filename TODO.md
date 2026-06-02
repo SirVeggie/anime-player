@@ -48,3 +48,7 @@ Episode selection page features
 # Performance
 
 - [ ] Improve thumbnail loading speed
+
+## Reliability
+
+- [x] Portable `data/diagnostic.log` for startup breadcrumbs, panics, and native/JS faults

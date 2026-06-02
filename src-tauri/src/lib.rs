@@ -4,6 +4,7 @@ use tauri::{Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 mod anilist;
+mod crash_log;
 mod db;
 mod library;
 mod scanner;
@@ -260,8 +261,16 @@ fn mpv_stop(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn diagnostic_log(message: String, level: Option<String>) -> Result<(), String> {
+    let level = level.as_deref().unwrap_or("INFO");
+    crash_log::log(level, &message);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crash_log::init();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             app.deep_link().handle_cli_arguments(argv.into_iter());
@@ -270,8 +279,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            crash_log::log(
+                "INFO",
+                &format!(
+                    "tauri setup (version {})",
+                    app.package_info().version
+                ),
+            );
+            crash_log::log("INFO", "opening portable database");
             let db = db::AppDatabase::open_portable()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            crash_log::log("INFO", "database open ok");
             app.manage(db);
 
             #[cfg(any(windows, target_os = "linux"))]
@@ -281,10 +299,12 @@ pub fn run() {
             {
                 app.manage(AppState::default());
                 let db_ref = app.state::<db::AppDatabase>();
+                crash_log::log("INFO", "initializing job manager");
                 app.manage(jobs::JobsState::new(
                     app.handle().clone(),
                     db_ref.inner(),
                 ));
+                crash_log::log("INFO", "job manager ok");
 
                 // Tear libmpv down before the main window's HWND becomes
                 // invalid, and re-issue the video margin natively on every
@@ -322,6 +342,7 @@ pub fn run() {
 
     #[cfg(windows)]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        diagnostic_log,
         library::scan_videos,
         library::get_library_state,
         library::get_anime_search_index,
@@ -396,6 +417,7 @@ pub fn run() {
 
     #[cfg(not(windows))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        diagnostic_log,
         library::scan_videos,
         library::get_library_state,
         library::get_anime_search_index,

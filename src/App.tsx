@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { diagnosticLog } from "./diagnosticLog";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -220,20 +221,37 @@ function App() {
   useEffect(() => {
     void (async () => {
       try {
+        diagnosticLog("startup: loading library");
         const state = await reloadLibraryAndSearchIndex();
+        diagnosticLog(
+          `startup: library loaded (${state.anime.length} anime, ${state.root_folders.length} roots)`,
+        );
+        diagnosticLog("startup: loading AniList auth");
         await reloadAnilistAuth();
+        diagnosticLog("startup: loading local data stats");
         await reloadLocalDataStats();
         if (state.root_folders.length > 0) {
           try {
-            await rescanLibrary();
+            diagnosticLog("startup: rescan_library begin");
+            const summary = await rescanLibrary();
+            diagnosticLog(
+              `startup: rescan_library ok (roots=${summary.roots_scanned}, imported=${summary.episodes_imported}, unmatched=${summary.unmatched_files})`,
+            );
             await reloadLibraryAndSearchIndex();
             await reloadLocalDataStats();
           } catch (e) {
-            showToast("error", errorMessage(e));
+            const msg = errorMessage(e);
+            diagnosticLog(`startup: rescan_library failed: ${msg}`, "ERROR");
+            showToast("error", msg);
           }
+        } else {
+          diagnosticLog("startup: skipping rescan (no root folders)");
         }
+        diagnosticLog("startup: complete");
       } catch (e) {
-        setFatalError(errorMessage(e));
+        const msg = errorMessage(e);
+        diagnosticLog(`startup: fatal error: ${msg}`, "ERROR");
+        setFatalError(msg);
       } finally {
         setLoading(false);
       }

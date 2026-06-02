@@ -1146,6 +1146,15 @@ pub fn rescan_library(
             episode_label: item.episode_label,
         })
         .collect();
+    if !scrub_imports.is_empty() {
+        crate::crash_log::log(
+            "INFO",
+            &format!(
+                "rescan_library: enqueueing {} scrub sprite job(s)",
+                scrub_imports.len()
+            ),
+        );
+    }
     crate::jobs::enqueue_scrub_for_rescan_imports(&jobs, &scrub_imports)?;
     Ok(summary)
 }
