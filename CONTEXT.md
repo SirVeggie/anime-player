@@ -508,6 +508,9 @@ got. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.
+- `src-tauri/src/op_ed.rs`, `src-tauri/src/media_tools.rs` — OP/ED detection
+  and shared ffmpeg/ffprobe helpers.
+- `src/opEd.ts` — OP/ED job identity and episode-page progress helpers.
 - `src-tauri/src/anilist.rs` — AniList OAuth callback handling, GraphQL
   search/link commands, and local cover caching.
 - `scripts/download-mpv-libs.mjs` — setup entry point that downloads
