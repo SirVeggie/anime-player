@@ -27,7 +27,10 @@ const SEED_WINDOW_SEC: f64 = 15.0;
 const SEGMENT_DURATION_SEC: f64 = 90.0;
 const OP_SEARCH_SEC: f64 = 180.0;
 const ED_TAIL_SEC: f64 = 180.0;
-const MATCH_THRESHOLD: f32 = 0.72;
+const MATCH_AVERAGE_THRESHOLD: f32 = 0.78;
+const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.72;
+const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.55;
+const MATCH_MIN_LOWER_QUARTILE: f32 = 0.60;
 const SEED_MATCH_THRESHOLD: f32 = 0.68;
 const MAX_SEED_EPISODES: usize = 10;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
@@ -44,6 +47,13 @@ impl SegmentKind {
         match self {
             Self::Op => "op",
             Self::Ed => "ed",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Op => "OP",
+            Self::Ed => "ED",
         }
     }
 
@@ -250,6 +260,52 @@ fn sliding_match_score(
     sum / overlap as f32
 }
 
+#[derive(Debug, Clone, Copy)]
+struct MatchQuality {
+    average: f32,
+    strong_frame_ratio: f32,
+    lower_quartile: f32,
+}
+
+fn match_quality_at_offset(
+    template: &Fingerprint,
+    candidate: &Fingerprint,
+    offset_frames: usize,
+) -> Option<MatchQuality> {
+    let overlap = template
+        .frame_count
+        .min(candidate.frame_count.saturating_sub(offset_frames));
+    if overlap == 0 {
+        return None;
+    }
+
+    let mut scores = Vec::with_capacity(overlap);
+    let mut sum = 0.0f32;
+    let mut strong = 0usize;
+    for f in 0..overlap {
+        let score = fingerprint_similarity(template, f, candidate, offset_frames + f);
+        sum += score;
+        if score >= MATCH_STRONG_FRAME_THRESHOLD {
+            strong += 1;
+        }
+        scores.push(score);
+    }
+    scores.sort_by(|a, b| a.total_cmp(b));
+    let lower_quartile = scores[overlap / 4];
+
+    Some(MatchQuality {
+        average: sum / overlap as f32,
+        strong_frame_ratio: strong as f32 / overlap as f32,
+        lower_quartile,
+    })
+}
+
+fn match_quality_is_accepted(quality: MatchQuality) -> bool {
+    quality.average >= MATCH_AVERAGE_THRESHOLD
+        && quality.strong_frame_ratio >= MATCH_MIN_STRONG_FRAME_RATIO
+        && quality.lower_quartile >= MATCH_MIN_LOWER_QUARTILE
+}
+
 fn frames_for_seconds(sec: f64) -> usize {
     ((sec * SAMPLE_RATE as f64) / HOP_SAMPLES as f64).floor() as usize
 }
@@ -358,7 +414,8 @@ fn find_best_match_in_candidate(
             best_offset = offset;
         }
     }
-    if best_score < MATCH_THRESHOLD {
+    let quality = match_quality_at_offset(template, candidate, best_offset)?;
+    if !match_quality_is_accepted(quality) {
         return None;
     }
     let start_sec = seconds_for_frames(best_offset);
@@ -366,7 +423,7 @@ fn find_best_match_in_candidate(
     Some(TemplateMatch {
         start_sec,
         end_sec,
-        confidence: best_score,
+        confidence: quality.average,
         offset_frames: best_offset,
     })
 }
@@ -379,10 +436,29 @@ struct SeedCandidate {
     fingerprint: Fingerprint,
 }
 
+/// Steps reserved per segment kind: scan each seed episode, compare, then build or bail.
+fn discovery_steps_per_kind(episode_count: usize) -> u32 {
+    if episode_count < 2 {
+        return 0;
+    }
+    episode_count.min(MAX_SEED_EPISODES) as u32 + 2
+}
+
+fn op_ed_detect_total_steps(episode_count: usize) -> u32 {
+    if episode_count < 2 {
+        // Starting + OP skip + ED skip + Done
+        return 4;
+    }
+    let per_kind = discovery_steps_per_kind(episode_count) + episode_count as u32;
+    // Starting + (discovery + per-episode match) × 2 kinds + Done
+    1 + per_kind * 2 + 1
+}
+
 fn discover_repeated_seed(
     episodes: &[EpisodeRow],
     kind: SegmentKind,
     cancel: &AtomicBool,
+    report: &mut dyn FnMut(&str),
 ) -> Result<Option<(SeedCandidate, Vec<i64>)>, String> {
     let pool: Vec<_> = episodes.iter().take(MAX_SEED_EPISODES).collect();
     if pool.len() < 2 {
@@ -390,10 +466,16 @@ fn discover_repeated_seed(
     }
 
     let mut seeds: Vec<SeedCandidate> = Vec::new();
-    for ep in &pool {
+    for (index, ep) in pool.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
         }
+        report(&format!(
+            "{} discovery: scanning episode {}/{}",
+            kind.display_name(),
+            index + 1,
+            pool.len()
+        ));
         let duration = if ep.duration_seconds > 0.0 {
             ep.duration_seconds
         } else {
@@ -426,6 +508,11 @@ fn discover_repeated_seed(
             offset += SEED_WINDOW_SEC / 2.0;
         }
     }
+
+    report(&format!(
+        "{} discovery: comparing fingerprints",
+        kind.display_name()
+    ));
 
     let mut best_cluster: Option<(SeedCandidate, Vec<i64>, usize)> = None;
     for (i, seed_a) in seeds.iter().enumerate() {
@@ -625,11 +712,20 @@ fn run_kind_detection(
     ctx: &DetectContext<'_>,
     kind: SegmentKind,
     block_index: i32,
-    step_base: u32,
+    step: &mut u32,
     step_total: u32,
 ) -> Result<(), String> {
     let episodes = ctx.episodes;
+    let mut tick = |label: &str| {
+        (ctx.on_progress)(*step, step_total, label);
+        *step += 1;
+    };
+
     if episodes.len() < 2 {
+        tick(&format!(
+            "{}: skipped (need at least 2 episodes)",
+            kind.display_name()
+        ));
         for ep in episodes {
             ctx.upsert_segment_status(
                 ep.id,
@@ -647,14 +743,12 @@ fn run_kind_detection(
         return Ok(());
     }
 
-    (ctx.on_progress)(
-        step_base,
-        step_total,
-        &format!("Discovering {} template", kind.as_str().to_uppercase()),
-    );
-
-    let seed_result = discover_repeated_seed(episodes, kind, ctx.cancel)?;
+    let seed_result = discover_repeated_seed(episodes, kind, ctx.cancel, &mut |label| tick(label))?;
     let Some((seed, source_ids)) = seed_result else {
+        tick(&format!(
+            "{} discovery: no repeated segment found",
+            kind.display_name()
+        ));
         if episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
             ctx.conn
                 .execute(
@@ -681,6 +775,11 @@ fn run_kind_detection(
         }
         return Ok(());
     };
+
+    tick(&format!(
+        "{} discovery: building template",
+        kind.display_name()
+    ));
 
     let source_path = episodes
         .iter()
@@ -754,16 +853,12 @@ fn run_kind_detection(
         }
 
         done += 1;
-        (ctx.on_progress)(
-            step_base + done,
-            step_total,
-            &format!(
-                "{} {}/{}",
-                kind.as_str().to_uppercase(),
-                done,
-                total
-            ),
-        );
+        tick(&format!(
+            "{} match: episode {}/{}",
+            kind.display_name(),
+            done,
+            total
+        ));
 
         if let Some(m) = matched {
             fail_streak = 0;
@@ -812,7 +907,12 @@ pub fn run_op_ed_detect_job(
 ) -> Result<(), String> {
     db.with_conn(|conn| {
         let episodes = load_episodes(conn, anime_id)?;
-        let total_steps = (episodes.len() as u32).saturating_mul(2).max(4) + 4;
+        let total_steps = op_ed_detect_total_steps(episodes.len());
+        let mut step = 1u32;
+        let mut tick = |label: &str| {
+            on_step(step, total_steps, label);
+            step += 1;
+        };
 
         conn.execute(
             "UPDATE anime SET no_op_ed = 0, op_ed_analysis_version = ?2 WHERE id = ?1",
@@ -850,15 +950,14 @@ pub fn run_op_ed_detect_job(
             on_progress: &on_step,
         };
 
-        on_step(1, total_steps, "Analyzing openings");
-        run_kind_detection(&ctx, SegmentKind::Op, 0, 2, total_steps)?;
+        tick("Starting OP/ED detection");
+        run_kind_detection(&ctx, SegmentKind::Op, 0, &mut step, total_steps)?;
 
         if cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
         }
 
-        on_step(total_steps / 2, total_steps, "Analyzing endings");
-        run_kind_detection(&ctx, SegmentKind::Ed, 0, total_steps / 2, total_steps)?;
+        run_kind_detection(&ctx, SegmentKind::Ed, 0, &mut step, total_steps)?;
 
         conn.execute(
             "UPDATE anime SET op_ed_analyzed_at = CURRENT_TIMESTAMP WHERE id = ?1",
@@ -1117,6 +1216,22 @@ pub fn get_anime_op_ed_summary_cmd(
 mod tests {
     use super::*;
 
+    fn fingerprint_from_frame_scores(scores: &[f32]) -> Fingerprint {
+        let mut data = Vec::with_capacity(scores.len() * BAND_COUNT);
+        for &score in scores {
+            let clamped = score.clamp(0.0, 1.0);
+            let orthogonal = (1.0 - clamped * clamped).sqrt();
+            data.push(clamped);
+            data.push(orthogonal);
+            data.extend(std::iter::repeat_n(0.0, BAND_COUNT - 2));
+        }
+        Fingerprint {
+            data,
+            frame_count: scores.len(),
+            sample_rate: SAMPLE_RATE,
+        }
+    }
+
     #[test]
     fn fingerprint_similarity_identical_frames_score_high() {
         let samples: Vec<i16> = (0..FRAME_SAMPLES * 4)
@@ -1135,7 +1250,27 @@ mod tests {
             duration_seconds: 1200.0,
         }];
         let cancel = AtomicBool::new(false);
-        let result = discover_repeated_seed(&eps, SegmentKind::Op, &cancel).unwrap();
+        let result = discover_repeated_seed(&eps, SegmentKind::Op, &cancel, &mut |_| {}).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn match_requires_consistent_strong_frames() {
+        let template = fingerprint_from_frame_scores(&[1.0; 8]);
+        let candidate = fingerprint_from_frame_scores(&[1.0, 0.70, 1.0, 0.70, 1.0, 0.70, 1.0, 0.70]);
+
+        assert!(sliding_match_score(&template, &candidate, 0) >= MATCH_AVERAGE_THRESHOLD);
+        assert!(find_best_match_in_candidate(&template, &candidate, 0, 0).is_none());
+    }
+
+    #[test]
+    fn match_accepts_consistent_high_quality_segment() {
+        let template = fingerprint_from_frame_scores(&[1.0; 8]);
+        let candidate = fingerprint_from_frame_scores(&[0.0, 0.0, 0.92, 0.90, 0.94, 0.91, 0.93, 0.90, 0.92, 0.91]);
+
+        let matched = find_best_match_in_candidate(&template, &candidate, 0, 2)
+            .expect("consistent high-quality segment should match");
+        assert_eq!(matched.offset_frames, 2);
+        assert!(matched.confidence >= MATCH_AVERAGE_THRESHOLD);
     }
 }

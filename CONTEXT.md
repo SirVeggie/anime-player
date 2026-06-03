@@ -250,10 +250,14 @@ view components. Per-screen UI lives in `src/components/`:
   per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
   `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
   saved rows. Optimistic search windows (first ~3 minutes / last ~3 minutes,
-  15s seed steps) run before a full-episode pass for failed episodes. Title
-  settings **Reset OP/ED analysis** clears DB + cache. Global **Skip detected
-  OP/ED** (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past
-  matched segments on `mpv://time-pos`.
+  15s seed steps) run before a full-episode pass for failed episodes. Matching
+  is intentionally conservative: the best audio offset must clear both an
+  average-score threshold and consistency checks (enough strong frames plus a
+  lower-quartile floor) before it can mark an episode segment as matched, which
+  reduces false-positive skips on episodes without OP/ED. Title settings
+  **Reset OP/ED analysis** clears DB + cache. Global **Skip detected OP/ED**
+  (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
+  segments on `mpv://time-pos`.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads
