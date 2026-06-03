@@ -60,6 +60,64 @@ fn ensure_schema_updates(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE anime ADD COLUMN anilist_cached_status TEXT", [])
             .map_err(|e| e.to_string())?;
     }
+    if !table_has_column(conn, "anime", "no_op_ed")? {
+        conn.execute(
+            "ALTER TABLE anime ADD COLUMN no_op_ed INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if !table_has_column(conn, "anime", "op_ed_analysis_version")? {
+        conn.execute(
+            "ALTER TABLE anime ADD COLUMN op_ed_analysis_version INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if !table_has_column(conn, "anime", "op_ed_analyzed_at")? {
+        conn.execute("ALTER TABLE anime ADD COLUMN op_ed_analyzed_at TEXT", [])
+            .map_err(|e| e.to_string())?;
+    }
+
+    conn.execute_batch(
+        r#"
+CREATE TABLE IF NOT EXISTS op_ed_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  anime_id INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('op', 'ed')),
+  block_index INTEGER NOT NULL DEFAULT 0,
+  start_sec REAL NOT NULL,
+  duration_sec REAL NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0,
+  fingerprint_cache_key TEXT NOT NULL,
+  source_episode_ids TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(anime_id) REFERENCES anime(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS episode_op_ed_segments (
+  episode_id INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('op', 'ed')),
+  status TEXT NOT NULL DEFAULT 'pending',
+  start_sec REAL,
+  end_sec REAL,
+  confidence REAL,
+  template_id INTEGER,
+  search_pass TEXT NOT NULL DEFAULT 'none',
+  fingerprint_cache_key TEXT,
+  error_text TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (episode_id, kind),
+  FOREIGN KEY(episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+  FOREIGN KEY(template_id) REFERENCES op_ed_templates(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_op_ed_templates_anime ON op_ed_templates(anime_id);
+CREATE INDEX IF NOT EXISTS idx_episode_op_ed_status ON episode_op_ed_segments(episode_id, status);
+"#,
+    )
+    .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 

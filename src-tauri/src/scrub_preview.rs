@@ -1,14 +1,18 @@
 ﻿use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::UNIX_EPOCH;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
+
+use crate::media_tools::{
+    cache_key, ffmpeg_path, hidden_command, normalized_video_path, portable_data_dir, probe_duration,
+};
+
+pub use crate::media_tools::normalized_video_path_key;
 
 const SPRITE_DIR: &str = "scrub-sprites";
 const THUMB_COLS: u32 = 10;
@@ -51,105 +55,6 @@ struct ScrubSpriteMeta {
     source_path: String,
 }
 
-fn portable_data_dir() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("failed to resolve exe path: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| format!("failed to resolve parent directory for {exe:?}"))?;
-    Ok(dir.join("data"))
-}
-
-/// GUI release builds have no console; without this, ffmpeg/ffprobe flash CMD windows.
-fn hidden_command(program: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    cmd
-}
-
-fn find_on_path(file_name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(file_name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn ffmpeg_path() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| "failed to resolve exe directory".to_string())?;
-    let beside = dir.join("ffmpeg.exe");
-    if beside.is_file() {
-        return Ok(beside);
-    }
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev = manifest.join("libs").join("ffmpeg").join("ffmpeg.exe");
-    if dev.is_file() {
-        return Ok(dev);
-    }
-    if let Some(path_ffmpeg) = find_on_path("ffmpeg.exe") {
-        return Ok(path_ffmpeg);
-    }
-    Err(
-        "ffmpeg.exe not found beside the app, in the dev tree, or on PATH — \
-         run: npm run setup:ffmpeg, or install ffmpeg and add it to PATH"
-            .to_string(),
-    )
-}
-
-fn ffprobe_path() -> Result<PathBuf, String> {
-    let ffmpeg = ffmpeg_path()?;
-    let beside_ffmpeg = ffmpeg.with_file_name("ffprobe.exe");
-    if beside_ffmpeg.is_file() {
-        return Ok(beside_ffmpeg);
-    }
-    if let Some(path_probe) = find_on_path("ffprobe.exe") {
-        return Ok(path_probe);
-    }
-    Err(
-        "ffprobe.exe not found beside ffmpeg or on PATH — \
-         run: npm run setup:ffmpeg, or install ffmpeg and add it to PATH"
-            .to_string(),
-    )
-}
-
-pub fn normalized_video_path(path: &str) -> Result<PathBuf, String> {
-    let path_buf = PathBuf::from(path);
-    if !path_buf.is_file() {
-        return Err(format!("video file not found: {path}"));
-    }
-    path_buf
-        .canonicalize()
-        .map_err(|e| format!("failed to canonicalize {path}: {e}"))
-}
-
-pub fn cache_key(path: &Path) -> Result<String, String> {
-    let meta = fs::metadata(path).map_err(|e| format!("failed to stat {}: {e}", path.display()))?;
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let canonical = path.to_string_lossy().to_ascii_lowercase();
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    canonical.hash(&mut hasher);
-    meta.len().hash(&mut hasher);
-    modified.hash(&mut hasher);
-    Ok(format!("{:016x}", hasher.finish()))
-}
-
 fn sprite_cache_dir() -> Result<PathBuf, String> {
     let dir = portable_data_dir()?.join(SPRITE_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
@@ -169,11 +74,6 @@ pub fn scrub_sprite_is_cached(path: &str) -> Result<bool, String> {
     let jpg_path = cache_dir.join(format!("{key}.jpg"));
     let json_path = cache_dir.join(format!("{key}.json"));
     Ok(jpg_path.is_file() && json_path.is_file())
-}
-
-/// Normalized path key used to match episode rows with scrub sprite metadata.
-pub fn normalized_video_path_key(path: &str) -> String {
-    path.replace('\\', "/").to_ascii_lowercase()
 }
 
 fn normalize_path_for_match(path: &str) -> String {
@@ -301,33 +201,6 @@ pub fn remove_scrub_sprite_cache(path: &str) -> Result<u64, String> {
     }
     bytes += remove_sprite_cache_by_source_path(path)?;
     Ok(bytes)
-}
-
-fn probe_duration(path: &Path) -> Result<f64, String> {
-    let ffprobe = ffprobe_path()?;
-    let output = hidden_command(&ffprobe)
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-        ])
-        .arg(path)
-        .output()
-        .map_err(|e| format!("failed to run ffprobe: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "ffprobe failed for {}: {}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.trim()
-        .parse::<f64>()
-        .map_err(|e| format!("invalid duration from ffprobe: {e}"))
 }
 
 fn thumb_count_for_duration(duration: f64) -> u32 {

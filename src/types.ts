@@ -54,6 +54,7 @@ export type AnimeSummary = {
   latest_episode_at: string | null;
   /** First episode path in list order; used when AniList cover is missing */
   first_episode_path: string | null;
+  no_op_ed: boolean;
 };
 
 /** Per-title text used by library search (titles + episode file names, not paths). */
@@ -82,6 +83,30 @@ export type Episode = {
   position_seconds: number;
   watched: boolean;
   last_watched_at: string | null;
+  op_ed_segments: OpEdSegmentInfo[];
+};
+
+export type OpEdSegmentInfo = {
+  kind: string;
+  status: string;
+  start_sec: number | null;
+  end_sec: number | null;
+  confidence: number | null;
+  search_pass: string;
+  error_text: string | null;
+};
+
+export type AnimeOpEdAnalysisSummary = {
+  anime_id: number;
+  no_op_ed: boolean;
+  analysis_version: number;
+  analyzed_at: string | null;
+  episode_count: number;
+  op_matched: number;
+  op_pending: number;
+  ed_matched: number;
+  ed_pending: number;
+  templates_count: number;
 };
 
 export type MpvTrack = {
@@ -108,6 +133,7 @@ export type LibraryState = {
   unmatched_count: number;
   /** When true, linked titles use AniList name in library UI; unlinked titles always use the detected name. */
   prefer_anilist_display_title: boolean;
+  skip_op_ed: boolean;
 };
 
 export type ScanSummary = {
@@ -126,6 +152,7 @@ export type LocalDataStats = {
   database_bytes: number;
   thumbnails_bytes: number;
   scrub_sprites_bytes: number;
+  op_ed_fingerprints_bytes: number;
   total_bytes: number;
 };
 
@@ -136,6 +163,7 @@ export type LocalDataCleanupSummary = {
   unmatched_files_removed: number;
   thumbnails_removed: number;
   scrub_sprites_removed: number;
+  op_ed_fingerprints_removed: number;
   bytes_removed: number;
 };
 
@@ -268,6 +296,12 @@ export type EnqueueScrubSpriteJob = {
   animeTitle?: string | null;
   episodeLabel?: string | null;
   followUp?: EnqueueScrubSpriteJob[];
+};
+
+export type EnqueueOpEdDetectJob = {
+  anime_id: number;
+  priority: JobPriority;
+  anime_title?: string | null;
 };
 
 export type JobFinishedEvent = {

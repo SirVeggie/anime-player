@@ -243,6 +243,17 @@ view components. Per-screen UI lives in `src/components/`:
   cache synchronously; finished jobs emit `scrub-sprite-ready`. Generation uses
   ffmpeg with `-hwaccel auto` and `-skip_frame nokey`. The UI slices the sheet
   via CSS `background-position`.
+- **OP/ED detection** is manual per title: the episode page **Detect OP/ED** button
+  enqueues a background job (`jobs_enqueue_op_ed_detect`, identity
+  `op_ed_detect:{anime_id}`) that extracts mono PCM via ffmpeg, builds spectral
+  fingerprints under `data/op-ed-fingerprints/`, and stores templates plus
+  per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
+  `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
+  saved rows. Optimistic search windows (first ~3 minutes / last ~3 minutes,
+  15s seed steps) run before a full-episode pass for failed episodes. Title
+  settings **Reset OP/ED analysis** clears DB + cache. Global **Skip detected
+  OP/ED** (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past
+  matched segments on `mpv://time-pos`.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads

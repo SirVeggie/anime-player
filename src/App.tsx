@@ -3,7 +3,7 @@ import { diagnosticLog } from "./diagnosticLog";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
@@ -36,6 +36,7 @@ import {
   rescanLibrary,
   searchAnilistAnime,
   setPreferAnilistDisplayTitle,
+  setSkipOpEd,
   setAnimeCustomThumbnailPath,
   setAnimeTrackerOffset,
   setDefaultCategory,
@@ -499,6 +500,21 @@ function App() {
     [reloadLibrary],
   );
 
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    void listen("op-ed://analysis-updated", () => {
+      const animeId = selectedAnimeIdRef.current;
+      if (animeId != null) {
+        void refreshAnimePageData(animeId);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      void unlisten?.();
+    };
+  }, [refreshAnimePageData]);
+
   const openAnime = useCallback(
     async (anime: AnimeSummary, returnView: EpisodeReturnView = "anime") => {
       selectedAnimeIdRef.current = anime.id;
@@ -597,7 +613,8 @@ function App() {
       const emptyAnime = `${summary.empty_anime_removed} empty title entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
       const thumbnails = `${summary.thumbnails_removed} unused thumbnail${summary.thumbnails_removed === 1 ? "" : "s"}`;
       const scrubSprites = `${summary.scrub_sprites_removed} unused scrub sprite${summary.scrub_sprites_removed === 1 ? "" : "s"}`;
-      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, and ${scrubSprites}.`;
+      const opEdFp = `${summary.op_ed_fingerprints_removed} unused OP/ED fingerprint${summary.op_ed_fingerprints_removed === 1 ? "" : "s"}`;
+      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, ${scrubSprites}, and ${opEdFp}.`;
     });
   }, [reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction]);
 
@@ -851,6 +868,11 @@ function App() {
     },
     [],
   );
+
+  const handleSkipOpEd = useCallback(async (enabled: boolean) => {
+    const state = await setSkipOpEd(enabled);
+    setLibrary(state);
+  }, []);
 
   const handleSearchAnilist = useCallback((query: string): Promise<AnilistSearchResult[]> => {
     return searchAnilistAnime(query);
@@ -1305,6 +1327,8 @@ function App() {
               : library.anime.find((a) => a.id === selectedEpisode.anime_id) ?? null
           }
           preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+          skipOpEdEnabled={library.skip_op_ed}
+          onSkipOpEdEnabledChange={(enabled) => void handleSkipOpEd(enabled)}
           playlist={episodes}
           visible={Boolean(showPlayer)}
           playbackProgressFlushRef={playbackProgressFlushRef}
@@ -1396,6 +1420,10 @@ function App() {
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
               anilistConnected={isAnilistConnected(anilistAuth)}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+              jobsSnapshot={jobsSnapshot}
+              onOpEdAnalysisUpdated={() => {
+                if (selectedAnime) void refreshAnimePageData(selectedAnime.id);
+              }}
             />
           ) : null}
 
@@ -1435,6 +1463,7 @@ function App() {
               onLoginAnilist={() => void handleLoginAnilist()}
               onLogoutAnilist={() => void handleLogoutAnilist()}
               onPreferAnilistDisplayTitle={(enabled) => void handlePreferAnilistDisplayTitle(enabled)}
+              onSkipOpEd={(enabled) => void handleSkipOpEd(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
             />
           ) : null}

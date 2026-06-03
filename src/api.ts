@@ -14,7 +14,9 @@ import type {
   LocalDataStats,
   MpvTrack,
   MpvVideoGeometry,
+  AnimeOpEdAnalysisSummary,
   EnqueueJobResult,
+  EnqueueOpEdDetectJob,
   EnqueueScrubSpriteJob,
   JobPriority,
   JobsSnapshot,
@@ -40,6 +42,10 @@ export function getAnimeSearchIndex(): Promise<AnimeSearchEntry[]> {
 
 export function setPreferAnilistDisplayTitle(enabled: boolean): Promise<LibraryState> {
   return invoke("set_prefer_anilist_display_title", { enabled });
+}
+
+export function setSkipOpEd(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_skip_op_ed", { enabled });
 }
 
 export function addRootFolder(path: string): Promise<RootFolder> {
@@ -180,6 +186,18 @@ export function jobsCancelAll(): Promise<void> {
 
 export function jobsEnqueueScrubSprite(request: EnqueueScrubSpriteJob): Promise<EnqueueJobResult> {
   return invoke("jobs_enqueue_scrub_sprite", { request });
+}
+
+export function jobsEnqueueOpEdDetect(request: EnqueueOpEdDetectJob): Promise<EnqueueJobResult> {
+  return invoke("jobs_enqueue_op_ed_detect", { request });
+}
+
+export function resetAnimeOpEdAnalysis(animeId: number): Promise<void> {
+  return invoke("reset_anime_op_ed_analysis_cmd", { animeId });
+}
+
+export function getAnimeOpEdSummary(animeId: number): Promise<AnimeOpEdAnalysisSummary> {
+  return invoke("get_anime_op_ed_summary_cmd", { animeId });
 }
 
 export function jobsSetJobPriority(jobId: string, priority: JobPriority): Promise<void> {

@@ -5,16 +5,17 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::OptionalExtension;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::AppDatabase;
+use crate::op_ed::{self, op_ed_job_identity};
 use crate::scrub_preview::{
     self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity, scrub_sprite_is_cached,
 };
 
 use super::types::{
-    EnqueueJobResult, EnqueueScrubSpriteJob, JobPriority, JobProgress, JobResourceType, JobStatus,
-    JobView, JobsSnapshot, TypeMaxParallel,
+    EnqueueJobResult, EnqueueOpEdDetectJob, EnqueueScrubSpriteJob, JobPriority, JobProgress,
+    JobResourceType, JobStatus, JobView, JobsSnapshot, TypeMaxParallel,
 };
 
 /// Episode newly imported during `rescan_library` (auto scrub enqueue).
@@ -53,6 +54,9 @@ fn new_job_id() -> String {
 #[derive(Debug, Clone)]
 enum JobKind {
     ScrubSprite { path: String },
+    OpEdDetect {
+        anime_id: i64,
+    },
 }
 
 struct JobRecord {
@@ -353,6 +357,85 @@ impl JobManager {
         })
     }
 
+    pub fn enqueue_op_ed_detect(
+        &mut self,
+        request: EnqueueOpEdDetectJob,
+    ) -> Result<EnqueueJobResult, String> {
+        let identity = op_ed_job_identity(request.anime_id);
+        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
+            if self.records.get(&existing_id).is_some_and(|r| {
+                matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+            }) {
+                if self.records.get(&existing_id).is_some_and(|r| {
+                    r.view.status == JobStatus::Queued
+                        && priority_rank(request.priority) > priority_rank(r.view.priority)
+                }) {
+                    self.set_job_priority(&existing_id, request.priority)?;
+                }
+                return Ok(EnqueueJobResult {
+                    job_id: Some(existing_id),
+                    skipped: false,
+                });
+            }
+        }
+
+        let desc = request
+            .anime_title
+            .as_deref()
+            .map(|t| t.trim())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| format!("Anime #{}", request.anime_id));
+
+        let id = new_job_id();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let total_steps = 100;
+        let view = JobView {
+            id: id.clone(),
+            name: "Detect OP/ED".to_string(),
+            desc,
+            identity: identity.clone(),
+            job_type: "op_ed_detect".to_string(),
+            resource_type: JobResourceType::Ffmpeg,
+            priority: request.priority,
+            status: JobStatus::Queued,
+            cancelable: true,
+            progress: JobProgress {
+                current_step: 0,
+                total_steps,
+            },
+            step_label: "Queued".to_string(),
+            completion_message: None,
+            created_at: now_ms(),
+            started_at: None,
+            finished_at: None,
+        };
+        let record = JobRecord {
+            view,
+            cancel,
+            kind: JobKind::OpEdDetect {
+                anime_id: request.anime_id,
+            },
+            follow_ups: Vec::new(),
+        };
+        self.records.insert(id.clone(), record);
+        self.identity_to_id.insert(identity, id.clone());
+
+        if request.priority == JobPriority::High {
+            self.try_start_or_queue(&id, true);
+            self.pump();
+        } else {
+            self.queued_ids.push(id.clone());
+            self.pump();
+        }
+
+        self.emit_snapshot();
+        Ok(EnqueueJobResult {
+            job_id: Some(id),
+            skipped: false,
+        })
+    }
+
     fn running_count(&self) -> u32 {
         self.records
             .values()
@@ -469,19 +552,29 @@ impl JobManager {
         self.queued_ids.retain(|id| id != job_id);
 
         let cancel = record.cancel.clone();
-        let path = match &record.kind {
-            JobKind::ScrubSprite { path } => path.clone(),
-        };
+        let kind = record.kind.clone();
         let job_id_owned = job_id.to_string();
         let app = self.app.clone();
 
-        super::spawn_scrub_worker(app, job_id_owned, path, cancel);
+        match kind {
+            JobKind::ScrubSprite { path } => {
+                super::spawn_scrub_worker(app, job_id_owned, path, cancel);
+            }
+            JobKind::OpEdDetect { anime_id } => {
+                super::spawn_op_ed_worker(app, job_id_owned, anime_id, cancel);
+            }
+        }
         self.emit_snapshot();
     }
 
     pub fn complete_worker(&mut self, job_id: &str, outcome: WorkerOutcome) {
-        let path_for_emit = self.records.get(job_id).and_then(|r| match &r.kind {
+        let scrub_path_for_emit = self.records.get(job_id).and_then(|r| match &r.kind {
             JobKind::ScrubSprite { path } => Some(path.clone()),
+            JobKind::OpEdDetect { .. } => None,
+        });
+
+        let emit_op_ed_updated = self.records.get(job_id).is_some_and(|r| {
+            matches!(r.kind, JobKind::OpEdDetect { .. })
         });
 
         match outcome {
@@ -498,9 +591,12 @@ impl JobManager {
                 for follow in follow_ups {
                     let _ = self.enqueue_scrub_sprite(follow);
                 }
+                if emit_op_ed_updated {
+                    let _ = self.app.emit("op-ed://analysis-updated", ());
+                }
             }
             WorkerOutcome::Failed(message) => {
-                if let Some(path) = path_for_emit {
+                if let Some(path) = scrub_path_for_emit {
                     emit_scrub_sprite_status(
                         &self.app,
                         scrub_preview::ScrubSpriteStatus::Unavailable { path },
@@ -509,7 +605,7 @@ impl JobManager {
                 self.finish_job(job_id, JobStatus::Failed, Some(message));
             }
             WorkerOutcome::Canceled => {
-                if let Some(path) = path_for_emit {
+                if let Some(path) = scrub_path_for_emit {
                     emit_scrub_sprite_status(
                         &self.app,
                         scrub_preview::ScrubSpriteStatus::Unavailable { path },
@@ -577,6 +673,23 @@ pub fn run_scrub_job_worker(
     }
     match run_scrub_sprite_job(path, cancel, |step, total, label| on_step(step, total, label)) {
         Ok(ready) => WorkerOutcome::Done("Sprite sheet ready".to_string(), Some(ready)),
+        Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
+        Err(e) => WorkerOutcome::Failed(e),
+    }
+}
+
+pub fn run_op_ed_job_worker(
+    app: &AppHandle,
+    anime_id: i64,
+    cancel: &AtomicBool,
+    on_step: impl Fn(u32, u32, &str),
+) -> WorkerOutcome {
+    if cancel.load(Ordering::Relaxed) {
+        return WorkerOutcome::Canceled;
+    }
+    let db = app.state::<AppDatabase>();
+    match op_ed::run_op_ed_detect_job(&db, anime_id, cancel, on_step) {
+        Ok(()) => WorkerOutcome::Done("OP/ED analysis complete".to_string(), None),
         Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
         Err(e) => WorkerOutcome::Failed(e),
     }

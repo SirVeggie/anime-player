@@ -1,14 +1,33 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
+  getAnimeOpEdSummary,
   getFileThumbnail,
   getMatchingDetectionRuleName,
+  jobsCancel,
+  jobsEnqueueOpEdDetect,
   jobsEnqueueScrubSprite,
   jobsSetScrubSpritePriorityForPaths,
+  resetAnimeOpEdAnalysis,
 } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
-import type { AnimeSummary, AnilistMediaStatus, AnilistSearchResult, Category, Episode } from "../types";
+import {
+  analysisProgressLabel,
+  findActiveOpEdJob,
+  jobProgressPercent,
+  opEdSegmentLabel,
+} from "../opEd";
+import type {
+  AnimeOpEdAnalysisSummary,
+  AnimeSummary,
+  AnilistMediaStatus,
+  AnilistSearchResult,
+  Category,
+  Episode,
+  JobsSnapshot,
+} from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import {
   animeDisplayTitle,
@@ -116,6 +135,8 @@ export function EpisodeScreen(props: {
   onOpenAnilist: (url: string) => void;
   anilistConnected: boolean;
   preferAnilistDisplayTitle: boolean;
+  jobsSnapshot: JobsSnapshot | null;
+  onOpEdAnalysisUpdated: () => void;
 }) {
   const {
     anime,
@@ -137,6 +158,8 @@ export function EpisodeScreen(props: {
     onUnlinkAnilist,
     onOpenAnilist,
     anilistConnected,
+    jobsSnapshot,
+    onOpEdAnalysisUpdated,
   } = props;
   // Highlight whichever episode the Q hotkey would launch right now, so the
   // pill always points at the same target as the keybind.
@@ -165,6 +188,14 @@ export function EpisodeScreen(props: {
   const [scoreSaving, setScoreSaving] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
+  const [opEdSummary, setOpEdSummary] = useState<AnimeOpEdAnalysisSummary | null>(null);
+  const [opEdDetectBusy, setOpEdDetectBusy] = useState(false);
+  const [opEdResetBusy, setOpEdResetBusy] = useState(false);
+  const [opEdError, setOpEdError] = useState<string | null>(null);
+  const activeOpEdJob = useMemo(
+    () => findActiveOpEdJob(jobsSnapshot, anime.id),
+    [anime.id, jobsSnapshot],
+  );
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
@@ -283,6 +314,70 @@ export function EpisodeScreen(props: {
     if (p == null) return;
     setProgressOverrideDraft(String(p));
   }, [animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
+
+  const reloadOpEdSummary = useCallback(async () => {
+    try {
+      setOpEdSummary(await getAnimeOpEdSummary(anime.id));
+    } catch {
+      setOpEdSummary(null);
+    }
+  }, [anime.id]);
+
+  useEffect(() => {
+    void reloadOpEdSummary();
+  }, [reloadOpEdSummary, episodes]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen("op-ed://analysis-updated", () => {
+      void reloadOpEdSummary();
+      onOpEdAnalysisUpdated();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      void unlisten?.();
+    };
+  }, [onOpEdAnalysisUpdated, reloadOpEdSummary]);
+
+  const handleDetectOpEd = useCallback(async () => {
+    if (episodes.length < 2) return;
+    setOpEdDetectBusy(true);
+    try {
+      await jobsEnqueueOpEdDetect({
+        anime_id: anime.id,
+        priority: "medium",
+        anime_title: animeDisplayTitle(anime, preferAnilistDisplayTitle),
+      });
+    } catch (e) {
+      setOpEdError(errorMessage(e));
+    } finally {
+      setOpEdDetectBusy(false);
+    }
+  }, [anime, episodes.length, preferAnilistDisplayTitle]);
+
+  const handleCancelOpEdJob = useCallback(async () => {
+    if (!activeOpEdJob) return;
+    try {
+      await jobsCancel(activeOpEdJob.id);
+    } catch (e) {
+      setOpEdError(errorMessage(e));
+    }
+  }, [activeOpEdJob]);
+
+  const handleResetOpEdAnalysis = useCallback(async () => {
+    if (!window.confirm("Clear all OP/ED analysis data for this title?")) return;
+    setOpEdResetBusy(true);
+    try {
+      await resetAnimeOpEdAnalysis(anime.id);
+      await reloadOpEdSummary();
+      onOpEdAnalysisUpdated();
+    } catch (e) {
+      setAnimeSettingsError(errorMessage(e));
+    } finally {
+      setOpEdResetBusy(false);
+    }
+  }, [anime.id, onOpEdAnalysisUpdated, reloadOpEdSummary]);
 
   useEffect(() => {
     return () => {
@@ -618,6 +713,20 @@ export function EpisodeScreen(props: {
             </button>
             <button
               type="button"
+              disabled={episodes.length < 2 || opEdDetectBusy || Boolean(activeOpEdJob)}
+              onClick={() => void handleDetectOpEd()}
+              title={
+                episodes.length < 2
+                  ? "Need at least 2 episodes"
+                  : activeOpEdJob
+                    ? "Analysis in progress"
+                    : "Detect opening and ending by matching audio across episodes"
+              }
+            >
+              {activeOpEdJob ? "Detecting…" : "Detect OP/ED"}
+            </button>
+            <button
+              type="button"
               className="header-icon-button"
               onClick={openAnimeSettings}
               aria-label="Open title settings"
@@ -945,6 +1054,17 @@ export function EpisodeScreen(props: {
                 </p>
               </div>
               {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}
+              <div className="anime-settings-field">
+                <p className="muted">Clear detected OP/ED templates and per-episode timestamps for this title.</p>
+                <button
+                  type="button"
+                  className="button-danger"
+                  disabled={animeSettingsSaving || opEdResetBusy}
+                  onClick={() => void handleResetOpEdAnalysis()}
+                >
+                  {opEdResetBusy ? "Resetting…" : "Reset OP/ED analysis"}
+                </button>
+              </div>
               <div className="modal-actions">
                 <button type="button" onClick={closeAnimeSettings} disabled={animeSettingsSaving}>
                   Cancel
@@ -957,6 +1077,33 @@ export function EpisodeScreen(props: {
           </section>
         </div>
       ) : null}
+
+      {episodes.length >= 2 && (activeOpEdJob || opEdSummary) ?
+        <section className="op-ed-analysis-banner" aria-live="polite">
+          {activeOpEdJob ?
+            <>
+              <div className="op-ed-analysis-banner__row">
+                <span className="muted">{activeOpEdJob.stepLabel}</span>
+                <span>{jobProgressPercent(activeOpEdJob)}%</span>
+              </div>
+              <div className="job-progress-track" aria-hidden>
+                <div
+                  className="job-progress-fill"
+                  style={{ width: `${jobProgressPercent(activeOpEdJob)}%` }}
+                />
+              </div>
+              {activeOpEdJob.cancelable ?
+                <button type="button" onClick={() => void handleCancelOpEdJob()}>
+                  Cancel
+                </button>
+              : null}
+            </>
+          : opEdSummary ?
+            <p className="muted">{analysisProgressLabel(opEdSummary)}</p>
+          : null}
+          {opEdError ? <p className="error">{opEdError}</p> : null}
+        </section>
+      : null}
 
       <section className="episode-list">
         {episodeListItems.map((item) => {
@@ -998,6 +1145,12 @@ export function EpisodeScreen(props: {
                   {isEpisodeNumberKnown(episode.episode_number) ? <span>{episode.file_name}</span> : null}
                   <span>{formatSize(episode.size)}</span>
                   {episode.duration_seconds > 0 ? <span>{formatTime(episode.duration_seconds)}</span> : null}
+                  {opEdSegmentLabel(episode.op_ed_segments, "op") ?
+                    <span className="op-ed-pill">OP {opEdSegmentLabel(episode.op_ed_segments, "op")}</span>
+                  : null}
+                  {opEdSegmentLabel(episode.op_ed_segments, "ed") ?
+                    <span className="op-ed-pill">ED {opEdSegmentLabel(episode.op_ed_segments, "ed")}</span>
+                  : null}
                 </div>
                 <div className="episode-progress">
                   <span style={{ width: `${percent}%` }} />

@@ -7,6 +7,7 @@ mod anilist;
 mod crash_log;
 mod db;
 mod library;
+mod media_tools;
 mod scanner;
 
 #[cfg(windows)]
@@ -15,6 +16,7 @@ mod mpv;
 mod thumbnails;
 #[cfg(windows)]
 mod scrub_preview;
+mod op_ed;
 #[cfg(windows)]
 mod jobs;
 
@@ -374,6 +376,9 @@ pub fn run() {
         library::rescan_library,
         library::get_local_data_stats,
         library::clean_local_data,
+        library::set_skip_op_ed,
+        op_ed::reset_anime_op_ed_analysis_cmd,
+        op_ed::get_anime_op_ed_summary_cmd,
         anilist::get_anilist_auth_state,
         anilist::set_anilist_client_id,
         anilist::get_anilist_login_url,
@@ -397,8 +402,12 @@ pub fn run() {
         jobs::jobs_cancel,
         jobs::jobs_cancel_all,
         jobs::jobs_enqueue_scrub_sprite,
+        jobs::jobs_enqueue_op_ed_detect,
         jobs::jobs_set_job_priority,
         jobs::jobs_set_scrub_sprite_priority_for_paths,
+        op_ed::reset_anime_op_ed_analysis_cmd,
+        op_ed::get_anime_op_ed_summary_cmd,
+        library::set_skip_op_ed,
         mpv_init,
         mpv_load,
         mpv_cycle_pause,
@@ -450,6 +459,9 @@ pub fn run() {
         library::rescan_library,
         library::get_local_data_stats,
         library::clean_local_data,
+        library::set_skip_op_ed,
+        op_ed::reset_anime_op_ed_analysis_cmd,
+        op_ed::get_anime_op_ed_summary_cmd,
         anilist::get_anilist_auth_state,
         anilist::set_anilist_client_id,
         anilist::get_anilist_login_url,

@@ -9,6 +9,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::{refresh_anime_latest_episode_at, AppDatabase};
+use crate::op_ed::{self, OpEdSegmentInfo};
 use crate::scanner::{self, DetectionRule};
 
 #[cfg(windows)]
@@ -97,6 +98,7 @@ pub struct AnimeSummary {
     latest_episode_at: Option<String>,
     /// Path of the first episode in list order (same as `list_episodes`); grid thumbnail fallback.
     first_episode_path: Option<String>,
+    no_op_ed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,6 +136,7 @@ pub struct Episode {
     position_seconds: f64,
     watched: bool,
     last_watched_at: Option<String>,
+    op_ed_segments: Vec<OpEdSegmentInfo>,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,6 +158,7 @@ pub struct LibraryState {
     missing_anime: Vec<MissingAnimeSummary>,
     unmatched_count: i64,
     prefer_anilist_display_title: bool,
+    skip_op_ed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -176,6 +180,7 @@ pub struct LocalDataStats {
     database_bytes: u64,
     thumbnails_bytes: u64,
     scrub_sprites_bytes: u64,
+    op_ed_fingerprints_bytes: u64,
     total_bytes: u64,
 }
 
@@ -187,6 +192,7 @@ pub struct LocalDataCleanupSummary {
     unmatched_files_removed: i64,
     thumbnails_removed: i64,
     scrub_sprites_removed: i64,
+    op_ed_fingerprints_removed: i64,
     bytes_removed: u64,
 }
 
@@ -351,6 +357,15 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         missing_anime: list_missing_anime(conn)?,
         unmatched_count: count_unmatched(conn)?,
         prefer_anilist_display_title: read_prefer_anilist_display_title(conn)?,
+        skip_op_ed: op_ed::read_skip_op_ed(conn)?,
+    })
+}
+
+#[tauri::command]
+pub fn set_skip_op_ed(db: State<'_, AppDatabase>, enabled: bool) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        op_ed::write_skip_op_ed(conn, enabled)?;
+        build_library_state(conn, &db)
     })
 }
 
@@ -727,6 +742,8 @@ pub fn delete_anime_files(
         && deleted_episode_ids.len() == deletable_episode_count;
 
     let mut remove_anime_row = remove_anime_from_library;
+
+    let _ = db.with_conn(|conn| op_ed::reset_anime_op_ed_analysis(conn, anime_id));
 
     db.with_conn(|conn| {
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1191,6 +1208,7 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
             unmatched_files_removed: 0,
             thumbnails_removed: 0,
             scrub_sprites_removed: 0,
+            op_ed_fingerprints_removed: 0,
             bytes_removed: 0,
         };
 
@@ -1224,9 +1242,14 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
     let (scrub_removed, scrub_bytes_removed) =
         crate::scrub_preview::delete_unreferenced_scrub_sprites(&referenced_scrub_paths)?;
     summary.scrub_sprites_removed = scrub_removed as i64;
+    let referenced_op_ed = db.with_conn(|conn| op_ed::list_referenced_op_ed_fingerprint_keys(conn))?;
+    let (op_ed_removed, op_ed_bytes_removed) =
+        op_ed::delete_unreferenced_op_ed_fingerprints(&referenced_op_ed)?;
+    summary.op_ed_fingerprints_removed = op_ed_removed as i64;
     summary.bytes_removed = database_bytes_before.saturating_sub(database_bytes_after)
         + thumbnail_bytes_removed
-        + scrub_bytes_removed;
+        + scrub_bytes_removed
+        + op_ed_bytes_removed;
     Ok(summary)
 }
 
@@ -1491,7 +1514,8 @@ fn list_anime(
                 (SELECT e2.path FROM episodes e2
                  WHERE e2.anime_id = a.id AND e2.missing = 0
                  ORDER BY e2.episode_number IS NULL, e2.episode_number, e2.relative_path COLLATE NOCASE
-                 LIMIT 1) AS first_episode_path
+                 LIMIT 1) AS first_episode_path,
+                a.no_op_ed
          FROM anime a
          LEFT JOIN episodes e ON e.anime_id = a.id AND e.missing = 0",
     );
@@ -1552,6 +1576,7 @@ fn list_anime(
             created_at: row.get(17)?,
             latest_episode_at: row.get(18)?,
             first_episode_path: row.get(19)?,
+            no_op_ed: row.get::<_, i64>(20)? != 0,
         })
     };
 
@@ -1636,7 +1661,11 @@ fn list_episodes_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<Episo
     let rows = stmt
         .query_map(params![anime_id], episode_from_row)
         .map_err(|e| e.to_string())?;
-    collect_rows(rows)
+    let mut episodes = collect_rows(rows)?;
+    for episode in &mut episodes {
+        episode.op_ed_segments = op_ed::load_episode_op_ed_segments(conn, episode.id)?;
+    }
+    Ok(episodes)
 }
 
 fn list_deletable_episodes_for_anime(
@@ -1857,6 +1886,7 @@ fn episode_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Episode> {
         position_seconds: row.get(9)?,
         watched: row.get::<_, i64>(10)? != 0,
         last_watched_at: row.get(11)?,
+        op_ed_segments: Vec::new(),
     })
 }
 
@@ -2061,18 +2091,23 @@ fn delete_unmatched_files_not_in_scan(
 
 fn local_data_stats(db: &AppDatabase) -> Result<LocalDataStats, String> {
     let database_bytes = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
-    let (thumbnails_bytes, scrub_sprites_bytes) = match db.path().parent() {
+    let (thumbnails_bytes, scrub_sprites_bytes, op_ed_fingerprints_bytes) = match db.path().parent() {
         Some(data_dir) => (
             directory_size(&data_dir.join("anilist-covers"))?,
             directory_size(&data_dir.join("scrub-sprites"))?,
+            op_ed::op_ed_cache_directory_size()?,
         ),
-        None => (0, 0),
+        None => (0, 0, 0),
     };
     Ok(LocalDataStats {
         database_bytes,
         thumbnails_bytes,
         scrub_sprites_bytes,
-        total_bytes: database_bytes + thumbnails_bytes + scrub_sprites_bytes,
+        op_ed_fingerprints_bytes,
+        total_bytes: database_bytes
+            + thumbnails_bytes
+            + scrub_sprites_bytes
+            + op_ed_fingerprints_bytes,
     })
 }
 

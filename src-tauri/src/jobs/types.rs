@@ -116,3 +116,11 @@ pub struct EnqueueScrubSpriteJob {
     #[serde(default)]
     pub follow_up: Vec<EnqueueScrubSpriteJob>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueOpEdDetectJob {
+    pub anime_id: i64,
+    pub priority: JobPriority,
+    pub anime_title: Option<String>,
+}

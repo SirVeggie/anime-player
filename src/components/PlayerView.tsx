@@ -309,6 +309,8 @@ export function PlayerView(props: {
   episode: Episode;
   anime: Pick<AnimeSummary, "title" | "anilist_id" | "anilist_title" | "tracker_offset"> | null;
   preferAnilistDisplayTitle: boolean;
+  skipOpEdEnabled: boolean;
+  onSkipOpEdEnabledChange: (enabled: boolean) => void;
   playlist: Episode[];
   visible: boolean;
   playbackProgressFlushRef: MutableRefObject<(() => Promise<void>) | null>;
@@ -325,6 +327,8 @@ export function PlayerView(props: {
     episode,
     anime,
     preferAnilistDisplayTitle,
+    skipOpEdEnabled,
+    onSkipOpEdEnabledChange,
     playlist,
     visible,
     playbackProgressFlushRef,
@@ -347,6 +351,9 @@ export function PlayerView(props: {
   const seekInteractingRef = useRef(false);
   const scrubSessionRef = useRef<{ resumeAfter: boolean } | null>(null);
   const scrubSeekEpochRef = useRef(0);
+  const skippedOpEdRef = useRef(new Set<string>());
+  const skipOpEdEnabledRef = useRef(skipOpEdEnabled);
+  skipOpEdEnabledRef.current = skipOpEdEnabled;
   const scrubEndIdRef = useRef(0);
   const pausedRef = useRef(true);
   const [scrubSprite, setScrubSprite] = useState<ScrubSpriteReady | null>(null);
@@ -496,6 +503,31 @@ export function PlayerView(props: {
   useEffect(() => {
     playbackRef.current = { episode, position, duration };
   }, [duration, episode, position]);
+
+  useEffect(() => {
+    skippedOpEdRef.current.clear();
+  }, [episode.id]);
+
+  const maybeSkipOpEdAtPositionRef = useRef<(seconds: number) => boolean>(() => false);
+  useEffect(() => {
+    maybeSkipOpEdAtPositionRef.current = (seconds: number) => {
+      if (!skipOpEdEnabledRef.current) return false;
+      for (const seg of episode.op_ed_segments) {
+        if (seg.status !== "matched" || seg.start_sec == null || seg.end_sec == null) continue;
+        const key = `${episode.id}:${seg.kind}`;
+        if (skippedOpEdRef.current.has(key)) continue;
+        if (seconds >= seg.start_sec && seconds < seg.end_sec - 0.25) {
+          skippedOpEdRef.current.add(key);
+          void invoke("mpv_seek", { seconds: seg.end_sec }).catch((err) =>
+            propsRef.current.onError(errorMessage(err)),
+          );
+          setPosition(seg.end_sec);
+          return true;
+        }
+      }
+      return false;
+    };
+  }, [episode]);
 
   useEffect(() => {
     onPausedStateChange?.(paused);
@@ -715,7 +747,9 @@ export function PlayerView(props: {
           "mpv://time-pos",
           (e) => {
             if (typeof e.payload === "number" && !seekInteractingRef.current) {
-              setPosition(e.payload);
+              if (!maybeSkipOpEdAtPositionRef.current(e.payload)) {
+                setPosition(e.payload);
+              }
             }
           },
         ],
@@ -1455,6 +1489,18 @@ export function PlayerView(props: {
                 </div>
               </div>
               <div className="controls-right">
+                <button
+                  type="button"
+                  className={`track-menu-trigger${skipOpEdEnabled ? " active" : ""}`}
+                  title={
+                    skipOpEdEnabled
+                      ? "Skip detected OP/ED (on)"
+                      : "Skip detected OP/ED (off)"
+                  }
+                  onClick={() => onSkipOpEdEnabledChange(!skipOpEdEnabled)}
+                >
+                  Skip OP/ED
+                </button>
                 <TrackMenu
                   kind="audio"
                   label={selectedAudioTrack ? trackLabel(selectedAudioTrack) : "Audio"}

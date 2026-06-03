@@ -750,3 +750,26 @@
 .anilist-result small {
   color: var(--text-muted);
 }
+
+.op-ed-analysis-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.op-ed-analysis-banner__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.op-ed-pill {
+  font-size: 11px;
+  color: var(--text-muted);
+}

@@ -46,6 +46,7 @@ export function SettingsScreen(props: {
   onLoginAnilist: () => void;
   onLogoutAnilist: () => void;
   onPreferAnilistDisplayTitle: (enabled: boolean) => void;
+  onSkipOpEd: (enabled: boolean) => void;
   onCleanLocalData: () => void;
 }) {
   const {
@@ -75,6 +76,7 @@ export function SettingsScreen(props: {
     onLoginAnilist,
     onLogoutAnilist,
     onPreferAnilistDisplayTitle,
+    onSkipOpEd,
     onCleanLocalData,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
@@ -140,6 +142,24 @@ export function SettingsScreen(props: {
 
       <section className="panel">
         <div className="panel-heading">
+          <h2>Playback</h2>
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.skip_op_ed}
+            disabled={busy}
+            onChange={onSkipOpEd}
+            label="Skip detected OP/ED automatically"
+          />
+          <p className="muted">
+            During playback, jump past opening and ending segments that were detected for each episode. Use the
+            player control to toggle this without opening Settings.
+          </p>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
           <h2>Local Data</h2>
           <span className="muted">{localDataStats ? formatBytes(localDataStats.total_bytes) : "Calculating..."}</span>
         </div>
@@ -155,6 +175,10 @@ export function SettingsScreen(props: {
           <div className="local-data-stat">
             <span>Scrub sprites</span>
             <strong>{localDataStats ? formatBytes(localDataStats.scrub_sprites_bytes) : "-"}</strong>
+          </div>
+          <div className="local-data-stat">
+            <span>OP/ED fingerprints</span>
+            <strong>{localDataStats ? formatBytes(localDataStats.op_ed_fingerprints_bytes) : "-"}</strong>
           </div>
         </div>
         <p className="muted">
