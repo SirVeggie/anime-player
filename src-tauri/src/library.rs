@@ -591,6 +591,14 @@ pub fn delete_regex_rule(db: State<'_, AppDatabase>, id: i64) -> Result<(), Stri
 }
 
 #[tauri::command]
+pub fn reset_regex_rules_to_defaults(db: State<'_, AppDatabase>) -> Result<Vec<RegexRule>, String> {
+    db.with_conn(|conn| {
+        crate::db::reset_regex_rules_to_defaults(conn)?;
+        list_regex_rules(conn)
+    })
+}
+
+#[tauri::command]
 pub fn move_anime_to_category(
     db: State<'_, AppDatabase>,
     anime_id: i64,

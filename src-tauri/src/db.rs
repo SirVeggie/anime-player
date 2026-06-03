@@ -85,6 +85,66 @@ fn portable_data_dir() -> Result<PathBuf, String> {
     Ok(dir.join("data"))
 }
 
+/// Default detection rules when `regex_rules` is empty. Use parameterized inserts
+/// so regex literals (e.g. `.'!` in Generic) never break SQL quoting.
+const DEFAULT_REGEX_RULES: &[(
+    i64,
+    &str,
+    &str,
+    &str,
+    i64,
+    i64,
+)] = &[
+    (
+        1,
+        "Fansub",
+        r"^\[(\w+)\] .*? - (\w+ )?\d+",
+        r"^\[(\w+)\] (?P<title>.*?) - (?P<episode>\d+(\.\d+)?)",
+        1,
+        10,
+    ),
+    (
+        2,
+        "Fansub (no ep)",
+        r"^\[(\w+)\] .*? - (\w+ )?\d+",
+        r"^\[(\w+)\] (?P<title>.*?) - (?P<episode>\d+(\.\d+)?)?",
+        1,
+        9,
+    ),
+    (
+        3,
+        "Series",
+        ".",
+        r"(?i)^(\[\w+\])?(?P<title>.*?(S\d+|[.\- ]))E(?P<episode>\d+)",
+        1,
+        8,
+    ),
+    (
+        4,
+        "Simple",
+        r"^([\w\s,.!]|\w-\w)+ (- \w+|(- )?\d+)",
+        r"^(?P<title>([\w\s,.!]|\w-\w)+) (- )?(?P<episode>\d+(\.\d+)?)",
+        1,
+        5,
+    ),
+    (
+        5,
+        "Simple (no ep)",
+        r"^([\w\s,.!]|\w-\w)+ (- \w+|(- )?\d+)",
+        r"^(?P<title>([\w\s,.!]|\w-\w)+) (- )?(?P<episode>\d+(\.\d+)?)?",
+        1,
+        4,
+    ),
+    (
+        6,
+        "Generic",
+        ".",
+        r"(\[\w+\])?(?P<title>[\w\s\-,.'!]+).*\.\w+",
+        1,
+        0,
+    ),
+];
+
 fn seed_defaults(conn: &Connection) -> Result<(), String> {
     let category_count = conn
         .query_row("SELECT COUNT(*) FROM categories", [], |row| {
@@ -120,40 +180,29 @@ fn seed_defaults(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     if rule_count == 0 {
-        conn.execute(
-            "INSERT INTO regex_rules
-                (id, name, detection_regex, title_regex, enabled, priority)
-             VALUES
-                (1, 'Fansub',
-                 '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
-                 '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)',
-                 1, 10),
-                (2, 'Fansub (no ep)',
-                 '^\\[(\\w+)\\] .*? - (\\w+ )?\\d+',
-                 '^\\[(\\w+)\\] (?P<title>.*?) - (?P<episode>\\d+(\\.\\d+)?)?',
-                 1, 9),
-                (3, 'Series',
-                 '.',
-                 '(?i)^(\\[\\w+\\])?(?P<title>.*?(S\\d+|[.\\- ]))E(?P<episode>\\d+)',
-                 1, 8),
-                (4, 'Simple',
-                 '^([\\w\\s,.!]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
-                 '^(?P<title>([\\w\\s,.!]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)',
-                 1, 5),
-                (5, 'Simple (no ep)',
-                 '^([\\w\\s,.!]|\\w-\\w)+ (- \\w+|(- )?\\d+)',
-                 '^(?P<title>([\\w\\s,.!]|\\w-\\w)+) (- )?(?P<episode>\\d+(\\.\\d+)?)?',
-                 1, 4),
-                (6, 'Generic',
-                 '.',
-                 '(\\[\\w+\\])?(?P<title>[\\w\\s\\-,.'!]+).*\\.\\w+',
-                 1, 0)",
-            [],
-        )
-        .map_err(|e| e.to_string())?;
+        insert_default_regex_rules(conn)?;
     }
 
     Ok(())
+}
+
+pub fn insert_default_regex_rules(conn: &Connection) -> Result<(), String> {
+    for (id, name, detection, title, enabled, priority) in DEFAULT_REGEX_RULES {
+        conn.execute(
+            "INSERT INTO regex_rules
+                (id, name, detection_regex, title_regex, enabled, priority)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, name, detection, title, enabled, priority],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn reset_regex_rules_to_defaults(conn: &Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM regex_rules", [])
+        .map_err(|e| e.to_string())?;
+    insert_default_regex_rules(conn)
 }
 
 /// Sets `anime.latest_episode_at` to the latest available episode update.
@@ -276,11 +325,12 @@ mod tests {
         conn.execute_batch(SCHEMA).unwrap();
 
         seed_defaults(&conn).unwrap();
-        assert_eq!(rule_count(&conn), 5);
+        assert_eq!(rule_count(&conn), DEFAULT_REGEX_RULES.len() as i64);
+        assert_generic_rule_stored(&conn);
 
         conn.execute("DELETE FROM regex_rules WHERE id = 1", []).unwrap();
         seed_defaults(&conn).unwrap();
-        assert_eq!(rule_count(&conn), 4);
+        assert_eq!(rule_count(&conn), DEFAULT_REGEX_RULES.len() as i64 - 1);
         assert!(
             conn.query_row(
                 "SELECT 1 FROM regex_rules WHERE id = 1",
@@ -294,7 +344,31 @@ mod tests {
 
         conn.execute("DELETE FROM regex_rules", []).unwrap();
         seed_defaults(&conn).unwrap();
-        assert_eq!(rule_count(&conn), 5);
+        assert_eq!(rule_count(&conn), DEFAULT_REGEX_RULES.len() as i64);
+        assert_generic_rule_stored(&conn);
+
+        conn.execute(
+            "UPDATE regex_rules SET name = 'Broken' WHERE id = 6",
+            [],
+        )
+        .unwrap();
+        reset_regex_rules_to_defaults(&conn).unwrap();
+        assert_eq!(rule_count(&conn), DEFAULT_REGEX_RULES.len() as i64);
+        assert_generic_rule_stored(&conn);
+    }
+
+    fn assert_generic_rule_stored(conn: &Connection) {
+        let title_regex: String = conn
+            .query_row(
+                "SELECT title_regex FROM regex_rules WHERE id = 6",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            title_regex.contains("'!"),
+            "Generic rule should keep apostrophe in character class: {title_regex:?}"
+        );
     }
 
     fn rule_count(conn: &Connection) -> i64 {

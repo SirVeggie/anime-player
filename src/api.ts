@@ -94,6 +94,10 @@ export function deleteRegexRule(id: number): Promise<void> {
   return invoke("delete_regex_rule", { id });
 }
 
+export function resetRegexRulesToDefaults(): Promise<RegexRule[]> {
+  return invoke("reset_regex_rules_to_defaults");
+}
+
 export function listEpisodes(animeId: number): Promise<Episode[]> {
   return invoke("list_episodes", { animeId });
 }

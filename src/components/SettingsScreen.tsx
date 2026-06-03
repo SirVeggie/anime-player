@@ -41,6 +41,7 @@ export function SettingsScreen(props: {
   onCreateRule: (input: RegexRuleInput) => void;
   onUpdateRule: (id: number, input: RegexRuleInput) => void;
   onDeleteRule: (rule: RegexRule) => void;
+  onResetRegexRules: () => void;
   onSaveAnilistClientId: (clientId: string) => void;
   onLoginAnilist: () => void;
   onLogoutAnilist: () => void;
@@ -69,6 +70,7 @@ export function SettingsScreen(props: {
     onCreateRule,
     onUpdateRule,
     onDeleteRule,
+    onResetRegexRules,
     onSaveAnilistClientId,
     onLoginAnilist,
     onLogoutAnilist,
@@ -277,10 +279,15 @@ export function SettingsScreen(props: {
 
       <section className="panel">
         <div className="panel-heading">
-          <h2>Detection Rules</h2>
-          <span className="muted">
-            {library.regex_rules.length} configured · higher priority matches first
-          </span>
+          <div>
+            <h2>Detection Rules</h2>
+            <span className="muted">
+              {library.regex_rules.length} configured · higher priority matches first
+            </span>
+          </div>
+          <button type="button" onClick={onResetRegexRules} disabled={busy}>
+            Reset to defaults
+          </button>
         </div>
         <div className="settings-list">
           {library.regex_rules.map((rule) => (

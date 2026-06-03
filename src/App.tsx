@@ -15,6 +15,7 @@ import {
   deleteAnimeFiles,
   deleteCategory,
   deleteRegexRule,
+  resetRegexRulesToDefaults,
   getAnilistAuthState,
   getAnilistLoginUrl,
   getAnilistMediaStatus,
@@ -690,6 +691,20 @@ function App() {
     },
     [reloadLibrary, runAction],
   );
+
+  const handleResetRegexRules = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Replace all detection rules with the built-in defaults? Custom rules will be removed.",
+    );
+    if (!confirmed) return;
+
+    await runAction(async () => {
+      await resetRegexRulesToDefaults();
+      await reloadLibrary();
+      setNewRuleEditorKey((k) => k + 1);
+      return "Detection rules reset to defaults.";
+    });
+  }, [reloadLibrary, runAction]);
 
   const handleMoveAnime = useCallback(
     async (categoryId: number) => {
@@ -1415,6 +1430,7 @@ function App() {
               onCreateRule={(input) => void handleCreateRule(input)}
               onUpdateRule={(id, input) => void handleUpdateRule(id, input)}
               onDeleteRule={(rule) => void handleDeleteRule(rule)}
+              onResetRegexRules={() => void handleResetRegexRules()}
               onSaveAnilistClientId={(clientId) => void handleSaveAnilistClientId(clientId)}
               onLoginAnilist={() => void handleLoginAnilist()}
               onLogoutAnilist={() => void handleLogoutAnilist()}
