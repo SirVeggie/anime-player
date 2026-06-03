@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -18,6 +18,7 @@ import {
   setMpvVolume,
   syncAnilistEpisodeProgress,
 } from "../api";
+import { opEdSeekMarkers, type OpEdSeekMarker } from "../opEd";
 import type {
   AnilistProgressSyncResult,
   AnimeSummary,
@@ -27,6 +28,7 @@ import type {
   ScrubSpriteReady,
   ScrubSpriteStatus,
 } from "../types";
+import { SkipOpEdIcon } from "./Icons";
 import {
   errorMessage,
   formatTime,
@@ -68,8 +70,9 @@ function SeekBar(props: {
   onScrubEnd: (seconds: number) => void;
   onInteractionChange?: (active: boolean) => void;
   sprite?: ScrubSpriteReady | null;
+  opEdMarkers?: OpEdSeekMarker[];
 }) {
-  const { duration, position, onScrubStart, onScrubPreview, onScrubEnd, onInteractionChange, sprite } =
+  const { duration, position, onScrubStart, onScrubPreview, onScrubEnd, onInteractionChange, sprite, opEdMarkers } =
     props;
   const areaRef = useRef<HTMLDivElement>(null);
   const durationRef = useRef(duration);
@@ -298,6 +301,19 @@ function SeekBar(props: {
         </div>
       ) : null}
       <div className="progress-bg">
+        {duration > 0 && opEdMarkers?.length ?
+          opEdMarkers.map((marker) => (
+            <div
+              key={`${marker.kind}-${marker.startSec}`}
+              className={`seek-op-ed-marker seek-op-ed-marker--${marker.kind}`}
+              style={{
+                left: `${(marker.startSec / duration) * 100}%`,
+                width: `${((marker.endSec - marker.startSec) / duration) * 100}%`,
+              }}
+              aria-hidden
+            />
+          ))
+        : null}
         <div className="progress-current" style={{ width: `${displayProgressPercent}%` }} />
       </div>
       <div className="scrubber-head" style={{ left: `${displayProgressPercent}%` }} />
@@ -505,6 +521,12 @@ export function PlayerView(props: {
   }, [duration, episode, position]);
 
   useEffect(() => {
+    if (!visible) {
+      skippedOpEdRef.current.clear();
+    }
+  }, [visible]);
+
+  useEffect(() => {
     skippedOpEdRef.current.clear();
   }, [episode.id]);
 
@@ -513,15 +535,15 @@ export function PlayerView(props: {
     maybeSkipOpEdAtPositionRef.current = (seconds: number) => {
       if (!skipOpEdEnabledRef.current) return false;
       for (const seg of episode.op_ed_segments) {
-        if (seg.status !== "matched" || seg.start_sec == null || seg.end_sec == null) continue;
+        if (seg.status !== "matched" || seg.startSec == null || seg.endSec == null) continue;
         const key = `${episode.id}:${seg.kind}`;
         if (skippedOpEdRef.current.has(key)) continue;
-        if (seconds >= seg.start_sec && seconds < seg.end_sec - 0.25) {
+        if (seconds >= seg.startSec && seconds < seg.endSec - 0.25) {
           skippedOpEdRef.current.add(key);
-          void invoke("mpv_seek", { seconds: seg.end_sec }).catch((err) =>
+          void invoke("mpv_seek", { seconds: seg.endSec }).catch((err) =>
             propsRef.current.onError(errorMessage(err)),
           );
-          setPosition(seg.end_sec);
+          setPosition(seg.endSec);
           return true;
         }
       }
@@ -803,6 +825,7 @@ export function PlayerView(props: {
             setPaused(false);
             setVideoCompositorRevealed(true);
             void refreshVideoGeometry();
+            maybeSkipOpEdAtPositionRef.current(playbackRef.current.position);
           },
         ],
       ];
@@ -1378,6 +1401,10 @@ export function PlayerView(props: {
   }, [adjustVolumeWithOsd, visible]);
 
   const safeDuration = duration > 0 ? duration : 0;
+  const seekOpEdMarkers = useMemo(
+    () => opEdSeekMarkers(episode.op_ed_segments, safeDuration),
+    [episode.op_ed_segments, safeDuration],
+  );
 
   return (
     <section
@@ -1440,6 +1467,7 @@ export function PlayerView(props: {
             onScrubEnd={onScrubEnd}
             onInteractionChange={setSeekInteracting}
             sprite={scrubSprite}
+            opEdMarkers={seekOpEdMarkers}
           />
           <div className="controls-main-viewport">
             <div className="controls-main">
@@ -1491,15 +1519,16 @@ export function PlayerView(props: {
               <div className="controls-right">
                 <button
                   type="button"
-                  className={`track-menu-trigger${skipOpEdEnabled ? " active" : ""}`}
+                  className={`icon-button icon-button--player icon-button--skip-op-ed${skipOpEdEnabled ? " icon-button--skip-op-ed-on" : ""}`}
                   title={
                     skipOpEdEnabled
                       ? "Skip detected OP/ED (on)"
                       : "Skip detected OP/ED (off)"
                   }
+                  aria-pressed={skipOpEdEnabled}
                   onClick={() => onSkipOpEdEnabledChange(!skipOpEdEnabled)}
                 >
-                  Skip OP/ED
+                  <SkipOpEdIcon enabled={skipOpEdEnabled} />
                 </button>
                 <TrackMenu
                   kind="audio"

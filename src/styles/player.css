@@ -175,6 +175,23 @@
   height: 5px;
 }
 
+.seek-op-ed-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.seek-op-ed-marker--op {
+  background: rgba(88, 166, 255, 0.5);
+}
+
+.seek-op-ed-marker--ed {
+  background: rgba(251, 191, 36, 0.5);
+}
+
 .progress-current {
   height: 100%;
   background: var(--progress-color);
@@ -360,6 +377,14 @@
   padding: 1px;
   border-radius: 6px;
   color: #fff;
+}
+
+.icon-button--skip-op-ed {
+  opacity: 0.42;
+}
+
+.icon-button--skip-op-ed-on {
+  opacity: 1;
 }
 
 .icon-button--player:focus-visible {

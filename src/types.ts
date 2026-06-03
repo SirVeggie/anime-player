@@ -89,24 +89,24 @@ export type Episode = {
 export type OpEdSegmentInfo = {
   kind: string;
   status: string;
-  start_sec: number | null;
-  end_sec: number | null;
+  startSec: number | null;
+  endSec: number | null;
   confidence: number | null;
-  search_pass: string;
-  error_text: string | null;
+  searchPass: string;
+  errorText: string | null;
 };
 
 export type AnimeOpEdAnalysisSummary = {
-  anime_id: number;
-  no_op_ed: boolean;
-  analysis_version: number;
-  analyzed_at: string | null;
-  episode_count: number;
-  op_matched: number;
-  op_pending: number;
-  ed_matched: number;
-  ed_pending: number;
-  templates_count: number;
+  animeId: number;
+  noOpEd: boolean;
+  analysisVersion: number;
+  analyzedAt: string | null;
+  episodeCount: number;
+  opMatched: number;
+  opPending: number;
+  edMatched: number;
+  edPending: number;
+  templatesCount: number;
 };
 
 export type MpvTrack = {
@@ -299,9 +299,9 @@ export type EnqueueScrubSpriteJob = {
 };
 
 export type EnqueueOpEdDetectJob = {
-  anime_id: number;
+  animeId: number;
   priority: JobPriority;
-  anime_title?: string | null;
+  animeTitle?: string | null;
 };
 
 export type JobFinishedEvent = {

@@ -1860,16 +1860,19 @@ fn is_directory_empty(path: &Path) -> bool {
 }
 
 fn get_episode(conn: &Connection, episode_id: i64) -> Result<Episode, String> {
-    conn.query_row(
-        "SELECT id, anime_id, path, relative_path, file_name, file_type,
-                episode_number, size, duration_seconds, position_seconds,
-                watched, last_watched_at
-         FROM episodes
-         WHERE id = ?1",
-        params![episode_id],
-        episode_from_row,
-    )
-    .map_err(|e| e.to_string())
+    let mut episode = conn
+        .query_row(
+            "SELECT id, anime_id, path, relative_path, file_name, file_type,
+                    episode_number, size, duration_seconds, position_seconds,
+                    watched, last_watched_at
+             FROM episodes
+             WHERE id = ?1",
+            params![episode_id],
+            episode_from_row,
+        )
+        .map_err(|e| e.to_string())?;
+    episode.op_ed_segments = op_ed::load_episode_op_ed_segments(conn, episode.id)?;
+    Ok(episode)
 }
 
 fn episode_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Episode> {

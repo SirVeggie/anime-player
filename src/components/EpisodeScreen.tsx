@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
-  getAnimeOpEdSummary,
   getFileThumbnail,
   getMatchingDetectionRuleName,
   jobsCancel,
@@ -13,14 +12,8 @@ import {
   resetAnimeOpEdAnalysis,
 } from "../api";
 import { pickQuickPlayEpisode } from "../quickPlay";
-import {
-  analysisProgressLabel,
-  findActiveOpEdJob,
-  jobProgressPercent,
-  opEdSegmentLabel,
-} from "../opEd";
+import { findActiveOpEdJob, jobProgressPercent, opEdSegmentLabel } from "../opEd";
 import type {
-  AnimeOpEdAnalysisSummary,
   AnimeSummary,
   AnilistMediaStatus,
   AnilistSearchResult,
@@ -188,7 +181,6 @@ export function EpisodeScreen(props: {
   const [scoreSaving, setScoreSaving] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
-  const [opEdSummary, setOpEdSummary] = useState<AnimeOpEdAnalysisSummary | null>(null);
   const [opEdDetectBusy, setOpEdDetectBusy] = useState(false);
   const [opEdResetBusy, setOpEdResetBusy] = useState(false);
   const [opEdError, setOpEdError] = useState<string | null>(null);
@@ -315,22 +307,9 @@ export function EpisodeScreen(props: {
     setProgressOverrideDraft(String(p));
   }, [animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
 
-  const reloadOpEdSummary = useCallback(async () => {
-    try {
-      setOpEdSummary(await getAnimeOpEdSummary(anime.id));
-    } catch {
-      setOpEdSummary(null);
-    }
-  }, [anime.id]);
-
-  useEffect(() => {
-    void reloadOpEdSummary();
-  }, [reloadOpEdSummary, episodes]);
-
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listen("op-ed://analysis-updated", () => {
-      void reloadOpEdSummary();
       onOpEdAnalysisUpdated();
     }).then((fn) => {
       unlisten = fn;
@@ -338,16 +317,16 @@ export function EpisodeScreen(props: {
     return () => {
       void unlisten?.();
     };
-  }, [onOpEdAnalysisUpdated, reloadOpEdSummary]);
+  }, [onOpEdAnalysisUpdated]);
 
   const handleDetectOpEd = useCallback(async () => {
     if (episodes.length < 2) return;
     setOpEdDetectBusy(true);
     try {
       await jobsEnqueueOpEdDetect({
-        anime_id: anime.id,
+        animeId: anime.id,
         priority: "medium",
-        anime_title: animeDisplayTitle(anime, preferAnilistDisplayTitle),
+        animeTitle: animeDisplayTitle(anime, preferAnilistDisplayTitle),
       });
     } catch (e) {
       setOpEdError(errorMessage(e));
@@ -370,14 +349,13 @@ export function EpisodeScreen(props: {
     setOpEdResetBusy(true);
     try {
       await resetAnimeOpEdAnalysis(anime.id);
-      await reloadOpEdSummary();
       onOpEdAnalysisUpdated();
     } catch (e) {
       setAnimeSettingsError(errorMessage(e));
     } finally {
       setOpEdResetBusy(false);
     }
-  }, [anime.id, onOpEdAnalysisUpdated, reloadOpEdSummary]);
+  }, [anime.id, onOpEdAnalysisUpdated]);
 
   useEffect(() => {
     return () => {
@@ -1078,7 +1056,7 @@ export function EpisodeScreen(props: {
         </div>
       ) : null}
 
-      {episodes.length >= 2 && (activeOpEdJob || opEdSummary) ?
+      {episodes.length >= 2 && (activeOpEdJob || opEdError) ?
         <section className="op-ed-analysis-banner" aria-live="polite">
           {activeOpEdJob ?
             <>
@@ -1098,8 +1076,6 @@ export function EpisodeScreen(props: {
                 </button>
               : null}
             </>
-          : opEdSummary ?
-            <p className="muted">{analysisProgressLabel(opEdSummary)}</p>
           : null}
           {opEdError ? <p className="error">{opEdError}</p> : null}
         </section>
@@ -1124,6 +1100,8 @@ export function EpisodeScreen(props: {
           const episodeTitle = isEpisodeNumberKnown(episode.episode_number)
             ? formatEpisodeNumber(episode.episode_number - anime.tracker_offset)
             : episode.file_name;
+          const opLabel = opEdSegmentLabel(episode.op_ed_segments, "op");
+          const edLabel = opEdSegmentLabel(episode.op_ed_segments, "ed");
           return (
             <button
               type="button"
@@ -1142,14 +1120,16 @@ export function EpisodeScreen(props: {
                   {episode.id === quickPlayEpisodeId ? <span className="pill">Up next</span> : null}
                 </div>
                 <div className="episode-meta">
-                  {isEpisodeNumberKnown(episode.episode_number) ? <span>{episode.file_name}</span> : null}
-                  <span>{formatSize(episode.size)}</span>
-                  {episode.duration_seconds > 0 ? <span>{formatTime(episode.duration_seconds)}</span> : null}
-                  {opEdSegmentLabel(episode.op_ed_segments, "op") ?
-                    <span className="op-ed-pill">OP {opEdSegmentLabel(episode.op_ed_segments, "op")}</span>
-                  : null}
-                  {opEdSegmentLabel(episode.op_ed_segments, "ed") ?
-                    <span className="op-ed-pill">ED {opEdSegmentLabel(episode.op_ed_segments, "ed")}</span>
+                  <div className="episode-meta-details">
+                    {isEpisodeNumberKnown(episode.episode_number) ? <span>{episode.file_name}</span> : null}
+                    <span>{formatSize(episode.size)}</span>
+                    {episode.duration_seconds > 0 ? <span>{formatTime(episode.duration_seconds)}</span> : null}
+                  </div>
+                  {opLabel || edLabel ?
+                    <div className="episode-op-ed">
+                      {opLabel ? <span className="op-ed-pill">OP {opLabel}</span> : null}
+                      {edLabel ? <span className="op-ed-pill">ED {edLabel}</span> : null}
+                    </div>
                   : null}
                 </div>
                 <div className="episode-progress">

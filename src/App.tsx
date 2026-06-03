@@ -990,7 +990,12 @@ function App() {
   const handleProgressSaved = useCallback(
     (saved: Episode) => {
       setEpisodes((current) => {
-        const next = current.map((episode) => (episode.id === saved.id ? saved : episode));
+        const next = current.map((episode) => {
+          if (episode.id !== saved.id) return episode;
+          const opEdSegments =
+            saved.op_ed_segments.length > 0 ? saved.op_ed_segments : episode.op_ed_segments;
+          return { ...saved, op_ed_segments: opEdSegments };
+        });
         setSelectedAnime((anime) =>
           anime && anime.id === saved.anime_id
             ? { ...anime, unwatched_count: next.filter((episode) => !episode.watched).length }

@@ -85,3 +85,21 @@ export function FolderOpenIcon() {
     </svg>
   );
 }
+
+/** Skip detected OP/ED; diagonal slash when `enabled` is false. */
+export function SkipOpEdIcon({ enabled }: { enabled: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M5 5v14h3V5H5zm5 7 8-5v10l-8-5z" />
+      {!enabled ?
+        <path
+          d="M4 4l16 16"
+          stroke="currentColor"
+          strokeWidth="2.25"
+          strokeLinecap="round"
+          fill="none"
+        />
+      : null}
+    </svg>
+  );
+}

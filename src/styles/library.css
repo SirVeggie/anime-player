@@ -376,6 +376,7 @@
 
 .episode-meta {
   display: flex;
+  align-items: center;
   gap: 12px;
   color: var(--text-muted);
   font-size: 12px;
@@ -383,7 +384,14 @@
   min-width: 0;
 }
 
-.episode-meta span:first-child {
+.episode-meta-details {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.episode-meta-details > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -769,7 +777,15 @@
   gap: 12px;
 }
 
+.episode-op-ed {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .op-ed-pill {
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
