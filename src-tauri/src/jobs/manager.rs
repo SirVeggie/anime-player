@@ -38,6 +38,8 @@ const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
 const DEFAULT_CHROMA_MAX_PARALLEL: u32 = 4;
 const MAX_PARALLEL_CAP: u32 = 20;
 const HISTORY_CAP: usize = 200;
+/// Coalesce rapid `jobs://updated` emissions so the WebView is not flooded during parallel work.
+const SNAPSHOT_EMIT_MIN_INTERVAL_MS: u64 = 250;
 
 const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
     &[JobResourceType::Ffmpeg, JobResourceType::Chroma];
@@ -86,6 +88,8 @@ pub struct JobManager {
     /// Last chroma start time per volume key (`G:/`) for HDD deferral gaps.
     last_chroma_start_on_volume: HashMap<String, u64>,
     chroma_disk_poll_wakeup_armed: bool,
+    snapshot_emit_wakeup_armed: bool,
+    last_snapshot_emit_ms: u64,
 }
 
 impl JobManager {
@@ -102,6 +106,8 @@ impl JobManager {
             history: VecDeque::new(),
             last_chroma_start_on_volume: HashMap::new(),
             chroma_disk_poll_wakeup_armed: false,
+            snapshot_emit_wakeup_armed: false,
+            last_snapshot_emit_ms: 0,
         }
     }
 
@@ -183,8 +189,39 @@ impl JobManager {
             .collect()
     }
 
-    pub fn emit_snapshot(&self) {
+    pub fn emit_snapshot(&mut self) {
+        self.schedule_snapshot_emit(false);
+    }
+
+    pub fn emit_snapshot_now(&mut self) {
+        self.snapshot_emit_wakeup_armed = false;
+        self.last_snapshot_emit_ms = now_ms();
         let _ = self.app.emit("jobs://updated", self.snapshot());
+    }
+
+    fn schedule_snapshot_emit(&mut self, immediate: bool) {
+        if immediate {
+            self.emit_snapshot_now();
+            return;
+        }
+        let now = now_ms();
+        if now.saturating_sub(self.last_snapshot_emit_ms) >= SNAPSHOT_EMIT_MIN_INTERVAL_MS {
+            self.emit_snapshot_now();
+            return;
+        }
+        if self.snapshot_emit_wakeup_armed {
+            return;
+        }
+        self.snapshot_emit_wakeup_armed = true;
+        let delay = SNAPSHOT_EMIT_MIN_INTERVAL_MS
+            .saturating_sub(now.saturating_sub(self.last_snapshot_emit_ms))
+            .max(1);
+        super::schedule_snapshot_emit_after_ms(&self.app, delay);
+    }
+
+    pub fn on_snapshot_emit_wakeup(&mut self) {
+        self.snapshot_emit_wakeup_armed = false;
+        self.emit_snapshot_now();
     }
 
     fn view_with_waiting_for(&self, record: &JobRecord) -> JobView {
@@ -469,6 +506,7 @@ impl JobManager {
                 &ep,
                 request.priority,
                 request.anime_title.as_deref(),
+                false,
             )?;
             if let Some(id) = result.job_id {
                 last_job_id = Some(id);
@@ -477,10 +515,16 @@ impl JobManager {
                 }
             }
         }
+        self.finish_op_ed_enqueue_batch();
         Ok(EnqueueJobResult {
             job_id: last_job_id,
             skipped: !any_queued,
         })
+    }
+
+    fn finish_op_ed_enqueue_batch(&mut self) {
+        self.pump();
+        self.emit_snapshot_now();
     }
 
     fn enqueue_op_ed_chroma_episode(
@@ -489,8 +533,9 @@ impl JobManager {
         ep: &OpEdEpisode,
         priority: JobPriority,
         anime_title: Option<&str>,
+        flush_scheduling: bool,
     ) -> Result<EnqueueJobResult, String> {
-        if op_ed::full_episode_fingerprint_cached(ep)? {
+        if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
             return Ok(EnqueueJobResult {
                 job_id: None,
                 skipped: true,
@@ -555,13 +600,14 @@ impl JobManager {
 
         if priority == JobPriority::High {
             self.try_start_or_queue(&id, true);
-            self.pump();
         } else {
             self.queued_ids.push(id.clone());
-            self.pump();
         }
 
-        self.emit_snapshot();
+        if flush_scheduling {
+            self.finish_op_ed_enqueue_batch();
+        }
+
         Ok(EnqueueJobResult {
             job_id: Some(id),
             skipped: false,
@@ -602,7 +648,7 @@ impl JobManager {
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
         let mut prerequisite_job_ids = Vec::new();
         for ep in &episodes {
-            if op_ed::full_episode_fingerprint_cached(ep)? {
+            if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
                 continue;
             }
             let chroma = self.enqueue_op_ed_chroma_episode(
@@ -610,6 +656,7 @@ impl JobManager {
                 ep,
                 request.priority,
                 request.anime_title.as_deref(),
+                false,
             )?;
             if let Some(job_id) = chroma.job_id {
                 prerequisite_job_ids.push(job_id);
@@ -656,13 +703,11 @@ impl JobManager {
 
         if request.priority == JobPriority::High {
             self.try_start_or_queue(&id, true);
-            self.pump();
         } else {
             self.queued_ids.push(id.clone());
-            self.pump();
         }
 
-        self.emit_snapshot();
+        self.finish_op_ed_enqueue_batch();
         Ok(EnqueueJobResult {
             job_id: Some(id),
             skipped: false,
@@ -781,6 +826,13 @@ impl JobManager {
         })
     }
 
+    fn has_pending_chroma_work(&self) -> bool {
+        self.records.values().any(|r| {
+            r.view.resource_type == JobResourceType::Chroma
+                && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+        })
+    }
+
     fn schedule_chroma_disk_poll_if_needed(&mut self) {
         if self.chroma_disk_poll_wakeup_armed || !self.has_queued_chroma_blocked_by_disk_busy() {
             return;
@@ -832,9 +884,9 @@ impl JobManager {
     /// Low/medium jobs respect `max_parallel` against **all** running jobs (including high).
     /// High-priority jobs bypass the global cap but not per-resource-type caps.
     fn pump(&mut self) {
-        // Disk busy cache is refreshed on a blocking thread before pump when possible; refresh
-        // here only if pump runs inline (e.g. enqueue) and the cache is stale.
-        disk_volume::refresh_disk_busy_cache(now_ms());
+        if self.has_pending_chroma_work() {
+            disk_volume::refresh_disk_busy_cache(now_ms());
+        }
         loop {
             let Some(next_id) = self.pick_startable_queued_id() else {
                 break;

@@ -81,7 +81,9 @@ view components. Per-screen UI lives in `src/components/`:
   a queued job stays blocked until every prerequisite finishes successfully (failed
   or canceled prerequisites fail the dependent). Each job has a short numeric
   `#id` in the UI. Jobs dedupe by `identity`, support cancel/cancel-all,
-  progress steps, and emit `jobs://updated` / `jobs://finished`. Frontend
+  progress steps, and emit `jobs://updated` (coalesced to at most ~4 per second) /
+  `jobs://finished`. The root layout only subscribes to the active job count for the
+  sidebar badge; the episode and jobs screens subscribe to the full snapshot. Frontend
   helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
   `onJobIdentityFinished`). Workers run on `spawn_blocking` (off the WebView
   thread), but **must not** hold `AppDatabase::with_conn` across ffmpeg/fpcalc
@@ -265,7 +267,8 @@ view components. Per-screen UI lives in `src/components/`:
   (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`). Progress survives
   app restarts; re-running resumes from saved rows. The episode page **Fingerprint
   audio** button enqueues one `op_ed_chroma` job per episode (resource type `chroma`;
-  ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) to pre-compute the
+  ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) in a single batched scheduler
+  pass (`pump` + `jobs://updated` once, enqueue on a background thread) to pre-compute the
   full-episode Chromaprint cache used during matching. **Detect OP/ED** reuses cached
   fingerprints when present; otherwise it enqueues the same chroma jobs and queues
   detection with those jobs as prerequisites (reusing jobs already running from an
@@ -279,6 +282,8 @@ view components. Per-screen UI lives in `src/components/`:
   lower-quartile floor) before it can mark an episode segment as matched, which
   reduces false-positive skips on episodes without OP/ED. The worker commits
   progress through many short `with_conn` calls while ffmpeg/fpcalc run unlocked.
+  On completion the job emits `op-ed://analysis-updated`; the UI reloads that title
+  via `list_episodes` plus `get_anime_op_ed_summary` only (not a full `get_library_state`).
   The episode page navigates immediately and shows a loading state while
   `list_episodes` runs; episode row thumbnails load with bounded concurrency.
   Title settings

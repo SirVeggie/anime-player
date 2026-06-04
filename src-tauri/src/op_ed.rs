@@ -295,6 +295,27 @@ pub fn full_episode_fingerprint_cached(ep: &OpEdEpisode) -> Result<bool, String>
     Ok(load_fingerprint(&key)?.is_some())
 }
 
+/// Cache probe for job enqueue: skips `canonicalize` when duration is already known.
+pub fn full_episode_fingerprint_cached_for_enqueue(ep: &OpEdEpisode) -> Result<bool, String> {
+    if ep.duration_seconds <= 0.0 {
+        return full_episode_fingerprint_cached(ep);
+    }
+    let path_buf = Path::new(&ep.path);
+    if !path_buf.is_file() {
+        return Ok(false);
+    }
+    let file_hash = cache_key(path_buf)?;
+    let extract_len = full_episode_extract_len(ep.duration_seconds);
+    let key = format!(
+        "cp{}_{}_{}_{}",
+        ANALYSIS_VERSION,
+        file_hash,
+        0_i64,
+        (extract_len * 1000.0) as i64
+    );
+    Ok(load_fingerprint(&key)?.is_some())
+}
+
 /// Pre-compute the full-episode Chromaprint fingerprint for one episode.
 pub fn run_episode_chroma_fingerprint(
     ep: &OpEdEpisode,

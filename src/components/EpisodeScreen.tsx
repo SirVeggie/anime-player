@@ -14,6 +14,7 @@ import {
 import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
+import { useJobsSnapshot } from "../jobs/jobClient";
 import {
   activeOpEdChromaJobs,
   findActiveOpEdJob,
@@ -25,7 +26,6 @@ import type {
   AnilistSearchResult,
   Category,
   Episode,
-  JobsSnapshot,
 } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import {
@@ -135,7 +135,6 @@ export function EpisodeScreen(props: {
   onOpenAnilist: (url: string) => void;
   anilistConnected: boolean;
   preferAnilistDisplayTitle: boolean;
-  jobsSnapshot: JobsSnapshot | null;
   onOpEdAnalysisUpdated: () => void;
 }) {
   const {
@@ -159,9 +158,9 @@ export function EpisodeScreen(props: {
     onUnlinkAnilist,
     onOpenAnilist,
     anilistConnected,
-    jobsSnapshot,
     onOpEdAnalysisUpdated,
   } = props;
+  const jobsSnapshot = useJobsSnapshot();
   // Highlight whichever episode the Q hotkey would launch right now, so the
   // pill always points at the same target as the keybind.
   const quickPlayEpisodeId = useMemo(() => pickQuickPlayEpisode(episodes)?.id ?? null, [episodes]);

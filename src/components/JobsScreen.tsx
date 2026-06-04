@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { jobsCancel, jobsCancelAll, jobsSetMaxParallel, jobsSetTypeMaxParallel } from "../api";
-import { subscribeJobsSnapshot } from "../jobs/jobClient";
+import { useJobsSnapshot } from "../jobs/jobClient";
 import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
-import type { JobPriority, JobRecord, JobResourceType, JobsSnapshot } from "../types";
+import type { JobPriority, JobRecord, JobResourceType } from "../types";
 import { errorMessage, formatDurationMs } from "../utils";
 import { ViewHeader } from "./ViewHeader";
 
@@ -216,11 +216,11 @@ function JobRow(props: {
 }
 
 export function JobsScreen(props: {
-  snapshot: JobsSnapshot | null;
   onBack: () => void;
   onError: (message: string) => void;
 }) {
-  const { snapshot, onBack, onError } = props;
+  const snapshot = useJobsSnapshot();
+  const { onBack, onError } = props;
   const [activeTab, setActiveTab] = useState<JobsTab>("active");
   const [maxParallelDraft, setMaxParallelDraft] = useState(5);
   const [typeMaxParallelDraft, setTypeMaxParallelDraft] = useState<Record<string, number>>({});
@@ -457,8 +457,3 @@ export function JobsScreen(props: {
   );
 }
 
-export function useJobsSnapshot() {
-  const [snapshot, setSnapshot] = useState<JobsSnapshot | null>(null);
-  useEffect(() => subscribeJobsSnapshot(setSnapshot), []);
-  return snapshot;
-}

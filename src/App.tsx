@@ -19,6 +19,7 @@ import {
   getAnilistAuthState,
   getAnilistLoginUrl,
   getAnilistMediaStatus,
+  getAnimeOpEdSummary,
   getAnimeSearchIndex,
   getLibraryState,
   getLocalDataStats,
@@ -61,7 +62,8 @@ import {
   SearchIcon,
   SettingsIcon,
 } from "./components/Icons";
-import { JobsScreen, useJobsSnapshot } from "./components/JobsScreen";
+import { JobsScreen } from "./components/JobsScreen";
+import { useJobsActiveCount } from "./jobs/jobClient";
 import { MissingScreen } from "./components/MissingScreen";
 import { PlayerView } from "./components/PlayerView";
 import { SearchScreen } from "./components/SearchScreen";
@@ -164,7 +166,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const jobsSnapshot = useJobsSnapshot();
+  const jobsActiveCount = useJobsActiveCount();
   const [screenTransition, setScreenTransition] = useState<ScreenTransitionPhase>("idle");
   const screenTransitionRef = useRef<ScreenTransitionPhase>("idle");
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
@@ -485,6 +487,24 @@ function App() {
     return result;
   }, []);
 
+  /** Reload episode rows (and OP/ED flags) for one title without rebuilding the whole library. */
+  const refreshAnimeEpisodes = useCallback(async (animeId: number) => {
+    const [nextEpisodes, opEd] = await Promise.all([
+      listEpisodes(animeId),
+      getAnimeOpEdSummary(animeId),
+    ]);
+    if (selectedAnimeIdRef.current !== animeId) return;
+    setEpisodes(nextEpisodes);
+    setSelectedEpisode((current) =>
+      current?.anime_id === animeId
+        ? (nextEpisodes.find((episode) => episode.id === current.id) ?? current)
+        : current,
+    );
+    setSelectedAnime((current) =>
+      current?.id === animeId ? { ...current, no_op_ed: opEd.noOpEd } : current,
+    );
+  }, []);
+
   const refreshAnimePageData = useCallback(
     async (animeId: number) => {
       const [state, nextEpisodes] = await Promise.all([reloadLibrary(), listEpisodes(animeId)]);
@@ -506,7 +526,7 @@ function App() {
     void listen("op-ed://analysis-updated", () => {
       const animeId = selectedAnimeIdRef.current;
       if (animeId != null) {
-        void refreshAnimePageData(animeId);
+        void refreshAnimeEpisodes(animeId);
       }
     }).then((fn) => {
       unlisten = fn;
@@ -514,7 +534,7 @@ function App() {
     return () => {
       void unlisten?.();
     };
-  }, [refreshAnimePageData]);
+  }, [refreshAnimeEpisodes]);
 
   const openAnime = useCallback(
     async (anime: AnimeSummary, returnView: EpisodeReturnView = "anime") => {
@@ -1308,9 +1328,9 @@ function App() {
           >
             <JobsIcon />
             <span className="nav-label">Jobs</span>
-            {(jobsSnapshot?.activeCount ?? 0) > 0 ?
+            {jobsActiveCount > 0 ?
               <span className="nav-item-badge" aria-hidden>
-                {jobsSnapshot!.activeCount > 99 ? "99+" : jobsSnapshot!.activeCount}
+                {jobsActiveCount > 99 ? "99+" : jobsActiveCount}
               </span>
             : null}
           </button>
@@ -1431,16 +1451,14 @@ function App() {
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
               anilistConnected={isAnilistConnected(anilistAuth)}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
-              jobsSnapshot={jobsSnapshot}
               onOpEdAnalysisUpdated={() => {
-                if (selectedAnime) void refreshAnimePageData(selectedAnime.id);
+                if (selectedAnime) void refreshAnimeEpisodes(selectedAnime.id);
               }}
             />
           ) : null}
 
           {view === "jobs" ? (
             <JobsScreen
-              snapshot={jobsSnapshot}
               onBack={() => navigateToView("categories", "restore")}
               onError={(message) => showToast("error", message)}
             />

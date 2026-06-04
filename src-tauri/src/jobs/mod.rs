@@ -47,6 +47,34 @@ fn wake_job_pump(app: AppHandle) {
 }
 
 #[cfg(windows)]
+fn wake_snapshot_emit(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let Some(jobs_state) = app.try_state::<JobsState>() else {
+            return;
+        };
+        let Ok(mut guard) = jobs_state.manager.lock() else {
+            return;
+        };
+        guard.on_snapshot_emit_wakeup();
+    });
+}
+
+#[cfg(windows)]
+pub fn schedule_snapshot_emit_after_ms(app: &AppHandle, delay_ms: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let delay_ms = delay_ms.max(1);
+        let wait = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        });
+        if wait.await.is_err() {
+            return;
+        }
+        wake_snapshot_emit(app);
+    });
+}
+
+#[cfg(windows)]
 pub fn schedule_job_pump_after_ms(app: &AppHandle, delay_ms: u64) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -188,14 +216,7 @@ pub fn jobs_set_scrub_sprite_priority_for_paths(
 
 #[cfg(windows)]
 fn complete_worker_task(app: AppHandle, job_id: String, outcome: WorkerOutcome) {
-    let now_ms = manager::now_ms();
     tauri::async_runtime::spawn(async move {
-        let refresh = tauri::async_runtime::spawn_blocking(move || {
-            crate::disk_volume::refresh_disk_busy_cache(now_ms);
-        });
-        if refresh.await.is_err() {
-            return;
-        }
         let Some(jobs_state) = app.try_state::<JobsState>() else {
             return;
         };
@@ -254,12 +275,18 @@ pub fn spawn_op_ed_worker(
 
 #[cfg(windows)]
 #[tauri::command]
-pub fn jobs_enqueue_op_ed_detect(
-    jobs: State<'_, JobsState>,
-    db: State<'_, AppDatabase>,
+pub async fn jobs_enqueue_op_ed_detect(
+    app: AppHandle,
     request: EnqueueOpEdDetectJob,
 ) -> Result<EnqueueJobResult, String> {
-    with_manager(jobs, db, |manager, db| manager.enqueue_op_ed_detect(db, request))
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<AppDatabase>();
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.enqueue_op_ed_detect(&db, request)
+    })
+    .await
+    .map_err(|e| format!("enqueue thread failed: {e}"))?
 }
 
 #[cfg(windows)]
@@ -289,10 +316,16 @@ pub fn spawn_op_ed_chroma_worker(
 
 #[cfg(windows)]
 #[tauri::command]
-pub fn jobs_enqueue_op_ed_chroma_for_anime(
-    jobs: State<'_, JobsState>,
-    db: State<'_, AppDatabase>,
+pub async fn jobs_enqueue_op_ed_chroma_for_anime(
+    app: AppHandle,
     request: EnqueueOpEdChromaAnimeJob,
 ) -> Result<EnqueueJobResult, String> {
-    with_manager(jobs, db, |manager, db| manager.enqueue_op_ed_chroma_for_anime(db, request))
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<AppDatabase>();
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.enqueue_op_ed_chroma_for_anime(&db, request)
+    })
+    .await
+    .map_err(|e| format!("enqueue thread failed: {e}"))?
 }

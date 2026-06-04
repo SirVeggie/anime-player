@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { jobsGetSnapshot } from "../api";
 import type { JobFinishedEvent, JobRecord, JobStatus, JobsSnapshot } from "../types";
@@ -36,6 +37,23 @@ export function subscribeJobsSnapshot(listener: (snapshot: JobsSnapshot) => void
   return () => {
     snapshotListeners.delete(listener);
   };
+}
+
+/** Sidebar badge only — avoids re-rendering the whole app on every job progress tick. */
+export function useJobsActiveCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    return subscribeJobsSnapshot((snapshot) => {
+      setCount((current) => (current === snapshot.activeCount ? current : snapshot.activeCount));
+    });
+  }, []);
+  return count;
+}
+
+export function useJobsSnapshot(): JobsSnapshot | null {
+  const [snapshot, setSnapshot] = useState<JobsSnapshot | null>(null);
+  useEffect(() => subscribeJobsSnapshot(setSnapshot), []);
+  return snapshot;
 }
 
 export function onJobIdentityFinished(identity: string, listener: IdentityListener): () => void {
