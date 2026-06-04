@@ -5,10 +5,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use rayon::prelude::*;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -38,11 +35,9 @@ const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
 const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
 const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
 const SEED_MATCH_THRESHOLD: f32 = 0.82;
-const MAX_SEED_EPISODES: usize = 4;
+const MAX_SEED_EPISODES: usize = 10;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
 const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
-/// In-job parallelism for per-episode fingerprinting during the match phase.
-const MATCH_PARALLELISM: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentKind {
@@ -156,16 +151,6 @@ impl Fingerprint {
 
     fn frames_for_duration(duration_sec: f64) -> usize {
         (duration_sec / CHROMAPRINT_FRAME_SEC).floor() as usize
-    }
-
-    fn slice_frames(&self, start_frame: usize, window_frames: usize) -> Fingerprint {
-        let end = (start_frame + window_frames).min(self.frame_count());
-        if start_frame >= end {
-            return Fingerprint { values: Vec::new() };
-        }
-        Fingerprint {
-            values: self.values[start_frame..end].to_vec(),
-        }
     }
 }
 
@@ -444,16 +429,6 @@ fn load_fingerprint(cache_key: &str) -> Result<Option<Fingerprint>, String> {
     Ok(Some(Fingerprint { values }))
 }
 
-fn fingerprint_cache_key(path: &Path, start_sec: f64, duration_sec: f64) -> Result<String, String> {
-    Ok(format!(
-        "cp{}_{}_{}_{}",
-        ANALYSIS_VERSION,
-        cache_key(path)?,
-        (start_sec * 1000.0) as i64,
-        (duration_sec * 1000.0) as i64
-    ))
-}
-
 fn extract_fingerprint_from_file(
     path: &Path,
     start_sec: f64,
@@ -470,74 +445,19 @@ fn ensure_episode_fingerprint(
     duration_sec: f64,
 ) -> Result<(String, Fingerprint), String> {
     let path_buf = normalized_video_path(path)?;
-    let key = fingerprint_cache_key(&path_buf, start_sec, duration_sec)?;
+    let key = format!(
+        "cp{}_{}_{}_{}",
+        ANALYSIS_VERSION,
+        cache_key(&path_buf)?,
+        (start_sec * 1000.0) as i64,
+        (duration_sec * 1000.0) as i64
+    );
     if let Some(fp) = load_fingerprint(&key)? {
         return Ok((key, fp));
     }
     let fp = extract_fingerprint_from_file(&path_buf, start_sec, duration_sec, &key)?;
     save_fingerprint(&key, &fp)?;
     Ok((key, fp))
-}
-
-/// Slice a sub-window (in seconds) from a fingerprint whose frame 0 is `region_start_sec` in the file.
-fn slice_fingerprint_window(
-    region: &Fingerprint,
-    offset_within_region_sec: f64,
-    window_sec: f64,
-) -> Fingerprint {
-    let start_frame = frames_for_seconds(offset_within_region_sec);
-    let window_frames = frames_for_seconds(window_sec);
-    region.slice_frames(start_frame, window_frames)
-}
-
-/// Discovery / optimistic-match decode band for a segment kind.
-fn kind_search_region(kind: SegmentKind, duration: f64) -> (f64, f64) {
-    match kind {
-        SegmentKind::Op => (0.0, OP_SEARCH_SEC.min(duration)),
-        SegmentKind::Ed => {
-            let tail = ED_TAIL_SEC.min(duration);
-            ((duration - tail).max(0.0), tail)
-        }
-    }
-}
-
-/// First-pass match extract: enough audio for optimistic search + template slide.
-fn optimistic_match_extract_range(kind: SegmentKind, duration: f64) -> (f64, f64) {
-    let min_len = SEGMENT_DURATION_SEC + 1.0;
-    match kind {
-        SegmentKind::Op => {
-            let len = (OP_SEARCH_SEC + SEGMENT_DURATION_SEC).min(duration);
-            (0.0, len.max(min_len))
-        }
-        SegmentKind::Ed => {
-            let len = (ED_TAIL_SEC + SEGMENT_DURATION_SEC).min(duration);
-            let start = (duration - len).max(0.0);
-            (start, len.max(min_len))
-        }
-    }
-}
-
-/// Map file-timeline search bounds to frame indices in a fingerprint extracted at `extract_start_sec`.
-fn search_frames_in_extract(
-    kind: SegmentKind,
-    duration: f64,
-    extract_start_sec: f64,
-    extract_len_sec: f64,
-    full_pass: bool,
-) -> (usize, usize) {
-    if full_pass {
-        return (0, frames_for_seconds(duration.min(extract_len_sec)));
-    }
-    let (file_start_sec, file_end_sec) = match kind {
-        SegmentKind::Op => (0.0, OP_SEARCH_SEC.min(duration)),
-        SegmentKind::Ed => {
-            let tail = ED_TAIL_SEC.min(duration);
-            ((duration - tail).max(0.0), duration)
-        }
-    };
-    let start = frames_for_seconds((file_start_sec - extract_start_sec).max(0.0));
-    let end = frames_for_seconds((file_end_sec - extract_start_sec).min(extract_len_sec));
-    (start, end)
 }
 
 #[derive(Debug, Clone)]
@@ -636,19 +556,25 @@ fn discover_repeated_seed(
             let path = normalized_video_path(&ep.path)?;
             probe_duration(&path)?
         };
-        let (region_start, extract_len) = kind_search_region(kind, duration);
+        let (start_sec, extract_len) = match kind {
+            SegmentKind::Op => (0.0, OP_SEARCH_SEC.min(duration)),
+            SegmentKind::Ed => {
+                let tail = ED_TAIL_SEC.min(duration);
+                ((duration - tail).max(0.0), tail)
+            }
+        };
         if extract_len < SEED_WINDOW_SEC + 5.0 {
             continue;
         }
-        let (_, region_fp) = ensure_episode_fingerprint(&ep.path, region_start, extract_len)?;
         let mut offset = 0.0f64;
         while offset + SEED_WINDOW_SEC <= extract_len {
             if cancel.load(Ordering::Relaxed) {
                 return Err("OP/ED detection cancelled".to_string());
             }
-            let fp = slice_fingerprint_window(&region_fp, offset, SEED_WINDOW_SEC);
+            let (_, fp) =
+                ensure_episode_fingerprint(&ep.path, start_sec + offset, SEED_WINDOW_SEC)?;
             seeds.push(SeedCandidate {
-                start_sec: region_start + offset,
+                start_sec: start_sec + offset,
                 episode_id: ep.id,
                 fingerprint: fp,
             });
@@ -691,68 +617,6 @@ fn discover_repeated_seed(
         return Ok(None);
     }
     Ok(Some((seed, episode_ids)))
-}
-
-fn episode_duration_for_row(ep: &EpisodeRow) -> Result<f64, String> {
-    if ep.duration_seconds > 0.0 {
-        return Ok(ep.duration_seconds);
-    }
-    let path = normalized_video_path(&ep.path)?;
-    probe_duration(&path)
-}
-
-struct EpisodeMatchOutcome {
-    matched: Option<TemplateMatch>,
-    fp_key: Option<String>,
-    search_pass: String,
-}
-
-fn match_episode_to_template(
-    ep: &EpisodeRow,
-    kind: SegmentKind,
-    template_fp: &Fingerprint,
-    duration: f64,
-    cancel: &AtomicBool,
-) -> Result<EpisodeMatchOutcome, String> {
-    if cancel.load(Ordering::Relaxed) {
-        return Err("OP/ED detection cancelled".to_string());
-    }
-
-    let (extract_start, extract_len) = optimistic_match_extract_range(kind, duration);
-    let needs_full_decode = duration > extract_len + 0.5;
-
-    let (partial_key, partial_fp) =
-        ensure_episode_fingerprint(&ep.path, extract_start, extract_len)?;
-
-    let (search_start, search_end) =
-        search_frames_in_extract(kind, duration, extract_start, extract_len, false);
-    let mut matched =
-        find_best_match_in_candidate(template_fp, &partial_fp, search_start, search_end);
-    let mut search_pass = "optimistic".to_string();
-    let mut fp_key = partial_key;
-
-    if matched.is_none() {
-        if needs_full_decode {
-            let full_len = duration.max(SEGMENT_DURATION_SEC + 1.0);
-            let (full_key, full_fp) = ensure_episode_fingerprint(&ep.path, 0.0, full_len)?;
-            let full_end = frames_for_seconds(duration);
-            matched = find_best_match_in_candidate(template_fp, &full_fp, 0, full_end);
-            search_pass = "full".to_string();
-            fp_key = full_key;
-        } else {
-            let (full_start, full_end) =
-                search_frames_in_extract(kind, duration, extract_start, extract_len, true);
-            matched =
-                find_best_match_in_candidate(template_fp, &partial_fp, full_start, full_end);
-            search_pass = "full".to_string();
-        }
-    }
-
-    Ok(EpisodeMatchOutcome {
-        fp_key: matched.as_ref().map(|_| fp_key),
-        matched,
-        search_pass,
-    })
 }
 
 fn build_template_fingerprint(
@@ -892,6 +756,31 @@ impl DetectContext<'_> {
         })
     }
 
+    fn episode_duration(&self, ep: &EpisodeRow) -> Result<f64, String> {
+        if ep.duration_seconds > 0.0 {
+            return Ok(ep.duration_seconds);
+        }
+        let path = normalized_video_path(&ep.path)?;
+        Ok(probe_duration(&path)?)
+    }
+
+    fn optimistic_search_range(&self, kind: SegmentKind, duration: f64) -> (usize, usize) {
+        match kind {
+            SegmentKind::Op => {
+                let end_sec = OP_SEARCH_SEC.min(duration);
+                (0, frames_for_seconds(end_sec))
+            }
+            SegmentKind::Ed => {
+                let tail = ED_TAIL_SEC.min(duration);
+                let start = (duration - tail).max(0.0);
+                (frames_for_seconds(start), frames_for_seconds(duration))
+            }
+        }
+    }
+
+    fn full_search_range(&self, duration: f64) -> (usize, usize) {
+        (0, frames_for_seconds(duration))
+    }
 }
 
 fn load_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<EpisodeRow>, String> {
@@ -1054,18 +943,19 @@ fn run_kind_detection(
         &source_ids,
     )?;
 
-    let mut terminal_by_episode = Vec::with_capacity(episodes.len());
+    let mut fail_streak = 0usize;
+    let mut done = 0u32;
+    let total = episodes.len() as u32;
+
     for ep in episodes {
         if ctx.cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
         }
-        terminal_by_episode.push(ctx.segment_is_terminal(ep.id, kind)?);
-    }
-
-    for (ep, &terminal) in episodes.iter().zip(terminal_by_episode.iter()) {
-        if terminal {
+        if ctx.segment_is_terminal(ep.id, kind)? {
+            done += 1;
             continue;
         }
+
         ctx.upsert_segment_status(
             ep.id,
             kind,
@@ -1078,50 +968,22 @@ fn run_kind_detection(
             None,
             None,
         )?;
-    }
 
-    let template_fp = Arc::new(template_fp);
-    let workers = MATCH_PARALLELISM.min(episodes.len().max(1));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(workers)
-        .build()
-        .map_err(|e| e.to_string())?;
+        let duration = ctx.episode_duration(ep)?;
+        let (search_start, search_end) = ctx.optimistic_search_range(kind, duration);
+        let (full_start, full_end) = ctx.full_search_range(duration);
 
-    let match_outcomes: Result<Vec<Option<EpisodeMatchOutcome>>, String> = pool.install(|| {
-        episodes
-            .par_iter()
-            .zip(terminal_by_episode.par_iter())
-            .map(|(ep, &terminal)| {
-                if terminal {
-                    return Ok(None);
-                }
-                if ctx.cancel.load(Ordering::Relaxed) {
-                    return Err("OP/ED detection cancelled".to_string());
-                }
-                let duration = episode_duration_for_row(ep)?;
-                let outcome =
-                    match_episode_to_template(ep, kind, template_fp.as_ref(), duration, ctx.cancel)?;
-                Ok(Some(outcome))
-            })
-            .collect()
-    });
+        let extract_len = duration.max(SEGMENT_DURATION_SEC + 1.0);
+        let (candidate_key, candidate_fp) = ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
 
-    let match_outcomes = match_outcomes?;
+        let mut matched =
+            find_best_match_in_candidate(&template_fp, &candidate_fp, search_start, search_end);
+        let mut search_pass = "optimistic";
 
-    let mut fail_streak = 0usize;
-    let mut done = 0u32;
-    let total = episodes.len() as u32;
-
-    for (ep, (terminal, outcome)) in episodes
-        .iter()
-        .zip(terminal_by_episode.iter().zip(match_outcomes.iter()))
-    {
-        if ctx.cancel.load(Ordering::Relaxed) {
-            return Err("OP/ED detection cancelled".to_string());
-        }
-        if *terminal {
-            done += 1;
-            continue;
+        if matched.is_none() {
+            matched =
+                find_best_match_in_candidate(&template_fp, &candidate_fp, full_start, full_end);
+            search_pass = "full";
         }
 
         done += 1;
@@ -1132,11 +994,7 @@ fn run_kind_detection(
             total
         ));
 
-        let Some(outcome) = outcome else {
-            continue;
-        };
-
-        if let Some(m) = &outcome.matched {
+        if let Some(m) = matched {
             fail_streak = 0;
             ctx.upsert_segment_status(
                 ep.id,
@@ -1146,8 +1004,8 @@ fn run_kind_detection(
                 Some(m.end_sec),
                 Some(f64::from(m.confidence)),
                 Some(template_id),
-                &outcome.search_pass,
-                outcome.fp_key.as_deref(),
+                search_pass,
+                Some(&candidate_key),
                 None,
             )?;
         } else {
@@ -1160,7 +1018,7 @@ fn run_kind_detection(
                 None,
                 None,
                 Some(template_id),
-                &outcome.search_pass,
+                search_pass,
                 None,
                 None,
             )?;
@@ -1546,52 +1404,5 @@ mod tests {
             .expect("consistent high-quality segment should match");
         assert!((matched.start_sec - seconds_for_frames(2)).abs() < f64::EPSILON);
         assert!(matched.confidence >= MATCH_AVERAGE_THRESHOLD);
-    }
-
-    #[test]
-    fn slice_fingerprint_window_matches_frame_slice() {
-        let region = fingerprint_from_values(&(0..200).collect::<Vec<i32>>());
-        let by_window = slice_fingerprint_window(&region, 7.5, SEED_WINDOW_SEC);
-        let by_frame = region.slice_frames(
-            frames_for_seconds(7.5),
-            frames_for_seconds(SEED_WINDOW_SEC),
-        );
-        assert_eq!(by_window.values, by_frame.values);
-    }
-
-    #[test]
-    fn op_optimistic_search_uses_partial_extract_frames() {
-        let duration = 1400.0;
-        let (extract_start, extract_len) = optimistic_match_extract_range(SegmentKind::Op, duration);
-        assert_eq!(extract_start, 0.0);
-        assert!((extract_len - (OP_SEARCH_SEC + SEGMENT_DURATION_SEC)).abs() < 0.01);
-        let (start, end) =
-            search_frames_in_extract(SegmentKind::Op, duration, extract_start, extract_len, false);
-        assert_eq!(start, 0);
-        assert_eq!(end, frames_for_seconds(OP_SEARCH_SEC));
-    }
-
-    #[test]
-    fn ed_optimistic_search_maps_into_tail_extract() {
-        let duration = 1400.0;
-        let (extract_start, extract_len) = optimistic_match_extract_range(SegmentKind::Ed, duration);
-        assert!((extract_len - (ED_TAIL_SEC + SEGMENT_DURATION_SEC)).abs() < 0.01);
-        assert!((extract_start - (duration - extract_len)).abs() < 0.01);
-        let (start, end) =
-            search_frames_in_extract(SegmentKind::Ed, duration, extract_start, extract_len, false);
-        assert_eq!(start, frames_for_seconds(90.0));
-        assert_eq!(end, frames_for_seconds(extract_len));
-    }
-
-    #[test]
-    fn short_episode_uses_single_extract_for_full_pass() {
-        let duration = 200.0;
-        let (extract_start, extract_len) = optimistic_match_extract_range(SegmentKind::Op, duration);
-        assert!((extract_len - duration).abs() < 0.01);
-        assert!(duration <= extract_len + 0.5);
-        let (start, end) =
-            search_frames_in_extract(SegmentKind::Op, duration, extract_start, extract_len, true);
-        assert_eq!(start, 0);
-        assert_eq!(end, frames_for_seconds(duration));
     }
 }

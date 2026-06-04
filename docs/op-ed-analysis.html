@@ -228,11 +228,10 @@
         <tr><th>Constant</th><th>Value</th><th>Role</th></tr>
       </thead>
       <tbody>
-        <tr><td><code>MAX_SEED_EPISODES</code></td><td>4</td><td>First N episodes (by sort order) used in discovery only</td></tr>
+        <tr><td><code>MAX_SEED_EPISODES</code></td><td>10</td><td>First N episodes (by sort order) used in discovery only</td></tr>
         <tr><td><code>OP_SEARCH_SEC</code> / <code>ED_TAIL_SEC</code></td><td>180 s</td><td>Discovery scan band; optimistic match search window</td></tr>
         <tr><td><code>SEGMENT_DURATION_SEC</code></td><td>90 s</td><td>Template length; matched segment end = start + 90s</td></tr>
         <tr><td><code>SEED_WINDOW_SEC</code></td><td>15 s</td><td>Discovery slice length; stepped every 7.5 s</td></tr>
-        <tr><td><code>MATCH_PARALLELISM</code></td><td>4</td><td>Episodes fingerprinted in parallel during match phase</td></tr>
         <tr><td><code>SEED_MATCH_THRESHOLD</code></td><td>0.82</td><td>Min similarity to cluster seeds across episodes</td></tr>
         <tr><td><code>MATCH_AVERAGE_THRESHOLD</code></td><td>0.84</td><td>Mean frame similarity for a valid match</td></tr>
         <tr><td><code>MATCH_MIN_STRONG_FRAME_RATIO</code></td><td>60%</td><td>Frames above strong threshold</td></tr>
@@ -275,8 +274,8 @@
     </div>
   </div>
   <div class="legend">
-    <span class="leg-region">180s discovery region (one ffmpeg decode)</span>
-    <span class="leg-seed">15s seed windows every 7.5s (sliced in memory)</span>
+    <span class="leg-region">180s discovery band (OP head / ED tail)</span>
+    <span class="leg-seed">15s seed windows every 7.5s (each cached via ffmpeg)</span>
   </div>
 
   <h3><span class="badge badge-ed">ED</span> Tail region</h3>
@@ -287,9 +286,8 @@
   <div class="card">
     <h3>Discovery steps</h3>
     <ol style="margin-left: 1.2rem; color: var(--muted); font-size: 0.88rem;">
-      <li>Take up to <strong>4</strong> episodes from the start of the sorted list.</li>
-      <li>For each: decode <strong>one</strong> region (OP: first 180s, ED: last 180s) → one fingerprint.</li>
-      <li>Slice ~23 overlapping 15s windows (step 7.5s) from that fingerprint — no extra ffmpeg.</li>
+      <li>Take up to <strong>10</strong> episodes from the start of the sorted list.</li>
+      <li>For each episode: scan OP head or ED tail in 15s steps (7.5s overlap); each step runs ffmpeg + fpcalc (cached).</li>
       <li>Compare all seed pairs; pick the cluster matching the most distinct episodes (≥ 2).</li>
       <li>Build template: 90s fingerprint at the winning seed’s <code>start_sec</code>.</li>
     </ol>
@@ -311,40 +309,36 @@
     <text x="75" y="47" text-anchor="middle" fill="#e8eaef" font-size="12" font-family="Segoe UI,sans-serif">Episode audio</text>
 
     <rect x="170" y="20" width="150" height="44" rx="8" fill="#242836" stroke="#f0b429"/>
-    <text x="245" y="40" text-anchor="middle" fill="#f0b429" font-size="11" font-family="Segoe UI,sans-serif">Optimistic decode</text>
-    <text x="245" y="56" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">OP: 0–270s · ED: last 270s</text>
+    <text x="245" y="40" text-anchor="middle" fill="#f0b429" font-size="11" font-family="Segoe UI,sans-serif">Full-episode decode</text>
+    <text x="245" y="56" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">from t=0 through duration</text>
 
     <rect x="360" y="20" width="120" height="44" rx="8" fill="#242836" stroke="#7c9cff"/>
-    <text x="420" y="47" text-anchor="middle" fill="#7c9cff" font-size="12" font-family="Segoe UI,sans-serif">Search window</text>
+    <text x="420" y="40" text-anchor="middle" fill="#7c9cff" font-size="11" font-family="Segoe UI,sans-serif">Optimistic search</text>
+    <text x="420" y="56" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">OP: 0–180s · ED: last 180s</text>
 
     <rect x="520" y="8" width="180" height="68" rx="8" fill="#1a1d27" stroke="#5ee0b5"/>
     <text x="610" y="32" text-anchor="middle" fill="#5ee0b5" font-size="12" font-family="Segoe UI,sans-serif">Match found?</text>
     <text x="610" y="50" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">→ save matched + times</text>
-    <text x="610" y="66" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">→ else full decode (long eps)</text>
+    <text x="610" y="66" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">→ else full-timeline search</text>
 
     <line x1="140" y1="42" x2="168" y2="42" stroke="#9aa3b5" marker-end="url(#arr)"/>
     <line x1="320" y1="42" x2="358" y2="42" stroke="#9aa3b5" marker-end="url(#arr)"/>
     <line x1="480" y1="42" x2="518" y2="42" stroke="#9aa3b5" marker-end="url(#arr)"/>
-
-    <rect x="170" y="110" width="200" height="44" rx="8" fill="#242836" stroke="#c49bff" stroke-dasharray="4 3"/>
-    <text x="270" y="130" text-anchor="middle" fill="#c49bff" font-size="11" font-family="Segoe UI,sans-serif">Full episode decode</text>
-    <text x="270" y="146" text-anchor="middle" fill="#9aa3b5" font-size="10" font-family="Segoe UI,sans-serif">only if optimistic fails</text>
-    <line x1="610" y1="76" x2="270" y2="108" stroke="#9aa3b5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
   </svg>
 
   <div class="grid2">
     <div class="card">
-      <h3><span class="badge badge-op">OP</span> Optimistic match</h3>
-      <p>Decode <strong>min(duration, 180 + 90) ≈ 270s</strong> from t=0. Search frames 0 … 180s only.</p>
+      <h3><span class="badge badge-op">OP</span> Optimistic search</h3>
+      <p>One fingerprint from t=0 for the full episode. Slide template in frames <strong>0 … 180s</strong> first.</p>
     </div>
     <div class="card">
-      <h3><span class="badge badge-ed">ED</span> Optimistic match</h3>
-      <p>Decode <strong>~270s</strong> ending at file end (<code>-ss</code> near tail). Search maps to last 180s of timeline.</p>
+      <h3><span class="badge badge-ed">ED</span> Optimistic search</h3>
+      <p>Same full-episode fingerprint. Search frames from <strong>(duration − 180s)</strong> through end.</p>
     </div>
   </div>
 
   <div class="note">
-    Up to <strong>4 episodes</strong> run ffmpeg/fpcalc in parallel during matching (rayon). DB writes stay serial.
+    Episodes are matched <strong>serially</strong>. The worker releases the DB lock during ffmpeg/fpcalc.
     Re-runs are fast when <code>.fp</code> cache keys still match file mtime/size.
   </div>
 
@@ -390,34 +384,24 @@
       });
       if (mode === "op") {
         const region = bar(0, OP_SEARCH, "bar-region");
-        region.title = "One decode: first 180s";
+        region.title = "Discovery band: first 180s";
         el.appendChild(region);
         const seeds = bar(0, OP_SEARCH, "bar-seeds");
-        seeds.title = "15s windows every 7.5s (in memory)";
+        seeds.title = "15s windows every 7.5s (ffmpeg per window)";
         el.appendChild(seeds);
       } else {
         const start = DURATION - ED_TAIL;
         const region = bar(start, ED_TAIL, "bar-region");
-        region.title = "One decode: last 180s";
+        region.title = "Discovery band: last 180s";
         el.appendChild(region);
         const seeds = bar(start, ED_TAIL, "bar-seeds");
         el.appendChild(seeds);
       }
-      // match bands on second row concept
-      const optLen = OP_SEARCH + SEG;
-      if (mode === "op") {
-        const opt = bar(0, Math.min(optLen, DURATION), "bar-optimistic");
-        opt.style.top = "72px";
-        opt.style.height = "12px";
-        opt.title = "Optimistic match decode (~270s)";
-        el.appendChild(opt);
-      } else {
-        const optStart = Math.max(0, DURATION - optLen);
-        const opt = bar(optStart, Math.min(optLen, DURATION), "bar-optimistic");
-        opt.style.top = "72px";
-        opt.style.height = "12px";
-        el.appendChild(opt);
-      }
+      const full = bar(0, DURATION, "bar-optimistic");
+      full.style.top = "72px";
+      full.style.height = "12px";
+      full.title = "Match: one decode from t=0 for full duration";
+      el.appendChild(full);
     }
 
     function bar(startSec, lenSec, cls) {

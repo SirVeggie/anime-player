@@ -252,18 +252,16 @@ view components. Per-screen UI lives in `src/components/`:
   with Chromaprint `fpcalc.exe`, stores raw signed Chromaprint vectors under
   `data/op-ed/fingerprints/`, and stores templates plus per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
   `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
-  saved rows. Discovery fingerprints each episode’s OP/ED search band once and
-  slices 15s seed windows in memory; matching decodes only the optimistic band
-  first (~4.5 minutes at the head or tail) and falls back to a full-episode
-  extract only when that pass fails. Up to four episodes fingerprint in parallel
-  during the match phase. Matching
+  saved rows. Optimistic search windows (first ~3 minutes / last ~3 minutes,
+  15s seed steps) run before a full-episode pass for failed episodes. Matching
   is intentionally conservative: the best audio offset must clear both an
   average-score threshold and consistency checks (enough strong frames plus a
   lower-quartile floor) before it can mark an episode segment as matched, which
   reduces false-positive skips on episodes without OP/ED. The worker commits
   progress through many short `with_conn` calls while ffmpeg/fpcalc run unlocked.
   The episode page navigates immediately and shows a loading state while
-  `list_episodes` runs. Title settings
+  `list_episodes` runs; episode row thumbnails load with bounded concurrency.
+  Title settings
   **Reset OP/ED analysis** clears DB rows and all fingerprint cache files for
   that title's episodes (not only keys recorded in SQLite). Global **Skip detected OP/ED**
   (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
