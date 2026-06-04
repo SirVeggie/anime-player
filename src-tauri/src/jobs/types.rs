@@ -25,6 +25,7 @@ pub enum JobResourceType {
     #[default]
     None,
     Ffmpeg,
+    Chroma,
 }
 
 impl JobResourceType {
@@ -32,6 +33,7 @@ impl JobResourceType {
         match self {
             Self::None => "none",
             Self::Ffmpeg => "ffmpeg",
+            Self::Chroma => "chroma",
         }
     }
 
@@ -39,6 +41,7 @@ impl JobResourceType {
         match value {
             "none" => Some(Self::None),
             "ffmpeg" => Some(Self::Ffmpeg),
+            "chroma" => Some(Self::Chroma),
             _ => None,
         }
     }
@@ -53,8 +56,18 @@ pub struct JobProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct JobPrerequisiteView {
+    pub job_id: String,
+    pub short_id: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JobView {
     pub id: String,
+    /// Short numeric label shown in the UI (e.g. `#42`).
+    #[serde(default)]
+    pub short_id: u32,
     pub name: String,
     pub desc: String,
     pub identity: String,
@@ -70,6 +83,9 @@ pub struct JobView {
     pub created_at: u64,
     pub started_at: Option<u64>,
     pub finished_at: Option<u64>,
+    /// Prerequisite jobs still queued or running (completed ones are omitted).
+    #[serde(default)]
+    pub waiting_for: Vec<JobPrerequisiteView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +136,14 @@ pub struct EnqueueScrubSpriteJob {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnqueueOpEdDetectJob {
+    pub anime_id: i64,
+    pub priority: JobPriority,
+    pub anime_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueOpEdChromaAnimeJob {
     pub anime_id: i64,
     pub priority: JobPriority,
     pub anime_title: Option<String>,

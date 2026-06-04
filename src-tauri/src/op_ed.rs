@@ -236,6 +236,76 @@ pub fn op_ed_job_identity(anime_id: i64) -> String {
     format!("{JOB_NAME}:{anime_id}")
 }
 
+const CHROMA_JOB_NAME: &str = "op_ed_chroma";
+
+pub fn op_ed_chroma_job_identity(episode_id: i64) -> String {
+    format!("{CHROMA_JOB_NAME}:{episode_id}")
+}
+
+/// Episode row used when enqueueing OP/ED fingerprint jobs.
+#[derive(Debug, Clone)]
+pub struct OpEdEpisode {
+    pub id: i64,
+    pub path: String,
+    pub duration_seconds: f64,
+}
+
+pub fn list_anime_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<OpEdEpisode>, String> {
+    let rows = load_episodes(conn, anime_id)?;
+    Ok(rows
+        .into_iter()
+        .map(|ep| OpEdEpisode {
+            id: ep.id,
+            path: ep.path,
+            duration_seconds: ep.duration_seconds,
+        })
+        .collect())
+}
+
+pub fn episode_duration_seconds(ep: &OpEdEpisode) -> Result<f64, String> {
+    if ep.duration_seconds > 0.0 {
+        return Ok(ep.duration_seconds);
+    }
+    let path = normalized_video_path(&ep.path)?;
+    probe_duration(&path)
+}
+
+fn full_episode_fingerprint_cache_key(ep: &OpEdEpisode) -> Result<String, String> {
+    let duration = episode_duration_seconds(ep)?;
+    let extract_len = duration.max(SEGMENT_DURATION_SEC + 1.0);
+    let path_buf = normalized_video_path(&ep.path)?;
+    Ok(format!(
+        "cp{}_{}_{}_{}",
+        ANALYSIS_VERSION,
+        cache_key(&path_buf)?,
+        0_i64,
+        (extract_len * 1000.0) as i64
+    ))
+}
+
+/// Whether the full-episode fingerprint used during OP/ED matching is already on disk.
+pub fn full_episode_fingerprint_cached(ep: &OpEdEpisode) -> Result<bool, String> {
+    let key = full_episode_fingerprint_cache_key(ep)?;
+    Ok(load_fingerprint(&key)?.is_some())
+}
+
+/// Pre-compute the full-episode Chromaprint fingerprint for one episode.
+pub fn run_episode_chroma_fingerprint(
+    ep: &OpEdEpisode,
+    cancel: &AtomicBool,
+    on_step: impl Fn(u32, u32, &str),
+) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Fingerprinting cancelled".to_string());
+    }
+    on_step(0, 2, "Extracting audio");
+    let duration = episode_duration_seconds(ep)?;
+    let extract_len = duration.max(SEGMENT_DURATION_SEC + 1.0);
+    ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
+    on_step(2, 2, "Done");
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 struct FpcalcOutput {
     fingerprint: Vec<i32>,

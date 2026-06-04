@@ -403,6 +403,7 @@ pub fn run() {
         jobs::jobs_cancel_all,
         jobs::jobs_enqueue_scrub_sprite,
         jobs::jobs_enqueue_op_ed_detect,
+        jobs::jobs_enqueue_op_ed_chroma_for_anime,
         jobs::jobs_set_job_priority,
         jobs::jobs_set_scrub_sprite_priority_for_paths,
         op_ed::reset_anime_op_ed_analysis_cmd,

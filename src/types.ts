@@ -252,10 +252,16 @@ export type JobProgress = {
   totalSteps: number;
 };
 
-export type JobResourceType = "none" | "ffmpeg";
+export type JobResourceType = "none" | "ffmpeg" | "chroma";
+
+export type JobPrerequisiteView = {
+  jobId: string;
+  shortId: number;
+};
 
 export type JobRecord = {
   id: string;
+  shortId: number;
   name: string;
   desc: string;
   identity: string;
@@ -270,6 +276,13 @@ export type JobRecord = {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  waitingFor: JobPrerequisiteView[];
+};
+
+export type EnqueueOpEdChromaAnimeJob = {
+  animeId: number;
+  priority: JobPriority;
+  animeTitle?: string | null;
 };
 
 export type TypeMaxParallel = {

@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::AppDatabase;
+use crate::op_ed;
 
 use manager::{JobManager, WorkerOutcome};
 
@@ -23,6 +24,31 @@ impl JobsState {
             manager: Mutex::new(JobManager::new(app, db)),
         }
     }
+}
+
+#[cfg(windows)]
+fn wake_job_pump(app: AppHandle) {
+    let Some(jobs_state) = app.try_state::<JobsState>() else {
+        return;
+    };
+    if let Ok(mut guard) = jobs_state.manager.lock() {
+        guard.on_chroma_stagger_wakeup();
+    };
+}
+
+#[cfg(windows)]
+pub fn schedule_job_pump_after_ms(app: &AppHandle, delay_ms: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let delay_ms = delay_ms.max(1);
+        let wait = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        });
+        if wait.await.is_err() {
+            return;
+        }
+        wake_job_pump(app);
+    });
 }
 
 #[cfg(windows)]
@@ -213,5 +239,40 @@ pub fn jobs_enqueue_op_ed_detect(
     db: State<'_, AppDatabase>,
     request: EnqueueOpEdDetectJob,
 ) -> Result<EnqueueJobResult, String> {
-    with_manager(jobs, db, |manager, _| manager.enqueue_op_ed_detect(request))
+    with_manager(jobs, db, |manager, db| manager.enqueue_op_ed_detect(db, request))
+}
+
+#[cfg(windows)]
+pub fn spawn_op_ed_chroma_worker(
+    app: AppHandle,
+    job_id: String,
+    episode: op_ed::OpEdEpisode,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let job_id_for_step = job_id.clone();
+        let app_for_step = app.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            manager::run_op_ed_chroma_job_worker(&episode, &cancel, |step, total, label| {
+                notify_job_step(&app_for_step, &job_id_for_step, step, total, label);
+            })
+        })
+        .await;
+
+        let outcome = match outcome {
+            Ok(o) => o,
+            Err(e) => WorkerOutcome::Failed(e.to_string()),
+        };
+        complete_worker_task(app, job_id, outcome);
+    });
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn jobs_enqueue_op_ed_chroma_for_anime(
+    jobs: State<'_, JobsState>,
+    db: State<'_, AppDatabase>,
+    request: EnqueueOpEdChromaAnimeJob,
+) -> Result<EnqueueJobResult, String> {
+    with_manager(jobs, db, |manager, db| manager.enqueue_op_ed_chroma_for_anime(db, request))
 }

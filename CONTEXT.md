@@ -60,15 +60,20 @@ view components. Per-screen UI lives in `src/components/`:
   renamed and then imported by the follow-up rescan.
 - A **Jobs** sidebar page (between Settings and Rescan) lists queued/running
   background work and job history (two tabs, like Bulk Edit). The nav icon shows
-  a badge with the count of queued + running jobs. **Max parallel jobs** (1–8,
+  a badge with the count of queued + running jobs. **Max parallel jobs** (1–20,
   default 5, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
   jobs may run at once for scheduling low/medium work (high-priority jobs count
   toward that cap but are never blocked by it—e.g. six low jobs at the limit can
   still be joined by a seventh high job). Jobs also have a **resource type**
   (`none` by default; scrub thumbnails use `ffmpeg`) with its own max-parallel
-  limit (`jobs_max_parallel_type_ffmpeg`, default 1). A job starts only when
+  limit (`jobs_max_parallel_type_ffmpeg`, default 1; `jobs_max_parallel_type_chroma`,
+  default 4 for OP/ED pre-fingerprint jobs). Chroma job starts are staggered by
+  at least 1 second to reduce HDD contention when many episodes queue at once. A job starts only when
   both caps allow it: low/medium respect `min(global, type)`; high bypasses the
-  global cap but **not** the type cap. Jobs dedupe by `identity`, support cancel/cancel-all,
+  global cap but **not** the type cap. Jobs may list **prerequisite job ids**;
+  a queued job stays blocked until every prerequisite finishes successfully (failed
+  or canceled prerequisites fail the dependent). Each job has a short numeric
+  `#id` in the UI. Jobs dedupe by `identity`, support cancel/cancel-all,
   progress steps, and emit `jobs://updated` / `jobs://finished`. Frontend
   helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
   `onJobIdentityFinished`). Workers run on `spawn_blocking` (off the WebView
@@ -252,7 +257,12 @@ view components. Per-screen UI lives in `src/components/`:
   with Chromaprint `fpcalc.exe`, stores raw signed Chromaprint vectors under
   `data/op-ed/fingerprints/`, and stores templates plus per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
   `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
-  saved rows. Optimistic search windows (first ~3 minutes / last ~3 minutes,
+  saved rows. The episode page **Fingerprint audio** button enqueues one
+  `op_ed_chroma` job per episode (resource type `chroma`) to pre-compute the
+  full-episode Chromaprint cache entry used during matching. **Detect OP/ED**
+  reuses cached fingerprints when present; otherwise it enqueues the same chroma
+  jobs and queues detection with those jobs as prerequisites (reusing jobs already
+  running from an earlier fingerprint pass). Optimistic search windows (first ~3 minutes / last ~3 minutes,
   15s seed steps) run before a full-episode pass for failed episodes. Matching
   is intentionally conservative: the best audio offset must clear both an
   average-score threshold and consistency checks (enough strong frames plus a

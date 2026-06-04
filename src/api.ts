@@ -16,6 +16,7 @@ import type {
   MpvVideoGeometry,
   AnimeOpEdAnalysisSummary,
   EnqueueJobResult,
+  EnqueueOpEdChromaAnimeJob,
   EnqueueOpEdDetectJob,
   EnqueueScrubSpriteJob,
   JobPriority,
@@ -190,6 +191,12 @@ export function jobsEnqueueScrubSprite(request: EnqueueScrubSpriteJob): Promise<
 
 export function jobsEnqueueOpEdDetect(request: EnqueueOpEdDetectJob): Promise<EnqueueJobResult> {
   return invoke("jobs_enqueue_op_ed_detect", { request });
+}
+
+export function jobsEnqueueOpEdChromaForAnime(
+  request: EnqueueOpEdChromaAnimeJob,
+): Promise<EnqueueJobResult> {
+  return invoke("jobs_enqueue_op_ed_chroma_for_anime", { request });
 }
 
 export function resetAnimeOpEdAnalysis(animeId: number): Promise<void> {

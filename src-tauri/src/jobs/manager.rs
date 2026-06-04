@@ -8,14 +8,15 @@ use rusqlite::OptionalExtension;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::AppDatabase;
-use crate::op_ed::{self, op_ed_job_identity};
+use crate::op_ed::{self, op_ed_chroma_job_identity, op_ed_job_identity, OpEdEpisode};
 use crate::scrub_preview::{
     self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity, scrub_sprite_is_cached,
 };
 
 use super::types::{
-    EnqueueJobResult, EnqueueOpEdDetectJob, EnqueueScrubSpriteJob, JobPriority, JobProgress,
-    JobResourceType, JobStatus, JobView, JobsSnapshot, TypeMaxParallel,
+    EnqueueJobResult, EnqueueOpEdChromaAnimeJob, EnqueueOpEdDetectJob, EnqueueScrubSpriteJob,
+    JobPrerequisiteView, JobPriority, JobProgress, JobResourceType, JobStatus, JobView,
+    JobsSnapshot, TypeMaxParallel,
 };
 
 /// Episode newly imported during `rescan_library` (auto scrub enqueue).
@@ -33,10 +34,13 @@ const MAX_PARALLEL_SETTING: &str = "jobs_max_parallel";
 const TYPE_MAX_PARALLEL_SETTING_PREFIX: &str = "jobs_max_parallel_type_";
 const DEFAULT_MAX_PARALLEL: u32 = 5;
 const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
-const MAX_PARALLEL_CAP: u32 = 8;
+const DEFAULT_CHROMA_MAX_PARALLEL: u32 = 4;
+const MAX_PARALLEL_CAP: u32 = 20;
+const CHROMA_START_STAGGER_MS: u64 = 0000;
 const HISTORY_CAP: usize = 200;
 
-const MANAGED_RESOURCE_TYPES: &[JobResourceType] = &[JobResourceType::Ffmpeg];
+const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
+    &[JobResourceType::Ffmpeg, JobResourceType::Chroma];
 
 static JOB_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -47,13 +51,17 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn new_job_id() -> String {
-    format!("job-{}", JOB_COUNTER.fetch_add(1, Ordering::Relaxed))
+fn alloc_job_ids() -> (String, u32) {
+    let n = JOB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    (format!("job-{n}"), n as u32)
 }
 
 #[derive(Debug, Clone)]
 enum JobKind {
     ScrubSprite { path: String },
+    OpEdChroma {
+        episode: OpEdEpisode,
+    },
     OpEdDetect {
         anime_id: i64,
     },
@@ -64,6 +72,7 @@ struct JobRecord {
     cancel: Arc<AtomicBool>,
     kind: JobKind,
     follow_ups: Vec<EnqueueScrubSpriteJob>,
+    prerequisite_job_ids: Vec<String>,
 }
 
 pub struct JobManager {
@@ -74,6 +83,9 @@ pub struct JobManager {
     records: HashMap<String, JobRecord>,
     identity_to_id: HashMap<String, String>,
     history: VecDeque<JobView>,
+    /// Wall-clock ms when the most recent chroma job was started (for HDD stagger).
+    last_chroma_start_ms: Option<u64>,
+    chroma_stagger_wakeup_armed: bool,
 }
 
 impl JobManager {
@@ -88,6 +100,8 @@ impl JobManager {
             records: HashMap::new(),
             identity_to_id: HashMap::new(),
             history: VecDeque::new(),
+            last_chroma_start_ms: None,
+            chroma_stagger_wakeup_armed: false,
         }
     }
 
@@ -139,7 +153,7 @@ impl JobManager {
         let mut active: Vec<JobView> = self
             .records
             .values()
-            .map(|r| r.view.clone())
+            .map(|r| self.view_with_waiting_for(r))
             .collect();
         active.sort_by_key(|j| j.created_at);
         let active_count = active
@@ -171,6 +185,85 @@ impl JobManager {
 
     pub fn emit_snapshot(&self) {
         let _ = self.app.emit("jobs://updated", self.snapshot());
+    }
+
+    fn view_with_waiting_for(&self, record: &JobRecord) -> JobView {
+        let mut view = record.view.clone();
+        view.waiting_for = self.pending_prerequisites(record);
+        if !view.waiting_for.is_empty() && view.status == JobStatus::Queued {
+            view.step_label = "Waiting for prerequisites".to_string();
+        }
+        view
+    }
+
+    fn pending_prerequisites(&self, record: &JobRecord) -> Vec<JobPrerequisiteView> {
+        record
+            .prerequisite_job_ids
+            .iter()
+            .filter_map(|prereq_id| {
+                let prereq = self.records.get(prereq_id)?;
+                if matches!(prereq.view.status, JobStatus::Done) {
+                    return None;
+                }
+                Some(JobPrerequisiteView {
+                    job_id: prereq_id.clone(),
+                    short_id: prereq.view.short_id,
+                })
+            })
+            .collect()
+    }
+
+    fn prerequisites_met(&self, job_id: &str) -> bool {
+        let Some(record) = self.records.get(job_id) else {
+            return false;
+        };
+        for prereq_id in &record.prerequisite_job_ids {
+            if self.records.contains_key(prereq_id) {
+                return false;
+            }
+            let satisfied = self
+                .history
+                .iter()
+                .any(|h| h.id == *prereq_id && h.status == JobStatus::Done);
+            if !satisfied {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn fail_queued_job(&mut self, job_id: &str, message: String) {
+        let Some(record) = self.records.get(job_id) else {
+            return;
+        };
+        if record.view.status != JobStatus::Queued {
+            return;
+        }
+        self.queued_ids.retain(|id| id != job_id);
+        self.finish_job(job_id, JobStatus::Failed, Some(message));
+    }
+
+    fn on_prerequisite_finished(&mut self, prereq_id: &str, status: JobStatus, prereq_short: u32) {
+        if status == JobStatus::Done {
+            return;
+        }
+        let reason = match status {
+            JobStatus::Canceled => format!("Prerequisite #{prereq_short} was canceled"),
+            JobStatus::Failed => format!("Prerequisite #{prereq_short} failed"),
+            _ => format!("Prerequisite #{prereq_short} did not complete"),
+        };
+        let dependents: Vec<String> = self
+            .records
+            .iter()
+            .filter(|(_, r)| {
+                r.prerequisite_job_ids.contains(&prereq_id.to_string())
+                    && r.view.status == JobStatus::Queued
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for dep_id in dependents {
+            self.fail_queued_job(&dep_id, reason.clone());
+        }
     }
 
     pub fn cancel(&mut self, job_id: &str) -> Result<(), String> {
@@ -309,10 +402,11 @@ impl JobManager {
         }
 
         let desc = build_scrub_desc(&request);
-        let id = new_job_id();
+        let (id, short_id) = alloc_job_ids();
         let cancel = Arc::new(AtomicBool::new(false));
         let view = JobView {
             id: id.clone(),
+            short_id,
             name: "Scrub thumbnails".to_string(),
             desc,
             identity: identity.clone(),
@@ -330,6 +424,7 @@ impl JobManager {
             created_at: now_ms(),
             started_at: None,
             finished_at: None,
+            waiting_for: Vec::new(),
         };
         let record = JobRecord {
             view,
@@ -338,6 +433,7 @@ impl JobManager {
                 path: request.path.clone(),
             },
             follow_ups: request.follow_up,
+            prerequisite_job_ids: Vec::new(),
         };
         self.records.insert(id.clone(), record);
         self.identity_to_id.insert(identity, id.clone());
@@ -357,8 +453,121 @@ impl JobManager {
         })
     }
 
+    pub fn enqueue_op_ed_chroma_for_anime(
+        &mut self,
+        db: &AppDatabase,
+        request: EnqueueOpEdChromaAnimeJob,
+    ) -> Result<EnqueueJobResult, String> {
+        let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
+        let mut last_job_id: Option<String> = None;
+        let mut any_queued = false;
+        for ep in episodes {
+            let result = self.enqueue_op_ed_chroma_episode(
+                db,
+                &ep,
+                request.priority,
+                request.anime_title.as_deref(),
+            )?;
+            if let Some(id) = result.job_id {
+                last_job_id = Some(id);
+                if !result.skipped {
+                    any_queued = true;
+                }
+            }
+        }
+        Ok(EnqueueJobResult {
+            job_id: last_job_id,
+            skipped: !any_queued,
+        })
+    }
+
+    fn enqueue_op_ed_chroma_episode(
+        &mut self,
+        _db: &AppDatabase,
+        ep: &OpEdEpisode,
+        priority: JobPriority,
+        anime_title: Option<&str>,
+    ) -> Result<EnqueueJobResult, String> {
+        if op_ed::full_episode_fingerprint_cached(ep)? {
+            return Ok(EnqueueJobResult {
+                job_id: None,
+                skipped: true,
+            });
+        }
+
+        let identity = op_ed_chroma_job_identity(ep.id);
+        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
+            if self.records.get(&existing_id).is_some_and(|r| {
+                matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+            }) {
+                if self.records.get(&existing_id).is_some_and(|r| {
+                    r.view.status == JobStatus::Queued
+                        && priority_rank(priority) > priority_rank(r.view.priority)
+                }) {
+                    self.set_job_priority(&existing_id, priority)?;
+                }
+                return Ok(EnqueueJobResult {
+                    job_id: Some(existing_id),
+                    skipped: false,
+                });
+            }
+        }
+
+        let desc = build_chroma_desc(ep, anime_title);
+        let (id, short_id) = alloc_job_ids();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let view = JobView {
+            id: id.clone(),
+            short_id,
+            name: "Fingerprint audio".to_string(),
+            desc,
+            identity: identity.clone(),
+            job_type: "op_ed_chroma".to_string(),
+            resource_type: JobResourceType::Chroma,
+            priority,
+            status: JobStatus::Queued,
+            cancelable: true,
+            progress: JobProgress {
+                current_step: 0,
+                total_steps: 2,
+            },
+            step_label: "Queued".to_string(),
+            completion_message: None,
+            created_at: now_ms(),
+            started_at: None,
+            finished_at: None,
+            waiting_for: Vec::new(),
+        };
+        let record = JobRecord {
+            view,
+            cancel,
+            kind: JobKind::OpEdChroma {
+                episode: ep.clone(),
+            },
+            follow_ups: Vec::new(),
+            prerequisite_job_ids: Vec::new(),
+        };
+        self.records.insert(id.clone(), record);
+        self.identity_to_id.insert(identity, id.clone());
+
+        if priority == JobPriority::High {
+            self.try_start_or_queue(&id, true);
+            self.pump();
+        } else {
+            self.queued_ids.push(id.clone());
+            self.pump();
+        }
+
+        self.emit_snapshot();
+        Ok(EnqueueJobResult {
+            job_id: Some(id),
+            skipped: false,
+        })
+    }
+
     pub fn enqueue_op_ed_detect(
         &mut self,
+        db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<EnqueueJobResult, String> {
         let identity = op_ed_job_identity(request.anime_id);
@@ -387,11 +596,29 @@ impl JobManager {
             .map(|t| t.to_string())
             .unwrap_or_else(|| format!("Anime #{}", request.anime_id));
 
-        let id = new_job_id();
+        let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
+        let mut prerequisite_job_ids = Vec::new();
+        for ep in &episodes {
+            if op_ed::full_episode_fingerprint_cached(ep)? {
+                continue;
+            }
+            let chroma = self.enqueue_op_ed_chroma_episode(
+                db,
+                ep,
+                request.priority,
+                request.anime_title.as_deref(),
+            )?;
+            if let Some(job_id) = chroma.job_id {
+                prerequisite_job_ids.push(job_id);
+            }
+        }
+
+        let (id, short_id) = alloc_job_ids();
         let cancel = Arc::new(AtomicBool::new(false));
         let total_steps = 100;
         let view = JobView {
             id: id.clone(),
+            short_id,
             name: "Detect OP/ED".to_string(),
             desc,
             identity: identity.clone(),
@@ -409,6 +636,7 @@ impl JobManager {
             created_at: now_ms(),
             started_at: None,
             finished_at: None,
+            waiting_for: Vec::new(),
         };
         let record = JobRecord {
             view,
@@ -417,6 +645,7 @@ impl JobManager {
                 anime_id: request.anime_id,
             },
             follow_ups: Vec::new(),
+            prerequisite_job_ids,
         };
         self.records.insert(id.clone(), record);
         self.identity_to_id.insert(identity, id.clone());
@@ -468,8 +697,26 @@ impl JobManager {
         )
     }
 
+    fn chroma_stagger_remaining_ms(&self) -> u64 {
+        let Some(last) = self.last_chroma_start_ms else {
+            return 0;
+        };
+        let elapsed = now_ms().saturating_sub(last);
+        CHROMA_START_STAGGER_MS.saturating_sub(elapsed)
+    }
+
+    fn is_chroma_stagger_blocked(&self, job_id: &str) -> bool {
+        let Some(record) = self.records.get(job_id) else {
+            return true;
+        };
+        if record.view.resource_type != JobResourceType::Chroma {
+            return false;
+        }
+        self.chroma_stagger_remaining_ms() > 0
+    }
+
     /// Global cap applies to low/medium only (high may bypass). Resource-type caps apply to all.
-    fn can_start(&self, job_id: &str) -> bool {
+    fn can_start_without_stagger(&self, job_id: &str) -> bool {
         let Some(record) = self.records.get(job_id) else {
             return false;
         };
@@ -485,7 +732,42 @@ impl JobManager {
                 return false;
             }
         }
-        true
+        self.prerequisites_met(job_id)
+    }
+
+    fn can_start(&self, job_id: &str) -> bool {
+        if !self.can_start_without_stagger(job_id) {
+            return false;
+        }
+        !self.is_chroma_stagger_blocked(job_id)
+    }
+
+    fn has_queued_chroma_blocked_by_stagger(&self) -> bool {
+        if self.chroma_stagger_remaining_ms() == 0 {
+            return false;
+        }
+        self.queued_ids.iter().any(|id| {
+            self.records.get(id).is_some_and(|r| {
+                r.view.resource_type == JobResourceType::Chroma
+                    && r.view.status == JobStatus::Queued
+                    && self.can_start_without_stagger(id)
+            })
+        })
+    }
+
+    fn schedule_chroma_stagger_wakeup_if_needed(&mut self) {
+        if self.chroma_stagger_wakeup_armed || !self.has_queued_chroma_blocked_by_stagger() {
+            return;
+        }
+        let delay_ms = self.chroma_stagger_remaining_ms().max(1);
+        self.chroma_stagger_wakeup_armed = true;
+        super::schedule_job_pump_after_ms(&self.app, delay_ms);
+    }
+
+    pub fn on_chroma_stagger_wakeup(&mut self) {
+        self.chroma_stagger_wakeup_armed = false;
+        self.pump();
+        self.emit_snapshot();
     }
 
     fn try_start_or_queue(&mut self, job_id: &str, queue_front: bool) {
@@ -514,6 +796,7 @@ impl JobManager {
             };
             self.start_job(&next_id);
         }
+        self.schedule_chroma_stagger_wakeup_if_needed();
     }
 
     fn pick_startable_queued_id(&self) -> Option<String> {
@@ -547,8 +830,12 @@ impl JobManager {
             return;
         }
         record.view.status = JobStatus::Running;
-        record.view.started_at = Some(now_ms());
+        let started_at = now_ms();
+        record.view.started_at = Some(started_at);
         record.view.step_label = "Starting".to_string();
+        if record.view.resource_type == JobResourceType::Chroma {
+            self.last_chroma_start_ms = Some(started_at);
+        }
         self.queued_ids.retain(|id| id != job_id);
 
         let cancel = record.cancel.clone();
@@ -560,6 +847,9 @@ impl JobManager {
             JobKind::ScrubSprite { path } => {
                 super::spawn_scrub_worker(app, job_id_owned, path, cancel);
             }
+            JobKind::OpEdChroma { episode } => {
+                super::spawn_op_ed_chroma_worker(app, job_id_owned, episode, cancel);
+            }
             JobKind::OpEdDetect { anime_id } => {
                 super::spawn_op_ed_worker(app, job_id_owned, anime_id, cancel);
             }
@@ -570,7 +860,7 @@ impl JobManager {
     pub fn complete_worker(&mut self, job_id: &str, outcome: WorkerOutcome) {
         let scrub_path_for_emit = self.records.get(job_id).and_then(|r| match &r.kind {
             JobKind::ScrubSprite { path } => Some(path.clone()),
-            JobKind::OpEdDetect { .. } => None,
+            JobKind::OpEdChroma { .. } | JobKind::OpEdDetect { .. } => None,
         });
 
         let emit_op_ed_updated = self.records.get(job_id).is_some_and(|r| {
@@ -623,6 +913,7 @@ impl JobManager {
             return;
         };
         self.identity_to_id.remove(&record.view.identity);
+        let prereq_short = record.view.short_id;
 
         let mut view = record.view;
         view.status = status;
@@ -643,6 +934,8 @@ impl JobManager {
         while self.history.len() > HISTORY_CAP {
             self.history.pop_back();
         }
+
+        self.on_prerequisite_finished(job_id, status, prereq_short);
 
         let _ = self.app.emit("jobs://finished", finished_event);
     }
@@ -753,7 +1046,35 @@ fn type_max_parallel_setting_key(resource_type: &str) -> String {
 fn default_type_max_parallel(resource_type: JobResourceType) -> u32 {
     match resource_type {
         JobResourceType::Ffmpeg => DEFAULT_FFMPEG_MAX_PARALLEL,
+        JobResourceType::Chroma => DEFAULT_CHROMA_MAX_PARALLEL,
         JobResourceType::None => MAX_PARALLEL_CAP,
+    }
+}
+
+fn build_chroma_desc(ep: &OpEdEpisode, anime_title: Option<&str>) -> String {
+    let file_label = Path::new(&ep.path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&ep.path);
+    if let Some(title) = anime_title.map(str::trim).filter(|t| !t.is_empty()) {
+        format!("{title} — {file_label}")
+    } else {
+        file_label.to_string()
+    }
+}
+
+pub fn run_op_ed_chroma_job_worker(
+    ep: &OpEdEpisode,
+    cancel: &AtomicBool,
+    on_step: impl Fn(u32, u32, &str),
+) -> WorkerOutcome {
+    if cancel.load(Ordering::Relaxed) {
+        return WorkerOutcome::Canceled;
+    }
+    match op_ed::run_episode_chroma_fingerprint(ep, cancel, on_step) {
+        Ok(()) => WorkerOutcome::Done("Fingerprint ready".to_string(), None),
+        Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
+        Err(e) => WorkerOutcome::Failed(e),
     }
 }
 

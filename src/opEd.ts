@@ -5,6 +5,23 @@ export function opEdJobIdentity(animeId: number): string {
   return `op_ed_detect:${animeId}`;
 }
 
+export function opEdChromaJobIdentity(episodeId: number): string {
+  return `op_ed_chroma:${episodeId}`;
+}
+
+export function activeOpEdChromaJobs(
+  snapshot: JobsSnapshot | null | undefined,
+  episodeIds: number[],
+): JobRecord[] {
+  if (!snapshot || episodeIds.length === 0) return [];
+  const identities = new Set(episodeIds.map((id) => opEdChromaJobIdentity(id)));
+  return snapshot.active.filter(
+    (job) =>
+      identities.has(job.identity) &&
+      (job.status === "queued" || job.status === "running"),
+  );
+}
+
 export function findActiveOpEdJob(
   snapshot: JobsSnapshot | null | undefined,
   animeId: number,

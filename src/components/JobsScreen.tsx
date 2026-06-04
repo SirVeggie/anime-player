@@ -55,14 +55,14 @@ function ParallelLimitStepper(props: {
       <input
         type="number"
         min={1}
-        max={8}
+        max={20}
         value={value}
         disabled={disabled}
         aria-label={ariaLabel}
         onChange={(e) => {
           const parsed = Number(e.currentTarget.value);
           if (!Number.isFinite(parsed)) return;
-          onChange(Math.min(8, Math.max(1, Math.trunc(parsed))));
+          onChange(Math.min(20, Math.max(1, Math.trunc(parsed))));
         }}
       />
       <div className="score-stepper-buttons">
@@ -70,8 +70,8 @@ function ParallelLimitStepper(props: {
           type="button"
           className="score-stepper-button score-stepper-button--up"
           aria-label={`Increase ${ariaLabel}`}
-          disabled={disabled || value >= 8}
-          onClick={() => onChange(Math.min(8, value + 1))}
+          disabled={disabled || value >= 20}
+          onClick={() => onChange(Math.min(20, value + 1))}
         />
         <button
           type="button"
@@ -90,6 +90,37 @@ function progressPercent(job: JobRecord) {
   return Math.round((job.progress.currentStep / job.progress.totalSteps) * 100);
 }
 
+function sortJobsOldestFirst(
+  jobs: JobRecord[],
+  sortKey: (job: JobRecord) => number,
+): JobRecord[] {
+  return [...jobs].sort((a, b) => sortKey(a) - sortKey(b));
+}
+
+function JobList(props: {
+  jobs: JobRecord[];
+  nowMs: number;
+  onCancel?: (jobId: string) => void;
+  history?: boolean;
+}) {
+  const { jobs, nowMs, onCancel, history = false } = props;
+  if (jobs.length === 0) return null;
+  return (
+    <div className="job-list">
+      {jobs.map((job) => (
+        <JobRow
+          key={job.id}
+          job={job}
+          nowMs={nowMs}
+          history={history}
+          showProgress={!history}
+          onCancel={onCancel}
+        />
+      ))}
+    </div>
+  );
+}
+
 function JobRow(props: {
   job: JobRecord;
   nowMs: number;
@@ -106,9 +137,10 @@ function JobRow(props: {
 
   return (
     <div className="job-row">
-      <div className="job-row-header">
-        <div className="job-row-titles">
+      <div className="job-row-body">
+        <div className="job-row-header">
           <div className="job-row-name-line">
+            <span className="job-short-id">#{job.shortId}</span>
             <strong>{job.name}</strong>
             {job.resourceType !== "none" ?
               <span className={`job-resource-type-pill job-resource-type-pill--${job.resourceType}`}>
@@ -121,27 +153,53 @@ function JobRow(props: {
           </div>
           <span className="muted job-row-desc">{job.desc}</span>
         </div>
-        <span className={`job-status job-status--${job.status}`}>{job.status}</span>
-      </div>
-      {durationLabel ?
-        <span className="muted job-row-duration">{durationLabel}</span>
-      : null}
-      {showProgress && (job.status === "queued" || job.status === "running") ?
-        <>
-          <div className="job-progress-track" aria-hidden>
-            <div className="job-progress-fill" style={{ width: `${progressPercent(job)}%` }} />
+        {showProgress && (job.status === "queued" || job.status === "running") ?
+          <>
+            {durationLabel || job.stepLabel ?
+              <p className="muted job-row-meta">
+                {durationLabel}
+                {durationLabel && job.stepLabel ?
+                  <span className="job-row-meta-sep" aria-hidden="true">
+                    {" · "}
+                  </span>
+                : null}
+                {job.stepLabel ? <span>{job.stepLabel}</span> : null}
+              </p>
+            : null}
+            <div className="job-progress-track" aria-hidden>
+              <div className="job-progress-fill" style={{ width: `${progressPercent(job)}%` }} />
+            </div>
+          </>
+        : durationLabel || job.completionMessage ?
+          <p className="muted job-row-meta">
+            {durationLabel}
+            {durationLabel && job.completionMessage ?
+              <span className="job-row-meta-sep" aria-hidden="true">
+                {" · "}
+              </span>
+            : null}
+            {job.completionMessage ? <span>{job.completionMessage}</span> : null}
+          </p>
+        : null}
+        {job.waitingFor.length > 0 ?
+          <div className="job-row-prerequisites">
+            <span className="muted">Waiting for</span>
+            {job.waitingFor.map((prereq) => (
+              <span key={prereq.jobId} className="job-prerequisite-pill">
+                #{prereq.shortId}
+              </span>
+            ))}
           </div>
-          <span className="muted job-row-step">{job.stepLabel}</span>
-        </>
-      : null}
-      {job.completionMessage ?
-        <span className="muted job-row-completion">{job.completionMessage}</span>
-      : null}
-      {canCancel ?
-        <button type="button" className="job-row-cancel" onClick={() => onCancel(job.id)}>
-          Cancel
-        </button>
-      : null}
+        : null}
+      </div>
+      <div className="job-row-actions">
+        <span className={`job-status job-status--${job.status}`}>{job.status}</span>
+        {canCancel ?
+          <button type="button" className="job-row-cancel" onClick={() => onCancel!(job.id)}>
+            Cancel
+          </button>
+        : null}
+      </div>
     </div>
   );
 }
@@ -190,14 +248,14 @@ export function JobsScreen(props: {
     if (!globalChanged && !typeChanged) return;
 
     const timeoutId = window.setTimeout(() => {
-      if (!Number.isInteger(maxParallelDraft) || maxParallelDraft < 1 || maxParallelDraft > 8) {
-        onError("Max parallel jobs must be an integer from 1 to 8.");
+      if (!Number.isInteger(maxParallelDraft) || maxParallelDraft < 1 || maxParallelDraft > 20) {
+        onError("Max parallel jobs must be an integer from 1 to 20.");
         return;
       }
       for (const entry of savedLimits.entries) {
         const value = typeMaxParallelDraft[entry.resourceType] ?? entry.maxParallel;
-        if (!Number.isInteger(value) || value < 1 || value > 8) {
-          onError(`Max parallel ${entry.resourceType} jobs must be an integer from 1 to 8.`);
+        if (!Number.isInteger(value) || value < 1 || value > 20) {
+          onError(`Max parallel ${entry.resourceType} jobs must be an integer from 1 to 20.`);
           return;
         }
       }
@@ -229,6 +287,30 @@ export function JobsScreen(props: {
     () =>
       (snapshot?.active ?? []).filter((j) => j.status === "queued" || j.status === "running"),
     [snapshot?.active],
+  );
+
+  const runningJobs = useMemo(
+    () =>
+      sortJobsOldestFirst(
+        activeJobs.filter((j) => j.status === "running"),
+        (j) => j.startedAt ?? j.createdAt,
+      ),
+    [activeJobs],
+  );
+
+  const queuedJobs = useMemo(
+    () =>
+      sortJobsOldestFirst(
+        activeJobs.filter((j) => j.status === "queued"),
+        (j) => j.createdAt,
+      ),
+    [activeJobs],
+  );
+
+  const historyJobs = useMemo(
+    () =>
+      sortJobsOldestFirst(snapshot?.history ?? [], (j) => j.startedAt ?? j.createdAt),
+    [snapshot?.history],
   );
 
   const tickNow = activeTab === "active" && activeJobs.length > 0;
@@ -329,15 +411,22 @@ export function JobsScreen(props: {
           {activeJobs.length === 0 ?
             <p className="muted">No queued or running jobs.</p>
           : (
-            <div className="job-list">
-              {activeJobs.map((job) => (
-                <JobRow
-                  key={job.id}
-                  job={job}
-                  nowMs={nowMs}
-                  onCancel={(id) => void handleCancel(id)}
-                />
-              ))}
+            <div className="jobs-active-sections">
+              <JobList
+                jobs={runningJobs}
+                nowMs={nowMs}
+                onCancel={(id) => void handleCancel(id)}
+              />
+              {queuedJobs.length > 0 ?
+                <section className="jobs-active-section" aria-label="Job queue">
+                  <h3 className="jobs-section-title">Queue</h3>
+                  <JobList
+                    jobs={queuedJobs}
+                    nowMs={nowMs}
+                    onCancel={(id) => void handleCancel(id)}
+                  />
+                </section>
+              : null}
             </div>
           )}
         </section>
@@ -346,11 +435,7 @@ export function JobsScreen(props: {
           {(snapshot?.history.length ?? 0) === 0 ?
             <p className="muted">No completed jobs yet.</p>
           : (
-            <div className="job-list">
-              {snapshot?.history.map((job) => (
-                <JobRow key={job.id} job={job} nowMs={nowMs} history showProgress={false} />
-              ))}
-            </div>
+            <JobList jobs={historyJobs} nowMs={nowMs} history />
           )}
         </section>
       )}

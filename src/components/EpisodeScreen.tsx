@@ -5,6 +5,7 @@ import {
   getAnilistCoverImage,
   getMatchingDetectionRuleName,
   jobsCancel,
+  jobsEnqueueOpEdChromaForAnime,
   jobsEnqueueOpEdDetect,
   jobsEnqueueScrubSprite,
   jobsSetScrubSpritePriorityForPaths,
@@ -12,7 +13,12 @@ import {
 } from "../api";
 import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
-import { findActiveOpEdJob, jobProgressPercent, opEdSegmentLabel } from "../opEd";
+import {
+  activeOpEdChromaJobs,
+  findActiveOpEdJob,
+  jobProgressPercent,
+  opEdSegmentLabel,
+} from "../opEd";
 import type {
   AnimeSummary,
   AnilistMediaStatus,
@@ -184,11 +190,16 @@ export function EpisodeScreen(props: {
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
   const [opEdDetectBusy, setOpEdDetectBusy] = useState(false);
+  const [opEdChromaBusy, setOpEdChromaBusy] = useState(false);
   const [opEdResetBusy, setOpEdResetBusy] = useState(false);
   const [opEdError, setOpEdError] = useState<string | null>(null);
   const activeOpEdJob = useMemo(
     () => findActiveOpEdJob(jobsSnapshot, anime.id),
     [anime.id, jobsSnapshot],
+  );
+  const activeChromaJobs = useMemo(
+    () => activeOpEdChromaJobs(jobsSnapshot, episodes.map((ep) => ep.id)),
+    [episodes, jobsSnapshot],
   );
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
@@ -320,6 +331,22 @@ export function EpisodeScreen(props: {
       void unlisten?.();
     };
   }, [onOpEdAnalysisUpdated]);
+
+  const handleFingerprintOpEd = useCallback(async () => {
+    if (episodes.length === 0) return;
+    setOpEdChromaBusy(true);
+    try {
+      await jobsEnqueueOpEdChromaForAnime({
+        animeId: anime.id,
+        priority: "medium",
+        animeTitle: animeDisplayTitle(anime, preferAnilistDisplayTitle),
+      });
+    } catch (e) {
+      setOpEdError(errorMessage(e));
+    } finally {
+      setOpEdChromaBusy(false);
+    }
+  }, [anime, episodes.length, preferAnilistDisplayTitle]);
 
   const handleDetectOpEd = useCallback(async () => {
     if (episodes.length < 2) return;
@@ -692,6 +719,26 @@ export function EpisodeScreen(props: {
             </button>
             <button
               type="button"
+              disabled={
+                episodes.length === 0 ||
+                opEdChromaBusy ||
+                activeChromaJobs.length > 0
+              }
+              onClick={() => void handleFingerprintOpEd()}
+              title={
+                episodes.length === 0
+                  ? "No episodes"
+                  : activeChromaJobs.length > 0
+                    ? "Fingerprinting in progress"
+                    : "Pre-compute Chromaprint fingerprints for every episode (parallel test)"
+              }
+            >
+              {activeChromaJobs.length > 0
+                ? `Fingerprinting (${activeChromaJobs.length})…`
+                : "Fingerprint audio"}
+            </button>
+            <button
+              type="button"
               disabled={episodes.length < 2 || opEdDetectBusy || Boolean(activeOpEdJob)}
               onClick={() => void handleDetectOpEd()}
               title={
@@ -699,7 +746,7 @@ export function EpisodeScreen(props: {
                   ? "Need at least 2 episodes"
                   : activeOpEdJob
                     ? "Analysis in progress"
-                    : "Detect opening and ending by matching audio across episodes"
+                    : "Detect opening and ending; queues fingerprinting first when needed"
               }
             >
               {activeOpEdJob ? "Detecting…" : "Detect OP/ED"}
@@ -1062,9 +1109,21 @@ export function EpisodeScreen(props: {
           {activeOpEdJob ?
             <>
               <div className="op-ed-analysis-banner__row">
-                <span className="muted">{activeOpEdJob.stepLabel}</span>
+                <span className="muted">
+                  #{activeOpEdJob.shortId} {activeOpEdJob.stepLabel}
+                </span>
                 <span>{jobProgressPercent(activeOpEdJob)}%</span>
               </div>
+              {activeOpEdJob.waitingFor.length > 0 ?
+                <div className="job-row-prerequisites">
+                  <span className="muted">Waiting for</span>
+                  {activeOpEdJob.waitingFor.map((prereq) => (
+                    <span key={prereq.jobId} className="job-prerequisite-pill">
+                      #{prereq.shortId}
+                    </span>
+                  ))}
+                </div>
+              : null}
               <div className="job-progress-track" aria-hidden>
                 <div
                   className="job-progress-fill"
