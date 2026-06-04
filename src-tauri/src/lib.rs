@@ -404,6 +404,7 @@ pub fn run() {
         jobs::jobs_cancel,
         jobs::jobs_cancel_all,
         jobs::jobs_enqueue_scrub_sprite,
+        jobs::jobs_enqueue_episode_page_scrub_sprites,
         jobs::jobs_enqueue_op_ed_detect,
         jobs::jobs_enqueue_op_ed_chroma_for_anime,
         jobs::jobs_set_job_priority,

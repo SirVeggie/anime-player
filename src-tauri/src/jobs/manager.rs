@@ -15,9 +15,9 @@ use crate::scrub_preview::{
 };
 
 use super::types::{
-    EnqueueJobResult, EnqueueOpEdChromaAnimeJob, EnqueueOpEdDetectJob, EnqueueScrubSpriteJob,
-    JobPrerequisiteView, JobPriority, JobProgress, JobResourceType, JobStatus, JobView,
-    JobsSnapshot, TypeMaxParallel,
+    EnqueueEpisodePageScrubSprites, EnqueueJobResult, EnqueueOpEdChromaAnimeJob,
+    EnqueueOpEdDetectJob, EnqueueScrubSpriteJob, JobPrerequisiteView, JobPriority, JobProgress,
+    JobResourceType, JobStatus, JobView, JobsSnapshot, TypeMaxParallel,
 };
 
 /// Episode newly imported during `rescan_library` (auto scrub enqueue).
@@ -40,6 +40,8 @@ const MAX_PARALLEL_CAP: u32 = 20;
 const HISTORY_CAP: usize = 200;
 /// Coalesce rapid `jobs://updated` emissions so the WebView is not flooded during parallel work.
 const SNAPSHOT_EMIT_MIN_INTERVAL_MS: u64 = 250;
+/// Cap prerequisite pills in emitted snapshots (full count stays in `prerequisite_total`).
+const SNAPSHOT_WAITING_FOR_CAP: usize = 8;
 
 const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
     &[JobResourceType::Ffmpeg, JobResourceType::Chroma];
@@ -226,7 +228,11 @@ impl JobManager {
 
     fn view_with_waiting_for(&self, record: &JobRecord) -> JobView {
         let mut view = record.view.clone();
-        view.waiting_for = self.pending_prerequisites(record);
+        let mut waiting_for = self.pending_prerequisites(record);
+        if waiting_for.len() > SNAPSHOT_WAITING_FOR_CAP {
+            waiting_for.truncate(SNAPSHOT_WAITING_FOR_CAP);
+        }
+        view.waiting_for = waiting_for;
         view.prerequisite_total = record.prerequisite_job_ids.len() as u32;
         if !view.waiting_for.is_empty() && view.status == JobStatus::Queued {
             view.step_label = "Waiting for prerequisites".to_string();
@@ -348,6 +354,14 @@ impl JobManager {
     /// Changes priority for a **queued** job. High starts when limits allow (type caps
     /// always apply); upgrades call `pump`.
     pub fn set_job_priority(&mut self, job_id: &str, priority: JobPriority) -> Result<(), String> {
+        if self.set_job_priority_inner(job_id, priority)? {
+            self.emit_snapshot();
+        }
+        Ok(())
+    }
+
+    /// Like [`set_job_priority`] but never emits; batch callers emit once at the end.
+    fn set_job_priority_inner(&mut self, job_id: &str, priority: JobPriority) -> Result<bool, String> {
         let Some(record) = self.records.get(job_id) else {
             return Err(format!("job not found: {job_id}"));
         };
@@ -355,7 +369,7 @@ impl JobManager {
             return Err("only queued jobs can change priority".to_string());
         }
         if record.view.priority == priority {
-            return Ok(());
+            return Ok(false);
         }
         let old = record.view.priority;
         if let Some(record) = self.records.get_mut(job_id) {
@@ -368,8 +382,7 @@ impl JobManager {
         } else if priority_rank(priority) > priority_rank(old) {
             self.pump();
         }
-        self.emit_snapshot();
-        Ok(())
+        Ok(true)
     }
 
     pub fn set_scrub_sprite_priority_for_paths(
@@ -377,21 +390,24 @@ impl JobManager {
         paths: &[String],
         priority: JobPriority,
     ) -> Result<(), String> {
-        let mut job_ids = Vec::new();
+        let mut changed = false;
         for path in paths {
             let identity = scrub_sprite_identity(path)?;
-            if let Some(id) = self.identity_to_id.get(&identity) {
-                job_ids.push(id.clone());
-            }
-        }
-        for job_id in job_ids {
+            let Some(job_id) = self.identity_to_id.get(&identity).cloned() else {
+                continue;
+            };
             if self
                 .records
                 .get(&job_id)
                 .is_some_and(|r| r.view.status == JobStatus::Queued)
             {
-                let _ = self.set_job_priority(&job_id, priority);
+                if self.set_job_priority_inner(&job_id, priority)? {
+                    changed = true;
+                }
             }
+        }
+        if changed {
+            self.emit_snapshot_now();
         }
         Ok(())
     }
@@ -419,13 +435,44 @@ impl JobManager {
         &mut self,
         request: EnqueueScrubSpriteJob,
     ) -> Result<EnqueueJobResult, String> {
+        self.enqueue_scrub_sprite_inner(request, true)
+    }
+
+    pub fn enqueue_episode_page_scrub_sprites(
+        &mut self,
+        request: EnqueueEpisodePageScrubSprites,
+    ) -> Result<(), String> {
+        for item in request.episodes {
+            let _ = self.enqueue_scrub_sprite_inner(
+                EnqueueScrubSpriteJob {
+                    path: item.path,
+                    priority: request.priority,
+                    anime_title: request.anime_title.clone(),
+                    episode_label: item.episode_label,
+                    follow_up: Vec::new(),
+                },
+                false,
+            )?;
+        }
+        self.finish_scheduling_batch();
+        Ok(())
+    }
+
+    fn enqueue_scrub_sprite_inner(
+        &mut self,
+        request: EnqueueScrubSpriteJob,
+        flush_scheduling: bool,
+    ) -> Result<EnqueueJobResult, String> {
         let identity = scrub_sprite_identity(&request.path)?;
         if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
             if self.records.get(&existing_id).is_some_and(|r| {
                 r.view.status == JobStatus::Queued
                     && priority_rank(request.priority) > priority_rank(r.view.priority)
             }) {
-                self.set_job_priority(&existing_id, request.priority)?;
+                let _ = self.set_job_priority_inner(&existing_id, request.priority)?;
+            }
+            if flush_scheduling {
+                self.finish_scheduling_batch();
             }
             return Ok(EnqueueJobResult {
                 job_id: Some(existing_id),
@@ -433,6 +480,9 @@ impl JobManager {
             });
         }
         if scrub_sprite_is_cached(&request.path)? {
+            if flush_scheduling {
+                self.finish_scheduling_batch();
+            }
             return Ok(EnqueueJobResult {
                 job_id: None,
                 skipped: true,
@@ -479,13 +529,13 @@ impl JobManager {
 
         if request.priority == JobPriority::High {
             self.try_start_or_queue(&id, true);
-            self.pump();
         } else {
             self.queued_ids.push(id.clone());
-            self.pump();
         }
 
-        self.emit_snapshot();
+        if flush_scheduling {
+            self.finish_scheduling_batch();
+        }
         Ok(EnqueueJobResult {
             job_id: Some(id),
             skipped: false,
@@ -523,8 +573,21 @@ impl JobManager {
     }
 
     fn finish_op_ed_enqueue_batch(&mut self) {
+        self.finish_scheduling_batch();
+    }
+
+    /// Run scheduler after enqueueing work. Refreshes disk-busy cache **before** taking
+    /// further scheduler steps — never call WMI from inside [`Self::pump`] (holds the mutex).
+    fn finish_scheduling_batch(&mut self) {
+        self.refresh_disk_busy_if_needed();
         self.pump();
         self.emit_snapshot_now();
+    }
+
+    fn refresh_disk_busy_if_needed(&self) {
+        if self.has_pending_chroma_work() || self.has_queued_chroma_blocked_by_disk_busy() {
+            disk_volume::refresh_disk_busy_cache(now_ms());
+        }
     }
 
     fn enqueue_op_ed_chroma_episode(
@@ -860,6 +923,7 @@ impl JobManager {
 
     pub fn on_chroma_stagger_wakeup(&mut self) {
         self.chroma_disk_poll_wakeup_armed = false;
+        self.refresh_disk_busy_if_needed();
         self.pump();
         self.emit_snapshot();
     }
@@ -884,9 +948,6 @@ impl JobManager {
     /// Low/medium jobs respect `max_parallel` against **all** running jobs (including high).
     /// High-priority jobs bypass the global cap but not per-resource-type caps.
     fn pump(&mut self) {
-        if self.has_pending_chroma_work() {
-            disk_volume::refresh_disk_busy_cache(now_ms());
-        }
         loop {
             let Some(next_id) = self.pick_startable_queued_id() else {
                 break;

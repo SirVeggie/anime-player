@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { jobsGetSnapshot } from "../api";
 import type { JobFinishedEvent, JobRecord, JobStatus, JobsSnapshot } from "../types";
@@ -9,14 +9,22 @@ const identityListeners = new Map<string, Set<IdentityListener>>();
 
 let snapshotListeners = new Set<(snapshot: JobsSnapshot) => void>();
 let started = false;
+/** Last payload from `jobs://updated` or `jobs_get_snapshot` — avoids IPC when opening the Jobs page. */
+let cachedSnapshot: JobsSnapshot | null = null;
+let snapshotFetchPromise: Promise<JobsSnapshot> | null = null;
+
+function notifySnapshotListeners(snapshot: JobsSnapshot) {
+  cachedSnapshot = snapshot;
+  for (const cb of snapshotListeners) {
+    cb(snapshot);
+  }
+}
 
 function ensureGlobalListeners() {
   if (started) return;
   started = true;
   void listen<JobsSnapshot>("jobs://updated", (event) => {
-    for (const cb of snapshotListeners) {
-      cb(event.payload);
-    }
+    notifySnapshotListeners(event.payload);
   });
   void listen<JobFinishedEvent>("jobs://finished", (event) => {
     const payload = event.payload;
@@ -28,12 +36,37 @@ function ensureGlobalListeners() {
   });
 }
 
+function fetchSnapshotOnce(): Promise<JobsSnapshot> {
+  if (!snapshotFetchPromise) {
+    snapshotFetchPromise = jobsGetSnapshot()
+      .then((snapshot) => {
+        notifySnapshotListeners(snapshot);
+        return snapshot;
+      })
+      .catch((err) => {
+        snapshotFetchPromise = null;
+        throw err;
+      });
+  }
+  return snapshotFetchPromise;
+}
+
+export function getCachedJobsSnapshot(): JobsSnapshot | null {
+  return cachedSnapshot;
+}
+
 export function subscribeJobsSnapshot(listener: (snapshot: JobsSnapshot) => void): () => void {
   ensureGlobalListeners();
   snapshotListeners.add(listener);
-  void jobsGetSnapshot().then(listener).catch(() => {
-    /* ignore */
-  });
+  if (cachedSnapshot) {
+    listener(cachedSnapshot);
+  } else {
+    void fetchSnapshotOnce()
+      .then(listener)
+      .catch(() => {
+        /* ignore */
+      });
+  }
   return () => {
     snapshotListeners.delete(listener);
   };
@@ -41,7 +74,7 @@ export function subscribeJobsSnapshot(listener: (snapshot: JobsSnapshot) => void
 
 /** Sidebar badge only — avoids re-rendering the whole app on every job progress tick. */
 export function useJobsActiveCount(): number {
-  const [count, setCount] = useState(0);
+  const [count, setCount] = useState(() => cachedSnapshot?.activeCount ?? 0);
   useEffect(() => {
     return subscribeJobsSnapshot((snapshot) => {
       setCount((current) => (current === snapshot.activeCount ? current : snapshot.activeCount));
@@ -51,8 +84,12 @@ export function useJobsActiveCount(): number {
 }
 
 export function useJobsSnapshot(): JobsSnapshot | null {
-  const [snapshot, setSnapshot] = useState<JobsSnapshot | null>(null);
-  useEffect(() => subscribeJobsSnapshot(setSnapshot), []);
+  const [snapshot, setSnapshot] = useState<JobsSnapshot | null>(() => cachedSnapshot);
+  useEffect(() => {
+    return subscribeJobsSnapshot((next) => {
+      startTransition(() => setSnapshot(next));
+    });
+  }, []);
   return snapshot;
 }
 
@@ -87,46 +124,39 @@ export function waitForJob(jobId: string): Promise<JobRecord> {
 
     const terminal = new Set<JobStatus>(["done", "failed", "canceled"]);
 
+    const tryResolve = (snap: JobsSnapshot) => {
+      const record =
+        snap.history.find((j) => j.id === jobId) ?? snap.active.find((j) => j.id === jobId);
+      if (record && terminal.has(record.status)) {
+        cleanup();
+        resolve(record);
+      }
+    };
+
     void listen<JobFinishedEvent>("jobs://finished", (event) => {
       if (event.payload.jobId !== jobId) return;
       cleanup();
-      void jobsGetSnapshot()
-        .then((snapshot) => {
-          const record =
-            snapshot.history.find((j) => j.id === jobId) ??
-            snapshot.active.find((j) => j.id === jobId);
-          if (record) {
-            resolve(record);
-            return;
-          }
-          reject(new Error(`Job ${jobId} finished but was not found in snapshot`));
-        })
-        .catch(reject);
+      if (cachedSnapshot) {
+        tryResolve(cachedSnapshot);
+        return;
+      }
+      void fetchSnapshotOnce().then(tryResolve).catch(reject);
     }).then((fn) => {
       unlistenFinished = fn;
     });
 
     void listen<JobsSnapshot>("jobs://updated", (event) => {
-      const record = event.payload.active.find((j) => j.id === jobId);
-      if (!record || !terminal.has(record.status)) return;
-      cleanup();
-      resolve(record);
+      tryResolve(event.payload);
     }).then((fn) => {
       unlistenUpdated = fn;
     });
 
-    void jobsGetSnapshot()
-      .then((snapshot) => {
-        const record =
-          snapshot.history.find((j) => j.id === jobId) ??
-          snapshot.active.find((j) => j.id === jobId);
-        if (record && terminal.has(record.status)) {
-          cleanup();
-          resolve(record);
-        }
-      })
-      .catch(() => {
+    if (cachedSnapshot) {
+      tryResolve(cachedSnapshot);
+    } else {
+      void fetchSnapshotOnce().then(tryResolve).catch(() => {
         /* ignore */
       });
+    }
   });
 }

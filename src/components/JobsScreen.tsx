@@ -9,6 +9,55 @@ import { ViewHeader } from "./ViewHeader";
 type JobsTab = "active" | "history";
 
 const PARALLEL_LIMIT_DEBOUNCE_MS = 500;
+/** Collapse many identical chroma queue rows (typical after Detect OP/ED). */
+const CHROMA_QUEUE_COLLAPSE_THRESHOLD = 6;
+
+function bucketActiveJobs(jobs: JobRecord[]) {
+  const running: JobRecord[] = [];
+  const queuedOther: JobRecord[] = [];
+  const queuedChroma: JobRecord[] = [];
+  for (const job of jobs) {
+    if (job.status === "running") {
+      running.push(job);
+    } else if (job.status === "queued" && job.jobType === "op_ed_chroma") {
+      queuedChroma.push(job);
+    } else if (job.status === "queued") {
+      queuedOther.push(job);
+    }
+  }
+  return { running, queuedOther, queuedChroma };
+}
+
+function ChromaQueueSummary(props: { jobs: JobRecord[] }) {
+  const { jobs } = props;
+  const oldest = jobs.reduce(
+    (min, job) => (job.createdAt < min ? job.createdAt : min),
+    jobs[0]?.createdAt ?? 0,
+  );
+  const priority = jobs[0]?.priority ?? "medium";
+  return (
+    <div className="job-row job-row--group" aria-label={`${jobs.length} fingerprint jobs queued`}>
+      <div className="job-row-body">
+        <div className="job-row-header">
+          <div className="job-row-name-line">
+            <strong>Fingerprint episodes</strong>
+            <span className="job-resource-type-pill job-resource-type-pill--chroma">Chroma</span>
+            <span className={`job-priority-pill job-priority-pill--${priority}`}>
+              {priorityLabel(priority)}
+            </span>
+          </div>
+          <span className="muted job-row-desc">
+            {jobs.length} queued — runs when chroma slots and disk load allow
+          </span>
+        </div>
+        <p className="muted job-row-meta">Queued {formatDurationMs(Date.now() - oldest)} ago (oldest)</p>
+      </div>
+      <div className="job-row-actions">
+        <span className="job-status job-status--queued">queued</span>
+      </div>
+    </div>
+  );
+}
 
 function useNowMs(tick: boolean) {
   const [now, setNow] = useState(() => Date.now());
@@ -192,7 +241,7 @@ function JobRow(props: {
             {job.completionMessage ? <span>{job.completionMessage}</span> : null}
           </p>
         : null}
-        {job.waitingFor.length > 0 ?
+        {job.prerequisiteTotal > 0 ?
           <div className="job-row-prerequisites">
             <span className="muted">Waiting for</span>
             {job.waitingFor.map((prereq) => (
@@ -200,6 +249,11 @@ function JobRow(props: {
                 #{prereq.shortId}
               </span>
             ))}
+            {job.prerequisiteTotal > job.waitingFor.length ?
+              <span className="job-prerequisite-pill">
+                +{job.prerequisiteTotal - job.waitingFor.length} more
+              </span>
+            : null}
           </div>
         : null}
       </div>
@@ -300,23 +354,24 @@ export function JobsScreen(props: {
     [snapshot?.active],
   );
 
+  const activeBuckets = useMemo(() => bucketActiveJobs(activeJobs), [activeJobs]);
+
   const runningJobs = useMemo(
-    () =>
-      sortJobsOldestFirst(
-        activeJobs.filter((j) => j.status === "running"),
-        (j) => j.startedAt ?? j.createdAt,
-      ),
-    [activeJobs],
+    () => sortJobsOldestFirst(activeBuckets.running, (j) => j.startedAt ?? j.createdAt),
+    [activeBuckets.running],
   );
 
-  const queuedJobs = useMemo(
-    () =>
-      sortJobsOldestFirst(
-        activeJobs.filter((j) => j.status === "queued"),
-        (j) => j.createdAt,
-      ),
-    [activeJobs],
+  const queuedOtherJobs = useMemo(
+    () => sortJobsOldestFirst(activeBuckets.queuedOther, (j) => j.createdAt),
+    [activeBuckets.queuedOther],
   );
+
+  const queuedChromaJobs = useMemo(
+    () => sortJobsOldestFirst(activeBuckets.queuedChroma, (j) => j.createdAt),
+    [activeBuckets.queuedChroma],
+  );
+
+  const collapseChromaQueue = queuedChromaJobs.length >= CHROMA_QUEUE_COLLAPSE_THRESHOLD;
 
   const historyJobs = useMemo(
     () =>
@@ -431,14 +486,23 @@ export function JobsScreen(props: {
                 nowMs={nowMs}
                 onCancel={(id) => void handleCancel(id)}
               />
-              {queuedJobs.length > 0 ?
+              {queuedOtherJobs.length > 0 || queuedChromaJobs.length > 0 ?
                 <section className="jobs-active-section" aria-label="Job queue">
                   <h3 className="jobs-section-title">Queue</h3>
                   <JobList
-                    jobs={queuedJobs}
+                    jobs={queuedOtherJobs}
                     nowMs={nowMs}
                     onCancel={(id) => void handleCancel(id)}
                   />
+                  {collapseChromaQueue ?
+                    <ChromaQueueSummary jobs={queuedChromaJobs} />
+                  : queuedChromaJobs.length > 0 ?
+                    <JobList
+                      jobs={queuedChromaJobs}
+                      nowMs={nowMs}
+                      onCancel={(id) => void handleCancel(id)}
+                    />
+                  : null}
                 </section>
               : null}
             </div>

@@ -148,6 +148,8 @@ function App() {
   const [library, setLibrary] = useState<LibraryState | null>(null);
   const [animeSearchIndex, setAnimeSearchIndex] = useState<AnimeSearchEntry[]>([]);
   const [view, setView] = useState<View>("categories");
+  const viewRef = useRef<View>("categories");
+  viewRef.current = view;
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
   const [episodeReturnView, setEpisodeReturnView] = useState<EpisodeReturnView>("anime");
@@ -525,7 +527,7 @@ function App() {
     let unlisten: UnlistenFn | undefined;
     void listen("op-ed://analysis-updated", () => {
       const animeId = selectedAnimeIdRef.current;
-      if (animeId != null) {
+      if (animeId != null && viewRef.current === "episodes") {
         void refreshAnimeEpisodes(animeId);
       }
     }).then((fn) => {

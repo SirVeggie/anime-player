@@ -126,11 +126,14 @@ fn with_manager<T>(
 
 #[cfg(windows)]
 #[tauri::command]
-pub fn jobs_get_snapshot(
-    jobs: State<'_, JobsState>,
-    db: State<'_, AppDatabase>,
-) -> Result<JobsSnapshot, String> {
-    with_manager(jobs, db, |manager, _| Ok(manager.snapshot()))
+pub async fn jobs_get_snapshot(app: AppHandle) -> Result<JobsSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        Ok(guard.snapshot())
+    })
+    .await
+    .map_err(|e| format!("snapshot thread failed: {e}"))?
 }
 
 #[cfg(windows)]
@@ -192,6 +195,22 @@ pub fn jobs_enqueue_scrub_sprite(
 
 #[cfg(windows)]
 #[tauri::command]
+pub async fn jobs_enqueue_episode_page_scrub_sprites(
+    app: AppHandle,
+    request: EnqueueEpisodePageScrubSprites,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let db = app.state::<AppDatabase>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.enqueue_episode_page_scrub_sprites(request)
+    })
+    .await
+    .map_err(|e| format!("enqueue thread failed: {e}"))?
+}
+
+#[cfg(windows)]
+#[tauri::command]
 pub fn jobs_set_job_priority(
     jobs: State<'_, JobsState>,
     db: State<'_, AppDatabase>,
@@ -203,15 +222,18 @@ pub fn jobs_set_job_priority(
 
 #[cfg(windows)]
 #[tauri::command]
-pub fn jobs_set_scrub_sprite_priority_for_paths(
-    jobs: State<'_, JobsState>,
-    db: State<'_, AppDatabase>,
+pub async fn jobs_set_scrub_sprite_priority_for_paths(
+    app: AppHandle,
     paths: Vec<String>,
     priority: JobPriority,
 ) -> Result<(), String> {
-    with_manager(jobs, db, |manager, _| {
-        manager.set_scrub_sprite_priority_for_paths(&paths, priority)
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.set_scrub_sprite_priority_for_paths(&paths, priority)
     })
+    .await
+    .map_err(|e| format!("scrub priority thread failed: {e}"))?
 }
 
 #[cfg(windows)]

@@ -136,6 +136,22 @@ pub struct EnqueueScrubSpriteJob {
     pub follow_up: Vec<EnqueueScrubSpriteJob>,
 }
 
+/// One IPC for the episode page scrub queue (avoids N invokes while browsing a title).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodePageScrubItem {
+    pub path: String,
+    pub episode_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueEpisodePageScrubSprites {
+    pub priority: JobPriority,
+    pub anime_title: Option<String>,
+    pub episodes: Vec<EpisodePageScrubItem>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnqueueOpEdDetectJob {

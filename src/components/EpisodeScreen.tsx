@@ -7,7 +7,7 @@ import {
   jobsCancel,
   jobsEnqueueOpEdChromaForAnime,
   jobsEnqueueOpEdDetect,
-  jobsEnqueueScrubSprite,
+  jobsEnqueueEpisodePageScrubSprites,
   jobsSetScrubSpritePriorityForPaths,
   resetAnimeOpEdAnalysis,
 } from "../api";
@@ -419,27 +419,26 @@ export function EpisodeScreen(props: {
   }, [episodes, episodesLoading]);
 
   useEffect(() => {
-    let cancelled = false;
+    if (episodes.length === 0) return;
+
     const animeTitle = anime.anilist_title?.trim() || anime.title;
     const paths = episodes.map((episode) => episode.path);
-
-    for (const episode of episodes) {
-      if (cancelled) break;
-      const episodeLabel = isEpisodeNumberKnown(episode.episode_number)
+    const scrubEpisodes = episodes.map((episode) => ({
+      path: episode.path,
+      episodeLabel: isEpisodeNumberKnown(episode.episode_number)
         ? formatEpisodeNumber(episode.episode_number)
-        : episode.file_name;
-      void jobsEnqueueScrubSprite({
-        path: episode.path,
-        priority: "medium",
-        animeTitle,
-        episodeLabel,
-      }).catch(() => {
-        /* background queue; ignore */
-      });
-    }
+        : episode.file_name,
+    }));
+
+    void jobsEnqueueEpisodePageScrubSprites({
+      priority: "medium",
+      animeTitle,
+      episodes: scrubEpisodes,
+    }).catch(() => {
+      /* background queue; ignore */
+    });
 
     return () => {
-      cancelled = true;
       if (paths.length === 0) return;
       void jobsSetScrubSpritePriorityForPaths(paths, "low").catch(() => {
         /* background queue; ignore */

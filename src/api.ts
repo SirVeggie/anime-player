@@ -18,6 +18,7 @@ import type {
   EnqueueJobResult,
   EnqueueOpEdChromaAnimeJob,
   EnqueueOpEdDetectJob,
+  EnqueueEpisodePageScrubSprites,
   EnqueueScrubSpriteJob,
   JobPriority,
   JobsSnapshot,
@@ -187,6 +188,12 @@ export function jobsCancelAll(): Promise<void> {
 
 export function jobsEnqueueScrubSprite(request: EnqueueScrubSpriteJob): Promise<EnqueueJobResult> {
   return invoke("jobs_enqueue_scrub_sprite", { request });
+}
+
+export function jobsEnqueueEpisodePageScrubSprites(
+  request: EnqueueEpisodePageScrubSprites,
+): Promise<void> {
+  return invoke("jobs_enqueue_episode_page_scrub_sprites", { request });
 }
 
 export function jobsEnqueueOpEdDetect(request: EnqueueOpEdDetectJob): Promise<EnqueueJobResult> {

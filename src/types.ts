@@ -312,6 +312,17 @@ export type EnqueueScrubSpriteJob = {
   followUp?: EnqueueScrubSpriteJob[];
 };
 
+export type EpisodePageScrubItem = {
+  path: string;
+  episodeLabel?: string | null;
+};
+
+export type EnqueueEpisodePageScrubSprites = {
+  priority: JobPriority;
+  animeTitle?: string | null;
+  episodes: EpisodePageScrubItem[];
+};
+
 export type EnqueueOpEdDetectJob = {
   animeId: number;
   priority: JobPriority;

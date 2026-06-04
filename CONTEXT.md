@@ -83,7 +83,9 @@ view components. Per-screen UI lives in `src/components/`:
   `#id` in the UI. Jobs dedupe by `identity`, support cancel/cancel-all,
   progress steps, and emit `jobs://updated` (coalesced to at most ~4 per second) /
   `jobs://finished`. The root layout only subscribes to the active job count for the
-  sidebar badge; the episode and jobs screens subscribe to the full snapshot. Frontend
+  sidebar badge; the episode and jobs screens subscribe to the full snapshot (cached from
+  the last `jobs://updated` when opening Jobs — no extra IPC). The Jobs page collapses
+  large chroma queues into one summary row. Frontend
   helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
   `onJobIdentityFinished`). Workers run on `spawn_blocking` (off the WebView
   thread), but **must not** hold `AppDatabase::with_conn` across ffmpeg/fpcalc
@@ -251,9 +253,10 @@ view components. Per-screen UI lives in `src/components/`:
   under `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
   every five seconds capped at 120). **Scrub thumbnail** work runs as background
   jobs (`jobs_enqueue_scrub_sprite`): a rescan that imports ≤20 episodes
-  auto-queues scrub jobs (low priority); opening an anime’s episode list queues
-  **medium**-priority jobs for uncached episodes and downgrades them to **low**
-  when leaving that page (`jobs_set_scrub_sprite_priority_for_paths`); opening
+  auto-queues scrub jobs (low priority); opening an anime’s episode list uses one
+  batched command (`jobs_enqueue_episode_page_scrub_sprites`, medium priority for
+  uncached episodes) and downgrades them to **low** when leaving that page
+  (`jobs_set_scrub_sprite_priority_for_paths`, one emit); opening
   the player upgrades the current file’s queued job to **high** (starts
   immediately). Queued priorities can be changed via `jobs_set_job_priority`.
   `get_scrub_sprite_if_ready` reads the
@@ -430,7 +433,8 @@ view components. Per-screen UI lives in `src/components/`:
   `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
 - `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,
   dedupe), scrub-sprite worker; commands `jobs_get_snapshot`, `jobs_enqueue_scrub_sprite`,
-  `jobs_set_job_priority`, `jobs_set_scrub_sprite_priority_for_paths`, `jobs_cancel`,
+  `jobs_enqueue_episode_page_scrub_sprites`, `jobs_set_job_priority`,
+  `jobs_set_scrub_sprite_priority_for_paths`, `jobs_cancel`,
   `jobs_cancel_all`, `jobs_set_max_parallel`.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
