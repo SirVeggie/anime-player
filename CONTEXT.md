@@ -279,7 +279,13 @@ view components. Per-screen UI lives in `src/components/`:
   writes discovery slice caches (120 Chromaprint frames, stepped every 60 frames) for
   the first/last ~3 minutes so detection scans slices from disk instead of re-running
   ffmpeg per window. Optimistic search windows run before a full-episode pass for
-  failed episodes. Matching
+  failed episodes. Titles with multiple OP/ED sets in one folder (e.g. two seasons
+  merged) use **block detection**: after three consecutive per-kind match failures,
+  discovery re-runs on episodes not yet `matched` for that kind (`op_ed_templates.block_index`
+  increments). `not_found` rows from an earlier block are retried; only `matched`/`skipped`
+  episodes are excluded from seeds. At a season boundary, an episode with exactly one of
+  OP/ED matched may get a **bridge** retro match for the other kind (search_pass `bridge` /
+  `bridge_full`) without overriding an existing match. Matching
   is intentionally conservative: the best audio offset must clear both an
   average-score threshold and consistency checks (enough strong frames plus a
   lower-quartile floor) before it can mark an episode segment as matched, which
@@ -290,8 +296,8 @@ view components. Per-screen UI lives in `src/components/`:
   The episode page navigates immediately and shows a loading state while
   `list_episodes` runs; episode row thumbnails load with bounded concurrency.
   Title settings
-  **Reset OP/ED analysis** clears DB rows and all fingerprint cache files for
-  that title's episodes (not only keys recorded in SQLite). Global **Skip detected OP/ED**
+  **Reset OP/ED analysis** clears templates and segment rows in SQLite only;
+  Chromaprint cache files are kept for faster re-detection. Global **Skip detected OP/ED**
   (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
   segments on `mpv://time-pos`.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe

@@ -328,8 +328,10 @@
         </li>
         <li>
           <strong>Run OP, then ED</strong>
-          <code>run_kind_detection</code> is called twice (OP block index 0, ED block index 0).
-          Progress steps are precomputed from episode count.
+          <code>run_kind_detection</code> is called twice (OP then ED). Each kind may run
+          multiple <strong>blocks</strong> (<code>op_ed_templates.block_index</code>): after
+          3 consecutive match failures, discovery re-runs on episodes not yet
+          <code>matched</code> for that kind. Progress steps reserve headroom for several blocks.
         </li>
       </ol>
     </section>
@@ -445,7 +447,8 @@
           <strong>Record result</strong>
           <ul>
             <li><strong>Matched:</strong> store start/end seconds, confidence, template id, candidate fp key.</li>
-            <li><strong>Not found:</strong> increment fail streak; after 3 consecutive failures on titles with ≥3 episodes, stop processing further episodes for this kind.</li>
+            <li><strong>Not found:</strong> increment fail streak; after 3 consecutive failures on titles with ≥3 episodes, start a new block (re-discovery on remaining non-matched episodes) unless fewer than 2 remain or <code>MAX_OP_ED_BLOCKS</code> is reached.</li>
+            <li><strong>Bridge episode (optional):</strong> if the episode before the fail streak has exactly one of OP/ED matched, the next block tries a retro match for the missing kind without overriding an existing match and without using that episode in discovery seeds.</li>
           </ul>
           <span class="badge badge--sqlite">SQLite write</span>
         </li>
@@ -499,11 +502,8 @@
           <span class="badge badge--sqlite">SQLite write</span>
         </li>
         <li>
-          Remove fingerprint files referenced in DB, then scan
-          <code>data/op-ed/fingerprints/</code> and delete any <code>.fp</code> whose key stem
-          matches any episode path hash for that title (catches orphans).
-          <span class="badge badge--disk">Disk read</span> directory listing.
-          <span class="badge badge--disk">Disk write</span> deletes.
+          Chromaprint files under <code>data/op-ed/fingerprints/</code> are left on disk so
+          a later Detect OP/ED or Fingerprint audio pass can reuse them.
         </li>
       </ol>
     </section>

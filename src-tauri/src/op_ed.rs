@@ -41,7 +41,10 @@ const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
 const SEED_MATCH_THRESHOLD: f32 = 0.82;
 const MAX_SEED_EPISODES: usize = 10;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
+/// Consecutive per-kind match misses that indicate a new OP/ED block (e.g. season change).
 const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
+/// Upper bound on discovery/match blocks per kind (avoids unbounded re-scan on bad data).
+const MAX_OP_ED_BLOCKS: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentKind {
@@ -189,53 +192,6 @@ fn directory_size(path: &Path) -> Result<u64, String> {
         }
     }
     Ok(total)
-}
-
-fn episode_path_cache_keys(conn: &Connection, anime_id: i64) -> Result<HashSet<String>, String> {
-    let mut stmt = conn
-        .prepare("SELECT path FROM episodes WHERE anime_id = ?1 AND missing = 0")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![anime_id], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-    let mut keys = HashSet::new();
-    for row in rows {
-        let path = row.map_err(|e| e.to_string())?;
-        let path_buf = normalized_video_path(&path)?;
-        keys.insert(cache_key(&path_buf)?);
-    }
-    Ok(keys)
-}
-
-/// Remove cached `.fp` files for this anime's episodes (including keys never stored in SQLite).
-fn purge_fingerprint_cache_for_anime(conn: &Connection, anime_id: i64) -> Result<(), String> {
-    let path_keys = episode_path_cache_keys(conn, anime_id)?;
-    if path_keys.is_empty() {
-        return Ok(());
-    }
-    let cache_dir = fingerprint_cache_dir()?;
-    if !cache_dir.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(&cache_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("fp") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let belongs_to_anime = path_keys.iter().any(|key| {
-            stem == key.as_str()
-                || stem.starts_with(&format!("{key}_"))
-                || stem.contains(&format!("_{key}_"))
-        });
-        if belongs_to_anime {
-            let _ = fs::remove_file(&path);
-        }
-    }
-    Ok(())
 }
 
 pub fn op_ed_job_identity(anime_id: i64) -> String {
@@ -747,12 +703,23 @@ fn discovery_steps_per_kind(episode_count: usize) -> u32 {
     episode_count.min(MAX_SEED_EPISODES) as u32 + 2
 }
 
+fn max_detection_blocks(episode_count: usize) -> u32 {
+    if episode_count < 2 {
+        return 1;
+    }
+    let by_streak =
+        (episode_count / FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED).saturating_add(1) as u32;
+    by_streak.min(MAX_OP_ED_BLOCKS)
+}
+
 fn op_ed_detect_total_steps(episode_count: usize) -> u32 {
     if episode_count < 2 {
         // Starting + OP skip + ED skip + Done
         return 4;
     }
-    let per_kind = discovery_steps_per_kind(episode_count) + episode_count as u32;
+    let blocks = max_detection_blocks(episode_count);
+    let per_kind_block = discovery_steps_per_kind(episode_count) + episode_count as u32;
+    let per_kind = per_kind_block * blocks;
     // Starting + (discovery + per-episode match) × 2 kinds + Done
     1 + per_kind * 2 + 1
 }
@@ -964,9 +931,44 @@ impl DetectContext<'_> {
         })
     }
 
-    fn segment_is_terminal(&self, episode_id: i64, kind: SegmentKind) -> Result<bool, String> {
+    fn segment_is_matched(&self, episode_id: i64, kind: SegmentKind) -> Result<bool, String> {
         self.db
-            .with_conn(|conn| segment_is_terminal(conn, episode_id, kind))
+            .with_conn(|conn| segment_has_status(conn, episode_id, kind, "matched"))
+    }
+
+    fn segment_skip_in_match_pass(
+        &self,
+        episode_id: i64,
+        kind: SegmentKind,
+    ) -> Result<bool, String> {
+        self.db.with_conn(|conn| {
+            let status: Option<String> = conn
+                .query_row(
+                    "SELECT status FROM episode_op_ed_segments WHERE episode_id = ?1 AND kind = ?2",
+                    params![episode_id, kind.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            Ok(matches!(
+                status.as_deref(),
+                Some("matched") | Some("skipped")
+            ))
+        })
+    }
+
+    /// True when exactly one of OP/ED is matched on this episode (season-bridge edge case).
+    fn episode_has_single_kind_match(&self, episode_id: i64) -> Result<bool, String> {
+        let count: i64 = self.db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM episode_op_ed_segments
+                 WHERE episode_id = ?1 AND status = 'matched'",
+                params![episode_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())
+        })?;
+        Ok(count == 1)
     }
 
     fn insert_template(
@@ -1088,10 +1090,11 @@ fn insert_template(
     Ok(conn.last_insert_rowid())
 }
 
-fn segment_is_terminal(
+fn segment_has_status(
     conn: &Connection,
     episode_id: i64,
     kind: SegmentKind,
+    expected: &str,
 ) -> Result<bool, String> {
     let status: Option<String> = conn
         .query_row(
@@ -1101,16 +1104,51 @@ fn segment_is_terminal(
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    Ok(matches!(
-        status.as_deref(),
-        Some("matched") | Some("not_found") | Some("skipped")
-    ))
+    Ok(status.as_deref() == Some(expected))
+}
+
+fn record_episode_match_result(
+    ctx: &DetectContext<'_>,
+    ep: &EpisodeRow,
+    kind: SegmentKind,
+    template_id: i64,
+    candidate_key: &str,
+    matched: Option<TemplateMatch>,
+    search_pass: &str,
+) -> Result<(), String> {
+    if let Some(m) = matched {
+        ctx.upsert_segment_status(
+            ep.id,
+            kind,
+            OpEdSegmentStatus::Matched,
+            Some(m.start_sec),
+            Some(m.end_sec),
+            Some(f64::from(m.confidence)),
+            Some(template_id),
+            search_pass,
+            Some(candidate_key),
+            None,
+        )?;
+    } else {
+        ctx.upsert_segment_status(
+            ep.id,
+            kind,
+            OpEdSegmentStatus::NotFound,
+            None,
+            None,
+            None,
+            Some(template_id),
+            search_pass,
+            None,
+            None,
+        )?;
+    }
+    Ok(())
 }
 
 fn run_kind_detection(
     ctx: &DetectContext<'_>,
     kind: SegmentKind,
-    block_index: i32,
     step: &mut u32,
     step_total: u32,
 ) -> Result<(), String> {
@@ -1142,152 +1180,298 @@ fn run_kind_detection(
         return Ok(());
     }
 
-    let seed_result = discover_repeated_seed(episodes, kind, ctx.cancel, &mut |label| tick(label))?;
-    let Some((seed, source_ids)) = seed_result else {
-        tick(&format!(
-            "{} discovery: no repeated segment found",
-            kind.display_name()
-        ));
-        if episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
-            ctx.mark_no_op_ed()?;
-        }
-        for ep in episodes {
-            if !ctx.segment_is_terminal(ep.id, kind)? {
-                ctx.upsert_segment_status(
-                    ep.id,
-                    kind,
-                    OpEdSegmentStatus::NotFound,
-                    None,
-                    None,
-                    None,
-                    None,
-                    "seed",
-                    None,
-                    None,
-                )?;
-            }
-        }
-        return Ok(());
-    };
+    let max_blocks = max_detection_blocks(episodes.len());
+    let mut block_index = 0i32;
+    let mut bridge_episode_id: Option<i64> = None;
 
-    tick(&format!(
-        "{} discovery: building template",
-        kind.display_name()
-    ));
-
-    let source_path = episodes
-        .iter()
-        .find(|e| e.id == seed.episode_id)
-        .map(|e| e.path.as_str())
-        .ok_or("seed episode not found")?;
-    let seed_duration = ctx
-        .episodes
-        .iter()
-        .find(|e| e.id == seed.episode_id)
-        .map(|e| ctx.episode_duration(e))
-        .transpose()?
-        .unwrap_or(0.0);
-    let (template_fp, template_key) = build_template_fingerprint(
-        source_path,
-        seed.start_sec,
-        seed_duration,
-        ctx.cancel,
-    )?;
-    let template_id = ctx.insert_template(
-        kind,
-        block_index,
-        seed.start_sec,
-        SEGMENT_DURATION_SEC,
-        1.0,
-        &template_key,
-        &source_ids,
-    )?;
-
-    let mut fail_streak = 0usize;
-    let mut done = 0u32;
-    let total = episodes.len() as u32;
-
-    for ep in episodes {
+    loop {
         if ctx.cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
         }
-        if ctx.segment_is_terminal(ep.id, kind)? {
-            done += 1;
-            continue;
+
+        let seed_pool: Vec<EpisodeRow> = episodes
+            .iter()
+            .filter(|ep| {
+                ctx.segment_is_matched(ep.id, kind)
+                    .map(|matched| !matched)
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+
+        if seed_pool.len() < 2 {
+            if block_index == 0 {
+                tick(&format!(
+                    "{} discovery: no repeated segment found",
+                    kind.display_name()
+                ));
+                if episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
+                    ctx.mark_no_op_ed()?;
+                }
+                for ep in episodes {
+                    if !ctx.segment_is_matched(ep.id, kind)? {
+                        ctx.upsert_segment_status(
+                            ep.id,
+                            kind,
+                            OpEdSegmentStatus::NotFound,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "seed",
+                            None,
+                            None,
+                        )?;
+                    }
+                }
+            }
+            break;
         }
 
-        ctx.upsert_segment_status(
-            ep.id,
-            kind,
-            OpEdSegmentStatus::Analyzing,
-            None,
-            None,
-            None,
-            Some(template_id),
-            "optimistic",
-            None,
-            None,
-        )?;
-
-        let duration = ctx.episode_duration(ep)?;
-        let (search_start, search_end) = ctx.optimistic_search_range(kind, duration);
-        let (full_start, full_end) = ctx.full_search_range(duration);
-
-        let extract_len = full_episode_extract_len(duration);
-        let (candidate_key, candidate_fp) = ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
-
-        let mut matched =
-            find_best_match_in_candidate(&template_fp, &candidate_fp, search_start, search_end);
-        let mut search_pass = "optimistic";
-
-        if matched.is_none() {
-            matched =
-                find_best_match_in_candidate(&template_fp, &candidate_fp, full_start, full_end);
-            search_pass = "full";
+        if block_index > 0 {
+            tick(&format!(
+                "{} block {}: discovering new segment",
+                kind.display_name(),
+                block_index + 1
+            ));
         }
 
-        done += 1;
+        let seed_result =
+            discover_repeated_seed(&seed_pool, kind, ctx.cancel, &mut |label| tick(label))?;
+        let Some((seed, source_ids)) = seed_result else {
+            tick(&format!(
+                "{} block {}: no repeated segment in remaining episodes",
+                kind.display_name(),
+                block_index + 1
+            ));
+            if block_index == 0 && episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
+                ctx.mark_no_op_ed()?;
+            }
+            for ep in &seed_pool {
+                if !ctx.segment_is_matched(ep.id, kind)? {
+                    ctx.upsert_segment_status(
+                        ep.id,
+                        kind,
+                        OpEdSegmentStatus::NotFound,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "seed",
+                        None,
+                        None,
+                    )?;
+                }
+            }
+            break;
+        };
+
         tick(&format!(
-            "{} match: episode {}/{}",
+            "{} block {}: building template",
             kind.display_name(),
-            done,
-            total
+            block_index + 1
         ));
 
-        if let Some(m) = matched {
-            fail_streak = 0;
-            ctx.upsert_segment_status(
-                ep.id,
-                kind,
-                OpEdSegmentStatus::Matched,
-                Some(m.start_sec),
-                Some(m.end_sec),
-                Some(f64::from(m.confidence)),
-                Some(template_id),
-                search_pass,
-                Some(&candidate_key),
-                None,
-            )?;
-        } else {
-            fail_streak += 1;
-            ctx.upsert_segment_status(
-                ep.id,
-                kind,
-                OpEdSegmentStatus::NotFound,
-                None,
-                None,
-                None,
-                Some(template_id),
-                search_pass,
-                None,
-                None,
-            )?;
-            if fail_streak >= FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED
-                && episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED
+        let source_path = episodes
+            .iter()
+            .find(|e| e.id == seed.episode_id)
+            .map(|e| e.path.as_str())
+            .ok_or("seed episode not found")?;
+        let seed_duration = episodes
+            .iter()
+            .find(|e| e.id == seed.episode_id)
+            .map(|e| ctx.episode_duration(e))
+            .transpose()?
+            .unwrap_or(0.0);
+        let (template_fp, template_key) = build_template_fingerprint(
+            source_path,
+            seed.start_sec,
+            seed_duration,
+            ctx.cancel,
+        )?;
+        let template_id = ctx.insert_template(
+            kind,
+            block_index,
+            seed.start_sec,
+            SEGMENT_DURATION_SEC,
+            1.0,
+            &template_key,
+            &source_ids,
+        )?;
+
+        if let Some(bridge_id) = bridge_episode_id.take() {
+            if ctx.episode_has_single_kind_match(bridge_id)?
+                && !ctx.segment_is_matched(bridge_id, kind)?
             {
-                break;
+                if let Some(bridge_ep) = episodes.iter().find(|e| e.id == bridge_id) {
+                    tick(&format!(
+                        "{} block {}: bridge episode retro match",
+                        kind.display_name(),
+                        block_index + 1
+                    ));
+                    ctx.upsert_segment_status(
+                        bridge_id,
+                        kind,
+                        OpEdSegmentStatus::Analyzing,
+                        None,
+                        None,
+                        None,
+                        Some(template_id),
+                        "bridge",
+                        None,
+                        None,
+                    )?;
+                    let duration = ctx.episode_duration(bridge_ep)?;
+                    let (search_start, search_end) =
+                        ctx.optimistic_search_range(kind, duration);
+                    let (full_start, full_end) = ctx.full_search_range(duration);
+                    let extract_len = full_episode_extract_len(duration);
+                    let (candidate_key, candidate_fp) =
+                        ensure_episode_fingerprint(&bridge_ep.path, 0.0, extract_len)?;
+                    let mut matched = find_best_match_in_candidate(
+                        &template_fp,
+                        &candidate_fp,
+                        search_start,
+                        search_end,
+                    );
+                    let mut search_pass = "bridge";
+                    if matched.is_none() {
+                        matched = find_best_match_in_candidate(
+                            &template_fp,
+                            &candidate_fp,
+                            full_start,
+                            full_end,
+                        );
+                        search_pass = "bridge_full";
+                    }
+                    record_episode_match_result(
+                        ctx,
+                        bridge_ep,
+                        kind,
+                        template_id,
+                        &candidate_key,
+                        matched,
+                        search_pass,
+                    )?;
+                }
             }
         }
+
+        let mut fail_streak = 0usize;
+        let mut fail_streak_start_id: Option<i64> = None;
+        let mut done = 0u32;
+        let total = episodes.len() as u32;
+        let mut block_transition = false;
+
+        for ep in episodes {
+            if ctx.cancel.load(Ordering::Relaxed) {
+                return Err("OP/ED detection cancelled".to_string());
+            }
+            if ctx.segment_skip_in_match_pass(ep.id, kind)? {
+                done += 1;
+                continue;
+            }
+
+            ctx.upsert_segment_status(
+                ep.id,
+                kind,
+                OpEdSegmentStatus::Analyzing,
+                None,
+                None,
+                None,
+                Some(template_id),
+                "optimistic",
+                None,
+                None,
+            )?;
+
+            let duration = ctx.episode_duration(ep)?;
+            let extract_len = full_episode_extract_len(duration);
+            let (candidate_key, candidate_fp) =
+                ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
+
+            let (search_start, search_end) = ctx.optimistic_search_range(kind, duration);
+            let mut matched = find_best_match_in_candidate(
+                &template_fp,
+                &candidate_fp,
+                search_start,
+                search_end,
+            );
+            let mut search_pass = "optimistic";
+
+            if matched.is_none() {
+                let (full_start, full_end) = ctx.full_search_range(duration);
+                matched =
+                    find_best_match_in_candidate(&template_fp, &candidate_fp, full_start, full_end);
+                search_pass = "full";
+            }
+
+            done += 1;
+            tick(&format!(
+                "{} block {} match: episode {}/{}",
+                kind.display_name(),
+                block_index + 1,
+                done,
+                total
+            ));
+
+            if matched.is_some() {
+                fail_streak = 0;
+                fail_streak_start_id = None;
+                record_episode_match_result(
+                    ctx,
+                    ep,
+                    kind,
+                    template_id,
+                    &candidate_key,
+                    matched,
+                    search_pass,
+                )?;
+            } else {
+                if fail_streak == 0 {
+                    fail_streak_start_id = Some(ep.id);
+                }
+                fail_streak += 1;
+                record_episode_match_result(
+                    ctx,
+                    ep,
+                    kind,
+                    template_id,
+                    &candidate_key,
+                    None,
+                    search_pass,
+                )?;
+                if fail_streak >= FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED
+                    && episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED
+                {
+                    if let Some(first_fail_id) = fail_streak_start_id {
+                        bridge_episode_id = episodes
+                            .iter()
+                            .position(|e| e.id == first_fail_id)
+                            .and_then(|pos| pos.checked_sub(1))
+                            .map(|pos| episodes[pos].id);
+                    }
+                    block_transition = true;
+                    break;
+                }
+            }
+        }
+
+        if block_transition {
+            let still_unmatched = episodes
+                .iter()
+                .filter(|ep| {
+                    ctx.segment_is_matched(ep.id, kind)
+                        .map(|m| !m)
+                        .unwrap_or(true)
+                })
+                .count();
+            if still_unmatched >= 2 && (block_index + 1) < max_blocks as i32 {
+                block_index += 1;
+                continue;
+            }
+        }
+        break;
     }
 
     Ok(())
@@ -1347,13 +1531,13 @@ pub fn run_op_ed_detect_job(
     };
 
     tick("Starting OP/ED detection");
-    run_kind_detection(&ctx, SegmentKind::Op, 0, &mut step, total_steps)?;
+    run_kind_detection(&ctx, SegmentKind::Op, &mut step, total_steps)?;
 
     if cancel.load(Ordering::Relaxed) {
         return Err("OP/ED detection cancelled".to_string());
     }
 
-    run_kind_detection(&ctx, SegmentKind::Ed, 0, &mut step, total_steps)?;
+    run_kind_detection(&ctx, SegmentKind::Ed, &mut step, total_steps)?;
 
     db.with_conn(|conn| {
         conn.execute(
@@ -1368,29 +1552,9 @@ pub fn run_op_ed_detect_job(
     Ok(())
 }
 
+/// Clears OP/ED templates and per-episode segment rows for a title. Chromaprint cache
+/// files under `data/op-ed/fingerprints/` are kept so re-detection can reuse them.
 pub fn reset_anime_op_ed_analysis(conn: &Connection, anime_id: i64) -> Result<(), String> {
-    let keys: Vec<String> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT fingerprint_cache_key FROM episode_op_ed_segments
-                 WHERE episode_id IN (SELECT id FROM episodes WHERE anime_id = ?1)
-                   AND fingerprint_cache_key IS NOT NULL
-                 UNION
-                 SELECT fingerprint_cache_key FROM op_ed_templates WHERE anime_id = ?1",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![anime_id], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
-        let mut keys = Vec::new();
-        for row in rows {
-            if let Ok(k) = row {
-                keys.push(k);
-            }
-        }
-        keys
-    };
-
     conn.execute(
         "DELETE FROM episode_op_ed_segments
          WHERE episode_id IN (SELECT id FROM episodes WHERE anime_id = ?1)",
@@ -1408,13 +1572,6 @@ pub fn reset_anime_op_ed_analysis(conn: &Connection, anime_id: i64) -> Result<()
         params![anime_id],
     )
     .map_err(|e| e.to_string())?;
-
-    for key in keys {
-        if let Ok(path) = fingerprint_path(&key) {
-            let _ = fs::remove_file(path);
-        }
-    }
-    purge_fingerprint_cache_for_anime(conn, anime_id)?;
     Ok(())
 }
 
