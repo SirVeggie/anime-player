@@ -275,10 +275,8 @@ view components. Per-screen UI lives in `src/components/`:
   full-episode Chromaprint cache used during matching. **Detect OP/ED** reuses cached
   fingerprints when present; otherwise it enqueues the same chroma jobs and queues
   detection with those jobs as prerequisites (reusing jobs already running from an
-  earlier fingerprint pass). Building the full-episode fingerprint also
-  writes discovery slice caches (120 Chromaprint frames, stepped every 60 frames) for
-  the first/last ~3 minutes so detection scans slices from disk instead of re-running
-  ffmpeg per window. Optimistic search windows run before a full-episode pass for
+  earlier fingerprint pass). Discovery slides 15s windows by slicing the in-memory
+  full-episode fingerprint (no per-window cache files). Optimistic search windows run before a full-episode pass for
   failed episodes. Titles with multiple OP/ED sets in one folder (e.g. two seasons
   merged) use **block detection**: after three consecutive per-kind match failures,
   discovery re-runs on episodes not yet `matched` for that kind (`op_ed_templates.block_index`

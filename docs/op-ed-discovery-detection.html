@@ -359,8 +359,8 @@
           <strong>Slide 15s windows</strong>
           Within the region, extract fingerprints every 7.5s (half of <code>SEED_WINDOW_SEC</code>):
           offsets 0, 7.5, 15, … while <code>offset + 15 ≤ extract_len</code>.
-          Each window → <code>ensure_episode_fingerprint(path, start+offset, 15)</code>
-          (cache / ffmpeg / fpcalc as above). Collect <code>SeedCandidate</code> entries.
+          Load the full-episode fingerprint once per episode (disk cache / ffmpeg / fpcalc),
+          then slice each window in memory. Collect <code>SeedCandidate</code> entries.
         </li>
         <li>
           <strong>Cluster by cross-episode similarity</strong>

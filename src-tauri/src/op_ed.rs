@@ -455,13 +455,6 @@ fn full_episode_extract_len(duration_sec: f64) -> f64 {
     duration_sec.max(SEGMENT_DURATION_SEC + 1.0)
 }
 
-fn discovery_slice_cache_key(file_hash: &str, start_frame: usize) -> String {
-    format!(
-        "cp{}_{}_sf{}_w{}",
-        ANALYSIS_VERSION, file_hash, start_frame, SEED_WINDOW_FRAMES
-    )
-}
-
 fn slice_fingerprint(
     src: &Fingerprint,
     start_frame: usize,
@@ -474,51 +467,6 @@ fn slice_fingerprint(
     Some(Fingerprint {
         values: src.values[start_frame..end].to_vec(),
     })
-}
-
-/// Write discovery-sized slices for OP/ED search regions (idempotent).
-fn save_discovery_slices(
-    full: &Fingerprint,
-    file_hash: &str,
-    duration_sec: f64,
-) -> Result<(), String> {
-    let total = full.frame_count();
-    if total < SEED_WINDOW_FRAMES {
-        return Ok(());
-    }
-
-    let op_region_end = frames_for_seconds(OP_SEARCH_SEC.min(duration_sec)).min(total);
-    save_discovery_slices_in_range(full, file_hash, 0, op_region_end)?;
-
-    let tail_frames = frames_for_seconds(ED_TAIL_SEC.min(duration_sec)).min(total);
-    let ed_region_start = total.saturating_sub(tail_frames);
-    save_discovery_slices_in_range(full, file_hash, ed_region_start, total)?;
-
-    Ok(())
-}
-
-fn save_discovery_slices_in_range(
-    full: &Fingerprint,
-    file_hash: &str,
-    region_start: usize,
-    region_end: usize,
-) -> Result<(), String> {
-    let region_end = region_end.min(full.frame_count());
-    if region_end < region_start + SEED_WINDOW_FRAMES {
-        return Ok(());
-    }
-
-    let mut start_frame = region_start;
-    while start_frame + SEED_WINDOW_FRAMES <= region_end {
-        let key = discovery_slice_cache_key(file_hash, start_frame);
-        if load_fingerprint(&key)?.is_none() {
-            if let Some(slice) = slice_fingerprint(full, start_frame, SEED_WINDOW_FRAMES) {
-                save_fingerprint(&key, &slice)?;
-            }
-        }
-        start_frame += SEED_STEP_FRAMES;
-    }
-    Ok(())
 }
 
 fn save_fingerprint(cache_key: &str, fp: &Fingerprint) -> Result<(), String> {
@@ -576,41 +524,11 @@ fn ensure_episode_fingerprint(
         (duration_sec * 1000.0) as i64
     );
     if let Some(fp) = load_fingerprint(&key)? {
-        if start_sec <= f64::EPSILON {
-            if let Ok(file_hash) = cache_key(&path_buf) {
-                let _ = save_discovery_slices(&fp, &file_hash, duration_sec);
-            }
-        }
         return Ok((key, fp));
     }
     let fp = extract_fingerprint_from_file(&path_buf, start_sec, duration_sec, &key)?;
     save_fingerprint(&key, &fp)?;
-    if start_sec <= f64::EPSILON {
-        if let Ok(file_hash) = cache_key(&path_buf) {
-            save_discovery_slices(&fp, &file_hash, duration_sec)?;
-        }
-    }
     Ok((key, fp))
-}
-
-/// Slice a cached discovery window, building the parent full fingerprint if needed.
-fn load_discovery_slice(
-    file_hash: &str,
-    full: &Fingerprint,
-    start_frame: usize,
-) -> Result<Fingerprint, String> {
-    let key = discovery_slice_cache_key(file_hash, start_frame);
-    if let Some(fp) = load_fingerprint(&key)? {
-        return Ok(fp);
-    }
-    let slice = slice_fingerprint(full, start_frame, SEED_WINDOW_FRAMES).ok_or_else(|| {
-        format!(
-            "discovery slice at frame {start_frame} is out of range ({} frames)",
-            full.frame_count()
-        )
-    })?;
-    save_fingerprint(&key, &slice)?;
-    Ok(slice)
 }
 
 /// Fingerprint for an arbitrary time range by slicing the full-episode cache when possible.
@@ -753,8 +671,6 @@ fn discover_repeated_seed(
             probe_duration(&path)?
         };
         let full_extract_len = full_episode_extract_len(duration);
-        let path_buf = normalized_video_path(&ep.path)?;
-        let file_hash = cache_key(&path_buf)?;
         let (_, full) = ensure_episode_fingerprint(&ep.path, 0.0, full_extract_len)?;
         let total_frames = full.frame_count();
         let (region_start, region_end) = match kind {
@@ -779,7 +695,12 @@ fn discover_repeated_seed(
             if cancel.load(Ordering::Relaxed) {
                 return Err("OP/ED detection cancelled".to_string());
             }
-            let fp = load_discovery_slice(&file_hash, &full, start_frame)?;
+            let fp = slice_fingerprint(&full, start_frame, SEED_WINDOW_FRAMES).ok_or_else(|| {
+                format!(
+                    "discovery slice at frame {start_frame} is out of range ({} frames)",
+                    full.frame_count()
+                )
+            })?;
             seeds.push(SeedCandidate {
                 start_sec: seconds_for_frames(start_frame),
                 episode_id: ep.id,
