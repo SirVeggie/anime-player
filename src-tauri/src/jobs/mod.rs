@@ -28,12 +28,22 @@ impl JobsState {
 
 #[cfg(windows)]
 fn wake_job_pump(app: AppHandle) {
-    let Some(jobs_state) = app.try_state::<JobsState>() else {
-        return;
-    };
-    if let Ok(mut guard) = jobs_state.manager.lock() {
+    let now_ms = manager::now_ms();
+    tauri::async_runtime::spawn(async move {
+        let refresh = tauri::async_runtime::spawn_blocking(move || {
+            crate::disk_volume::refresh_disk_busy_cache(now_ms);
+        });
+        if refresh.await.is_err() {
+            return;
+        }
+        let Some(jobs_state) = app.try_state::<JobsState>() else {
+            return;
+        };
+        let Ok(mut guard) = jobs_state.manager.lock() else {
+            return;
+        };
         guard.on_chroma_stagger_wakeup();
-    };
+    });
 }
 
 #[cfg(windows)]
@@ -178,12 +188,22 @@ pub fn jobs_set_scrub_sprite_priority_for_paths(
 
 #[cfg(windows)]
 fn complete_worker_task(app: AppHandle, job_id: String, outcome: WorkerOutcome) {
-    let Some(jobs_state) = app.try_state::<JobsState>() else {
-        return;
-    };
-    if let Ok(mut guard) = jobs_state.manager.lock() {
+    let now_ms = manager::now_ms();
+    tauri::async_runtime::spawn(async move {
+        let refresh = tauri::async_runtime::spawn_blocking(move || {
+            crate::disk_volume::refresh_disk_busy_cache(now_ms);
+        });
+        if refresh.await.is_err() {
+            return;
+        }
+        let Some(jobs_state) = app.try_state::<JobsState>() else {
+            return;
+        };
+        let Ok(mut guard) = jobs_state.manager.lock() else {
+            return;
+        };
         guard.complete_worker(&job_id, outcome);
-    };
+    });
 }
 
 #[cfg(windows)]

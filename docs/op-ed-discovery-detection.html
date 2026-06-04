@@ -227,7 +227,9 @@
         <li>
           <strong>“Fingerprint audio” (optional pre-pass)</strong>
           Enqueues one <code>op_ed_chroma</code> job per episode (resource type <code>chroma</code>,
-          staggered ≥1s apart on HDD). Each job calls
+          deferred on HDD until <code>PercentDiskTime</code> &lt; 50% (WMI + performance counter),
+          with ≥500ms between starts on the same volume and a 3s fallback when busy cannot be read).
+          Each job calls
           <code>run_episode_chroma_fingerprint</code> → full-episode fingerprint cache only.
           <span class="badge badge--sqlite">SQLite</span> list episodes.
           <span class="badge badge--disk">Disk</span> read/write <code>.fp</code> cache.

@@ -37,7 +37,6 @@ const DEFAULT_MAX_PARALLEL: u32 = 5;
 const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
 const DEFAULT_CHROMA_MAX_PARALLEL: u32 = 4;
 const MAX_PARALLEL_CAP: u32 = 20;
-const CHROMA_START_STAGGER_MS: u64 = 2000;
 const HISTORY_CAP: usize = 200;
 
 const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
@@ -45,7 +44,7 @@ const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
 
 static JOB_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -84,9 +83,9 @@ pub struct JobManager {
     records: HashMap<String, JobRecord>,
     identity_to_id: HashMap<String, String>,
     history: VecDeque<JobView>,
-    /// Wall-clock ms when the most recent chroma job was started (for HDD stagger).
-    last_chroma_start_ms: Option<u64>,
-    chroma_stagger_wakeup_armed: bool,
+    /// Last chroma start time per volume key (`G:/`) for HDD deferral gaps.
+    last_chroma_start_on_volume: HashMap<String, u64>,
+    chroma_disk_poll_wakeup_armed: bool,
 }
 
 impl JobManager {
@@ -101,8 +100,8 @@ impl JobManager {
             records: HashMap::new(),
             identity_to_id: HashMap::new(),
             history: VecDeque::new(),
-            last_chroma_start_ms: None,
-            chroma_stagger_wakeup_armed: false,
+            last_chroma_start_on_volume: HashMap::new(),
+            chroma_disk_poll_wakeup_armed: false,
         }
     }
 
@@ -709,32 +708,39 @@ impl JobManager {
         })
     }
 
-    fn chroma_job_requires_start_stagger(&self, job_id: &str) -> bool {
-        let Some(path) = self.chroma_episode_path(job_id) else {
-            return true;
-        };
-        disk_volume::path_requires_chroma_stagger(path)
+    fn last_chroma_start_ms_for_path(&self, path: &str) -> Option<u64> {
+        let volume = disk_volume::volume_key_for_path(path)?;
+        self.last_chroma_start_on_volume.get(&volume).copied()
     }
 
-    fn chroma_stagger_remaining_ms(&self) -> u64 {
-        let Some(last) = self.last_chroma_start_ms else {
-            return 0;
-        };
-        let elapsed = now_ms().saturating_sub(last);
-        CHROMA_START_STAGGER_MS.saturating_sub(elapsed)
-    }
-
-    fn is_chroma_stagger_blocked(&self, job_id: &str) -> bool {
+    fn is_chroma_disk_busy_blocked(&self, job_id: &str) -> bool {
         let Some(record) = self.records.get(job_id) else {
-            return true;
+            return false;
         };
         if record.view.resource_type != JobResourceType::Chroma {
             return false;
         }
-        if !self.chroma_job_requires_start_stagger(job_id) {
+        let Some(path) = self.chroma_episode_path(job_id) else {
+            return false;
+        };
+        if !disk_volume::path_requires_chroma_stagger(path) {
             return false;
         }
-        self.chroma_stagger_remaining_ms() > 0
+        disk_volume::chroma_start_deferred(
+            path,
+            self.last_chroma_start_ms_for_path(path),
+            now_ms(),
+        )
+    }
+
+    fn record_chroma_volume_start(&mut self, path: &str) {
+        if !disk_volume::path_requires_chroma_stagger(path) {
+            return;
+        }
+        if let Some(volume) = disk_volume::volume_key_for_path(path) {
+            self.last_chroma_start_on_volume
+                .insert(volume, now_ms());
+        }
     }
 
     /// Global cap applies to low/medium only (high may bypass). Resource-type caps apply to all.
@@ -761,34 +767,47 @@ impl JobManager {
         if !self.can_start_without_stagger(job_id) {
             return false;
         }
-        !self.is_chroma_stagger_blocked(job_id)
+        !self.is_chroma_disk_busy_blocked(job_id)
     }
 
-    fn has_queued_chroma_blocked_by_stagger(&self) -> bool {
-        if self.chroma_stagger_remaining_ms() == 0 {
-            return false;
-        }
+    fn has_queued_chroma_blocked_by_disk_busy(&self) -> bool {
         self.queued_ids.iter().any(|id| {
             self.records.get(id).is_some_and(|r| {
                 r.view.resource_type == JobResourceType::Chroma
                     && r.view.status == JobStatus::Queued
-                    && self.chroma_job_requires_start_stagger(id)
                     && self.can_start_without_stagger(id)
+                    && self.is_chroma_disk_busy_blocked(id)
             })
         })
     }
 
-    fn schedule_chroma_stagger_wakeup_if_needed(&mut self) {
-        if self.chroma_stagger_wakeup_armed || !self.has_queued_chroma_blocked_by_stagger() {
+    fn schedule_chroma_disk_poll_if_needed(&mut self) {
+        if self.chroma_disk_poll_wakeup_armed || !self.has_queued_chroma_blocked_by_disk_busy() {
             return;
         }
-        let delay_ms = self.chroma_stagger_remaining_ms().max(1);
-        self.chroma_stagger_wakeup_armed = true;
+        let now = now_ms();
+        let delay_ms = self
+            .queued_ids
+            .iter()
+            .filter_map(|id| {
+                let path = self.chroma_episode_path(id)?;
+                if !self.is_chroma_disk_busy_blocked(id) {
+                    return None;
+                }
+                Some(disk_volume::chroma_defer_retry_ms(
+                    path,
+                    self.last_chroma_start_ms_for_path(path),
+                    now,
+                ))
+            })
+            .min()
+            .unwrap_or(disk_volume::CHROMA_HDD_POLL_MS);
+        self.chroma_disk_poll_wakeup_armed = true;
         super::schedule_job_pump_after_ms(&self.app, delay_ms);
     }
 
     pub fn on_chroma_stagger_wakeup(&mut self) {
-        self.chroma_stagger_wakeup_armed = false;
+        self.chroma_disk_poll_wakeup_armed = false;
         self.pump();
         self.emit_snapshot();
     }
@@ -813,13 +832,16 @@ impl JobManager {
     /// Low/medium jobs respect `max_parallel` against **all** running jobs (including high).
     /// High-priority jobs bypass the global cap but not per-resource-type caps.
     fn pump(&mut self) {
+        // Disk busy cache is refreshed on a blocking thread before pump when possible; refresh
+        // here only if pump runs inline (e.g. enqueue) and the cache is stale.
+        disk_volume::refresh_disk_busy_cache(now_ms());
         loop {
             let Some(next_id) = self.pick_startable_queued_id() else {
                 break;
             };
             self.start_job(&next_id);
         }
-        self.schedule_chroma_stagger_wakeup_if_needed();
+        self.schedule_chroma_disk_poll_if_needed();
     }
 
     fn pick_startable_queued_id(&self) -> Option<String> {
@@ -836,11 +858,9 @@ impl JobManager {
     }
 
     fn start_job(&mut self, job_id: &str) {
-        let track_chroma_stagger = self.chroma_job_requires_start_stagger(job_id)
-            && self
-                .records
-                .get(job_id)
-                .is_some_and(|r| r.view.resource_type == JobResourceType::Chroma);
+        let chroma_path = self
+            .chroma_episode_path(job_id)
+            .map(str::to_string);
         let Some(record) = self.records.get_mut(job_id) else {
             return;
         };
@@ -848,18 +868,18 @@ impl JobManager {
             return;
         }
         record.view.status = JobStatus::Running;
-        let started_at = now_ms();
-        record.view.started_at = Some(started_at);
+        record.view.started_at = Some(now_ms());
         record.view.step_label = "Starting".to_string();
-        if track_chroma_stagger {
-            self.last_chroma_start_ms = Some(started_at);
-        }
         self.queued_ids.retain(|id| id != job_id);
 
         let cancel = record.cancel.clone();
         let kind = record.kind.clone();
         let job_id_owned = job_id.to_string();
         let app = self.app.clone();
+
+        if let Some(path) = chroma_path.as_deref() {
+            self.record_chroma_volume_start(path);
+        }
 
         match kind {
             JobKind::ScrubSprite { path } => {

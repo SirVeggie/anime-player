@@ -67,14 +67,17 @@ view components. Per-screen UI lives in `src/components/`:
   still be joined by a seventh high job). Jobs also have a **resource type**
   (`none` by default; scrub thumbnails use `ffmpeg`) with its own max-parallel
   limit (`jobs_max_parallel_type_ffmpeg`, default 1; `jobs_max_parallel_type_chroma`,
-  default 4 for OP/ED pre-fingerprint jobs). Chroma job starts are staggered by
-  2 seconds on rotational volumes (`disk_volume.rs` queries `MSFT_PhysicalDisk.MediaType`
-  via WMI, with a PowerShell fallback); SSD volumes skip stagger; unknown classification
-  keeps stagger enabled. A job starts only when
+  default 4 for OP/ED pre-fingerprint jobs). On rotational volumes, new chroma jobs wait
+  until `PercentDiskTime` for that drive is below 50% (one cached WMI sample for all drives,
+  refreshed at most every 500ms on a background thread), with at least 500ms between starts
+  on the same volume, and a 3s gap when busy cannot be read; the scheduler polls while deferred.
+  SSD/NVMe paths skip deferral.
+  Rotational classification uses `MSFT_PhysicalDisk.MediaType` via WMI (PowerShell fallback);
+  unknown media type keeps deferral enabled. A job starts only when
   both caps allow it: low/medium respect `min(global, type)`; high bypasses the
   global cap but **not** the type cap. While a queued **medium** job can start,
-  **low** jobs wait; a medium job that is blocked (prerequisites, caps, chroma
-  stagger) does not hold low jobs back. Jobs may list **prerequisite job ids**;
+  **low** jobs wait; a medium job that is blocked (prerequisites, caps, disk-busy
+  deferral on HDD) does not hold low jobs back. Jobs may list **prerequisite job ids**;
   a queued job stays blocked until every prerequisite finishes successfully (failed
   or canceled prerequisites fail the dependent). Each job has a short numeric
   `#id` in the UI. Jobs dedupe by `identity`, support cancel/cancel-all,
