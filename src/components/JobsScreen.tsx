@@ -241,7 +241,7 @@ function JobRow(props: {
             {job.completionMessage ? <span>{job.completionMessage}</span> : null}
           </p>
         : null}
-        {job.prerequisiteTotal > 0 ?
+        {job.prerequisitePending > 0 ?
           <div className="job-row-prerequisites">
             <span className="muted">Waiting for</span>
             {job.waitingFor.map((prereq) => (
@@ -249,9 +249,9 @@ function JobRow(props: {
                 #{prereq.shortId}
               </span>
             ))}
-            {job.prerequisiteTotal > job.waitingFor.length ?
+            {job.prerequisitePending > job.waitingFor.length ?
               <span className="job-prerequisite-pill">
-                +{job.prerequisiteTotal - job.waitingFor.length} more
+                +{job.prerequisitePending - job.waitingFor.length} more
               </span>
             : null}
           </div>

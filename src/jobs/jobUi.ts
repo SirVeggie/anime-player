@@ -1,5 +1,10 @@
 import type { JobRecord } from "../types";
 
+function prerequisitePendingCount(job: JobRecord): number {
+  if (job.prerequisitePending > 0) return job.prerequisitePending;
+  return job.waitingFor.length;
+}
+
 export function jobStepProgressPercent(job: JobRecord): number {
   if (job.progress.totalSteps <= 0) return 0;
   return Math.round((job.progress.currentStep / job.progress.totalSteps) * 100);
@@ -7,7 +12,7 @@ export function jobStepProgressPercent(job: JobRecord): number {
 
 export function jobPrerequisiteProgressPercent(job: JobRecord): number {
   if (job.prerequisiteTotal <= 0) return 0;
-  const completed = job.prerequisiteTotal - job.waitingFor.length;
+  const completed = job.prerequisiteTotal - prerequisitePendingCount(job);
   return Math.round((completed / job.prerequisiteTotal) * 100);
 }
 

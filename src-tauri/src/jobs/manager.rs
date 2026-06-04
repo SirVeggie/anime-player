@@ -40,7 +40,7 @@ const MAX_PARALLEL_CAP: u32 = 20;
 const HISTORY_CAP: usize = 200;
 /// Coalesce rapid `jobs://updated` emissions so the WebView is not flooded during parallel work.
 const SNAPSHOT_EMIT_MIN_INTERVAL_MS: u64 = 250;
-/// Cap prerequisite pills in emitted snapshots (full count stays in `prerequisite_total`).
+/// Cap prerequisite pills in emitted snapshots (`prerequisite_pending` stays accurate).
 const SNAPSHOT_WAITING_FOR_CAP: usize = 8;
 
 const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
@@ -228,7 +228,9 @@ impl JobManager {
 
     fn view_with_waiting_for(&self, record: &JobRecord) -> JobView {
         let mut view = record.view.clone();
-        let mut waiting_for = self.pending_prerequisites(record);
+        let pending = self.pending_prerequisites(record);
+        view.prerequisite_pending = pending.len() as u32;
+        let mut waiting_for = pending;
         if waiting_for.len() > SNAPSHOT_WAITING_FOR_CAP {
             waiting_for.truncate(SNAPSHOT_WAITING_FOR_CAP);
         }
@@ -514,6 +516,7 @@ impl JobManager {
             finished_at: None,
             waiting_for: Vec::new(),
             prerequisite_total: 0,
+            prerequisite_pending: 0,
         };
         let record = JobRecord {
             view,
@@ -648,6 +651,7 @@ impl JobManager {
             finished_at: None,
             waiting_for: Vec::new(),
             prerequisite_total: 0,
+            prerequisite_pending: 0,
         };
         let record = JobRecord {
             view,
@@ -751,6 +755,7 @@ impl JobManager {
             finished_at: None,
             waiting_for: Vec::new(),
             prerequisite_total: 0,
+            prerequisite_pending: 0,
         };
         let record = JobRecord {
             view,
