@@ -68,9 +68,9 @@ view components. Per-screen UI lives in `src/components/`:
   (`none` by default; scrub thumbnails use `ffmpeg`) with its own max-parallel
   limit (`jobs_max_parallel_type_ffmpeg`, default 1; `jobs_max_parallel_type_chroma`,
   default 4 for OP/ED pre-fingerprint jobs). Chroma job starts are staggered by
-  2 seconds on rotational volumes (`disk_volume.rs` uses storage IOCTL when available,
-  otherwise `Get-PhysicalDisk` via PowerShell); SSD volumes skip stagger; unknown
-  classification keeps stagger enabled. A job starts only when
+  2 seconds on rotational volumes (`disk_volume.rs` queries `MSFT_PhysicalDisk.MediaType`
+  via WMI, with a PowerShell fallback); SSD volumes skip stagger; unknown classification
+  keeps stagger enabled. A job starts only when
   both caps allow it: low/medium respect `min(global, type)`; high bypasses the
   global cap but **not** the type cap. Jobs may list **prerequisite job ids**;
   a queued job stays blocked until every prerequisite finishes successfully (failed
