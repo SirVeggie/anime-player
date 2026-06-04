@@ -28,11 +28,12 @@ export function findActiveOpEdJob(
   animeId: number,
 ): JobRecord | null {
   if (!snapshot) return null;
-  const identity = opEdJobIdentity(animeId);
+  const legacy = opEdJobIdentity(animeId);
+  const batchPrefix = `${legacy}:`;
   return (
     snapshot.active.find(
       (job) =>
-        job.identity === identity &&
+        (job.identity === legacy || job.identity.startsWith(batchPrefix)) &&
         (job.status === "queued" || job.status === "running"),
     ) ?? null
   );

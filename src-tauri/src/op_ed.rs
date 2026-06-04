@@ -39,7 +39,7 @@ const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
 const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
 const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
 const SEED_MATCH_THRESHOLD: f32 = 0.82;
-const MAX_SEED_EPISODES: usize = 10;
+const MAX_SEED_EPISODES: usize = 12;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
 /// Consecutive per-kind match misses that indicate a new OP/ED block (e.g. season change).
 const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
@@ -207,6 +207,28 @@ pub fn op_ed_job_identity(anime_id: i64) -> String {
     format!("{JOB_NAME}:{anime_id}")
 }
 
+/// Batched detect jobs use `op_ed_detect:{anime_id}:{batch_index}`.
+pub fn op_ed_detect_batch_job_identity(anime_id: i64, batch_index: usize) -> String {
+    format!("{JOB_NAME}:{anime_id}:{batch_index}")
+}
+
+pub fn op_ed_detect_job_identity_prefix(anime_id: i64) -> String {
+    format!("{JOB_NAME}:{anime_id}:")
+}
+
+/// Episodes per detect job when fingerprinting a full season (progressive results).
+pub const OP_ED_DETECT_BATCH_SIZE: usize = 12;
+
+#[derive(Debug, Clone, Copy)]
+pub struct OpEdDetectJobOptions {
+    /// Reuse templates already in SQLite (batch 2+), falling back to discovery when needed.
+    pub continue_templates: bool,
+    /// Reset `no_op_ed` and ensure pending segment rows for every episode in the title.
+    pub init_anime_state: bool,
+    /// Set `op_ed_analyzed_at` when this batch finishes (last batch only).
+    pub mark_analyzed: bool,
+}
+
 const CHROMA_JOB_NAME: &str = "op_ed_chroma";
 
 pub fn op_ed_chroma_job_identity(episode_id: i64) -> String {
@@ -260,25 +282,9 @@ pub fn full_episode_fingerprint_cached(ep: &OpEdEpisode) -> Result<bool, String>
     Ok(load_fingerprint(&key)?.is_some())
 }
 
-/// Cache probe for job enqueue: skips `canonicalize` when duration is already known.
+/// Same key as chroma / detect (`normalized_video_path` + `cache_key`); used before queueing jobs.
 pub fn full_episode_fingerprint_cached_for_enqueue(ep: &OpEdEpisode) -> Result<bool, String> {
-    if ep.duration_seconds <= 0.0 {
-        return full_episode_fingerprint_cached(ep);
-    }
-    let path_buf = Path::new(&ep.path);
-    if !path_buf.is_file() {
-        return Ok(false);
-    }
-    let file_hash = cache_key(path_buf)?;
-    let extract_len = full_episode_extract_len(ep.duration_seconds);
-    let key = format!(
-        "cp{}_{}_{}_{}",
-        ANALYSIS_VERSION,
-        file_hash,
-        0_i64,
-        (extract_len * 1000.0) as i64
-    );
-    Ok(load_fingerprint(&key)?.is_some())
+    full_episode_fingerprint_cached(ep)
 }
 
 /// Pre-compute the full-episode Chromaprint fingerprint for one episode.
@@ -952,8 +958,15 @@ struct DetectContext<'a> {
     db: &'a AppDatabase,
     anime_id: i64,
     episodes: &'a [EpisodeRow],
+    continue_templates: bool,
     cancel: &'a AtomicBool,
     on_progress: &'a dyn Fn(u32, u32, &str),
+}
+
+struct ExistingKindTemplate {
+    template_id: i64,
+    template_fp: Fingerprint,
+    block_index: i32,
 }
 
 impl DetectContext<'_> {
@@ -1090,6 +1103,36 @@ impl DetectContext<'_> {
     }
 }
 
+fn load_latest_kind_template(
+    ctx: &DetectContext<'_>,
+    kind: SegmentKind,
+) -> Result<Option<ExistingKindTemplate>, String> {
+    ctx.db.with_conn(|conn| {
+        let row: Option<(i64, i32, String)> = conn
+            .query_row(
+                "SELECT id, block_index, fingerprint_cache_key FROM op_ed_templates
+                 WHERE anime_id = ?1 AND kind = ?2
+                 ORDER BY block_index DESC, id DESC
+                 LIMIT 1",
+                params![ctx.anime_id, kind.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((template_id, block_index, fp_key)) = row else {
+            return Ok(None);
+        };
+        let Some(template_fp) = load_fingerprint(&fp_key)? else {
+            return Ok(None);
+        };
+        Ok(Some(ExistingKindTemplate {
+            template_id,
+            template_fp,
+            block_index,
+        }))
+    })
+}
+
 fn load_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<EpisodeRow>, String> {
     let mut stmt = conn
         .prepare(
@@ -1112,6 +1155,49 @@ fn load_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<EpisodeRow>, St
         out.push(row.map_err(|e| e.to_string())?);
     }
     Ok(out)
+}
+
+/// Subset of a title's episodes (in library order) for one detect batch.
+pub fn load_episodes_for_detect(
+    conn: &Connection,
+    anime_id: i64,
+    episode_ids: &[i64],
+) -> Result<Vec<EpisodeRow>, String> {
+    let all = load_episodes(conn, anime_id)?;
+    if episode_ids.is_empty() {
+        return Ok(all);
+    }
+    let wanted: std::collections::HashSet<i64> = episode_ids.iter().copied().collect();
+    Ok(all
+        .into_iter()
+        .filter(|ep| wanted.contains(&ep.id))
+        .collect())
+}
+
+fn ensure_pending_segments_for_anime(conn: &Connection, anime_id: i64) -> Result<(), String> {
+    let episodes = load_episodes(conn, anime_id)?;
+    for ep in &episodes {
+        for kind in [SegmentKind::Op, SegmentKind::Ed] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM episode_op_ed_segments WHERE episode_id = ?1 AND kind = ?2",
+                    params![ep.id, kind.as_str()],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?
+                .is_some();
+            if !exists {
+                conn.execute(
+                    "INSERT INTO episode_op_ed_segments (episode_id, kind, status)
+                     VALUES (?1, ?2, 'pending')",
+                    params![ep.id, kind.as_str()],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn insert_template(
@@ -1239,6 +1325,7 @@ fn run_kind_detection(
     let max_blocks = max_detection_blocks(episodes.len());
     let mut block_index = 0i32;
     let mut bridge_episode_id: Option<i64> = None;
+    let mut try_reuse_templates = ctx.continue_templates;
 
     loop {
         if ctx.cancel.load(Ordering::Relaxed) {
@@ -1255,7 +1342,11 @@ fn run_kind_detection(
             .cloned()
             .collect();
 
-        if seed_pool.len() < 2 {
+        let can_match_with_saved_template = try_reuse_templates
+            && block_index == 0
+            && load_latest_kind_template(ctx, kind)?.is_some();
+
+        if seed_pool.len() < 2 && !can_match_with_saved_template {
             if block_index == 0 {
                 tick(&format!(
                     "{} discovery: no repeated segment found",
@@ -1284,76 +1375,95 @@ fn run_kind_detection(
             break;
         }
 
-        if block_index > 0 {
-            tick(&format!(
-                "{} block {}: discovering new segment",
-                kind.display_name(),
-                block_index + 1
-            ));
-        }
-
-        let seed_result =
-            discover_repeated_seed(&seed_pool, kind, ctx.cancel, &mut |label| tick(label))?;
-        let Some((seed, source_ids)) = seed_result else {
-            tick(&format!(
-                "{} block {}: no repeated segment in remaining episodes",
-                kind.display_name(),
-                block_index + 1
-            ));
-            if block_index == 0 && episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
-                ctx.mark_no_op_ed()?;
-            }
-            for ep in &seed_pool {
-                if !ctx.segment_is_matched(ep.id, kind)? {
-                    ctx.upsert_segment_status(
-                        ep.id,
-                        kind,
-                        OpEdSegmentStatus::NotFound,
-                        None,
-                        None,
-                        None,
-                        None,
-                        "seed",
-                        None,
-                        None,
-                    )?;
+        let template_bundle: Option<(Fingerprint, i64)> = 'template: {
+            if try_reuse_templates && block_index == 0 {
+                try_reuse_templates = false;
+                if let Some(existing) = load_latest_kind_template(ctx, kind)? {
+                    tick(&format!(
+                        "{} block {}: reusing saved template",
+                        kind.display_name(),
+                        existing.block_index + 1
+                    ));
+                    block_index = existing.block_index;
+                    break 'template Some((existing.template_fp, existing.template_id));
                 }
             }
+
+            if block_index > 0 {
+                tick(&format!(
+                    "{} block {}: discovering new segment",
+                    kind.display_name(),
+                    block_index + 1
+                ));
+            }
+
+            let seed_result =
+                discover_repeated_seed(&seed_pool, kind, ctx.cancel, &mut |label| tick(label))?;
+            let Some((seed, source_ids)) = seed_result else {
+                tick(&format!(
+                    "{} block {}: no repeated segment in remaining episodes",
+                    kind.display_name(),
+                    block_index + 1
+                ));
+                if block_index == 0 && episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
+                    ctx.mark_no_op_ed()?;
+                }
+                for ep in &seed_pool {
+                    if !ctx.segment_is_matched(ep.id, kind)? {
+                        ctx.upsert_segment_status(
+                            ep.id,
+                            kind,
+                            OpEdSegmentStatus::NotFound,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "seed",
+                            None,
+                            None,
+                        )?;
+                    }
+                }
+                break 'template None;
+            };
+
+            tick(&format!(
+                "{} block {}: building template",
+                kind.display_name(),
+                block_index + 1
+            ));
+
+            let source_path = episodes
+                .iter()
+                .find(|e| e.id == seed.episode_id)
+                .map(|e| e.path.as_str())
+                .ok_or("seed episode not found")?;
+            let seed_duration = episodes
+                .iter()
+                .find(|e| e.id == seed.episode_id)
+                .map(|e| ctx.episode_duration(e))
+                .transpose()?
+                .unwrap_or(0.0);
+            let (template_fp, template_key) = build_template_fingerprint(
+                source_path,
+                seed.start_sec,
+                seed_duration,
+                ctx.cancel,
+            )?;
+            let template_id = ctx.insert_template(
+                kind,
+                block_index,
+                seed.start_sec,
+                SEGMENT_DURATION_SEC,
+                1.0,
+                &template_key,
+                &source_ids,
+            )?;
+            break 'template Some((template_fp, template_id));
+        };
+        let Some((template_fp, template_id)) = template_bundle else {
             break;
         };
-
-        tick(&format!(
-            "{} block {}: building template",
-            kind.display_name(),
-            block_index + 1
-        ));
-
-        let source_path = episodes
-            .iter()
-            .find(|e| e.id == seed.episode_id)
-            .map(|e| e.path.as_str())
-            .ok_or("seed episode not found")?;
-        let seed_duration = episodes
-            .iter()
-            .find(|e| e.id == seed.episode_id)
-            .map(|e| ctx.episode_duration(e))
-            .transpose()?
-            .unwrap_or(0.0);
-        let (template_fp, template_key) = build_template_fingerprint(
-            source_path,
-            seed.start_sec,
-            seed_duration,
-            ctx.cancel,
-        )?;
-        let template_id = ctx.insert_template(
-            kind,
-            block_index,
-            seed.start_sec,
-            SEGMENT_DURATION_SEC,
-            1.0,
-            &template_key,
-            &source_ids,
-        )?;
 
         if let Some(bridge_id) = bridge_episode_id.take() {
             if ctx.episode_has_single_kind_match(bridge_id)?
@@ -1525,10 +1635,12 @@ fn run_kind_detection(
 pub fn run_op_ed_detect_job(
     db: &AppDatabase,
     anime_id: i64,
+    episode_ids: &[i64],
+    options: OpEdDetectJobOptions,
     cancel: &AtomicBool,
     on_step: impl Fn(u32, u32, &str),
 ) -> Result<(), String> {
-    let episodes = db.with_conn(|conn| load_episodes(conn, anime_id))?;
+    let episodes = db.with_conn(|conn| load_episodes_for_detect(conn, anime_id, episode_ids))?;
     let total_steps = op_ed_detect_total_steps(episodes.len());
     let mut step = 1u32;
     let mut tick = |label: &str| {
@@ -1536,41 +1648,22 @@ pub fn run_op_ed_detect_job(
         step += 1;
     };
 
-    db.with_conn(|conn| {
-        conn.execute(
-            "UPDATE anime SET no_op_ed = 0, op_ed_analysis_version = ?2 WHERE id = ?1",
-            params![anime_id, ANALYSIS_VERSION],
-        )
-        .map_err(|e| e.to_string())?;
-
-        for ep in &episodes {
-            for kind in [SegmentKind::Op, SegmentKind::Ed] {
-                let exists: bool = conn
-                    .query_row(
-                        "SELECT 1 FROM episode_op_ed_segments WHERE episode_id = ?1 AND kind = ?2",
-                        params![ep.id, kind.as_str()],
-                        |_| Ok(true),
-                    )
-                    .optional()
-                    .map_err(|e| e.to_string())?
-                    .is_some();
-                if !exists {
-                    conn.execute(
-                        "INSERT INTO episode_op_ed_segments (episode_id, kind, status)
-                         VALUES (?1, ?2, 'pending')",
-                        params![ep.id, kind.as_str()],
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-            }
-        }
-        Ok(())
-    })?;
+    if options.init_anime_state {
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE anime SET no_op_ed = 0, op_ed_analysis_version = ?2 WHERE id = ?1",
+                params![anime_id, ANALYSIS_VERSION],
+            )
+            .map_err(|e| e.to_string())?;
+            ensure_pending_segments_for_anime(conn, anime_id)
+        })?;
+    }
 
     let ctx = DetectContext {
         db,
         anime_id,
         episodes: &episodes,
+        continue_templates: options.continue_templates,
         cancel,
         on_progress: &on_step,
     };
@@ -1584,14 +1677,16 @@ pub fn run_op_ed_detect_job(
 
     run_kind_detection(&ctx, SegmentKind::Ed, &mut step, total_steps)?;
 
-    db.with_conn(|conn| {
-        conn.execute(
-            "UPDATE anime SET op_ed_analyzed_at = CURRENT_TIMESTAMP WHERE id = ?1",
-            params![anime_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })?;
+    if options.mark_analyzed {
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE anime SET op_ed_analyzed_at = CURRENT_TIMESTAMP WHERE id = ?1",
+                params![anime_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })?;
+    }
 
     on_step(total_steps, total_steps, "Done");
     Ok(())

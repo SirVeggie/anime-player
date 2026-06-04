@@ -274,6 +274,8 @@ pub fn spawn_op_ed_worker(
     app: AppHandle,
     job_id: String,
     anime_id: i64,
+    episode_ids: Vec<i64>,
+    options: op_ed::OpEdDetectJobOptions,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     tauri::async_runtime::spawn(async move {
@@ -281,9 +283,16 @@ pub fn spawn_op_ed_worker(
         let app_for_step = app.clone();
         let app_for_blocking = app.clone();
         let outcome = tauri::async_runtime::spawn_blocking(move || {
-            manager::run_op_ed_job_worker(&app_for_blocking, anime_id, &cancel, |step, total, label| {
-                notify_job_step(&app_for_step, &job_id_for_step, step, total, label);
-            })
+            manager::run_op_ed_job_worker(
+                &app_for_blocking,
+                anime_id,
+                episode_ids,
+                options,
+                &cancel,
+                |step, total, label| {
+                    notify_job_step(&app_for_step, &job_id_for_step, step, total, label);
+                },
+            )
         })
         .await;
 

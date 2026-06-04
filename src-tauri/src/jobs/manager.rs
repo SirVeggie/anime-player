@@ -9,7 +9,10 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::AppDatabase;
 use crate::disk_volume;
-use crate::op_ed::{self, op_ed_chroma_job_identity, op_ed_job_identity, OpEdEpisode};
+use crate::op_ed::{
+    self, op_ed_chroma_job_identity, op_ed_detect_batch_job_identity, op_ed_detect_job_identity_prefix,
+    OpEdDetectJobOptions, OpEdEpisode, OP_ED_DETECT_BATCH_SIZE,
+};
 use crate::scrub_preview::{
     self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity, scrub_sprite_is_cached,
 };
@@ -65,9 +68,13 @@ enum JobKind {
     ScrubSprite { path: String },
     OpEdChroma {
         episode: OpEdEpisode,
+        /// Fingerprint was already on disk at job start — do not stagger the next chroma.
+        skip_volume_stagger: bool,
     },
     OpEdDetect {
         anime_id: i64,
+        episode_ids: Vec<i64>,
+        options: OpEdDetectJobOptions,
     },
 }
 
@@ -658,6 +665,7 @@ impl JobManager {
             cancel,
             kind: JobKind::OpEdChroma {
                 episode: ep.clone(),
+                skip_volume_stagger: false,
             },
             follow_ups: Vec::new(),
             prerequisite_job_ids: Vec::new(),
@@ -686,11 +694,17 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<EnqueueJobResult, String> {
-        let identity = op_ed_job_identity(request.anime_id);
-        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
-            if self.records.get(&existing_id).is_some_and(|r| {
-                matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
-            }) {
+        if self.has_active_op_ed_detect(request.anime_id) {
+            let prefix = op_ed_detect_job_identity_prefix(request.anime_id);
+            if let Some(existing_id) = self
+                .records
+                .iter()
+                .find(|(_, r)| {
+                    r.view.identity.starts_with(&prefix)
+                        && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+                })
+                .map(|(id, _)| id.clone())
+            {
                 if self.records.get(&existing_id).is_some_and(|r| {
                     r.view.status == JobStatus::Queued
                         && priority_rank(request.priority) > priority_rank(r.view.priority)
@@ -704,7 +718,7 @@ impl JobManager {
             }
         }
 
-        let desc = request
+        let title = request
             .anime_title
             .as_deref()
             .map(|t| t.trim())
@@ -713,7 +727,14 @@ impl JobManager {
             .unwrap_or_else(|| format!("Anime #{}", request.anime_id));
 
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
-        let mut prerequisite_job_ids = Vec::new();
+        if episodes.is_empty() {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult {
+                job_id: None,
+                skipped: true,
+            });
+        }
+        let mut chroma_job_by_episode: HashMap<i64, String> = HashMap::new();
         for ep in &episodes {
             if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
                 continue;
@@ -726,58 +747,93 @@ impl JobManager {
                 false,
             )?;
             if let Some(job_id) = chroma.job_id {
-                prerequisite_job_ids.push(job_id);
+                chroma_job_by_episode.insert(ep.id, job_id);
             }
         }
 
-        let (id, short_id) = alloc_job_ids();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let total_steps = 100;
-        let view = JobView {
-            id: id.clone(),
-            short_id,
-            name: "Detect OP/ED".to_string(),
-            desc,
-            identity: identity.clone(),
-            job_type: "op_ed_detect".to_string(),
-            resource_type: JobResourceType::None,
-            priority: request.priority,
-            status: JobStatus::Queued,
-            cancelable: true,
-            progress: JobProgress {
-                current_step: 0,
-                total_steps,
-            },
-            step_label: "Queued".to_string(),
-            completion_message: None,
-            created_at: now_ms(),
-            started_at: None,
-            finished_at: None,
-            waiting_for: Vec::new(),
-            prerequisite_total: 0,
-            prerequisite_pending: 0,
-        };
-        let record = JobRecord {
-            view,
-            cancel,
-            kind: JobKind::OpEdDetect {
-                anime_id: request.anime_id,
-            },
-            follow_ups: Vec::new(),
-            prerequisite_job_ids,
-        };
-        self.records.insert(id.clone(), record);
-        self.identity_to_id.insert(identity, id.clone());
+        let batches: Vec<Vec<i64>> = episodes
+            .chunks(OP_ED_DETECT_BATCH_SIZE)
+            .map(|chunk| chunk.iter().map(|ep| ep.id).collect())
+            .collect();
+        let batch_count = batches.len();
+        let mut last_detect_id: Option<String> = None;
+        let mut first_detect_id: Option<String> = None;
 
-        if request.priority == JobPriority::High {
-            self.try_start_or_queue(&id, true);
-        } else {
-            self.queued_ids.push(id.clone());
+        for (batch_index, episode_ids) in batches.into_iter().enumerate() {
+            let mut prerequisite_job_ids: Vec<String> = episode_ids
+                .iter()
+                .filter_map(|ep_id| chroma_job_by_episode.get(ep_id).cloned())
+                .collect();
+            if let Some(prev) = &last_detect_id {
+                prerequisite_job_ids.push(prev.clone());
+            }
+
+            let identity = op_ed_detect_batch_job_identity(request.anime_id, batch_index);
+            let (id, short_id) = alloc_job_ids();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let batch_label = format!(
+                "Detect OP/ED ({}/{})",
+                batch_index + 1,
+                batch_count
+            );
+            let view = JobView {
+                id: id.clone(),
+                short_id,
+                name: batch_label,
+                desc: title.clone(),
+                identity: identity.clone(),
+                job_type: "op_ed_detect".to_string(),
+                resource_type: JobResourceType::None,
+                priority: request.priority,
+                status: JobStatus::Queued,
+                cancelable: true,
+                progress: JobProgress {
+                    current_step: 0,
+                    total_steps: 100,
+                },
+                step_label: "Queued".to_string(),
+                completion_message: None,
+                created_at: now_ms(),
+                started_at: None,
+                finished_at: None,
+                waiting_for: Vec::new(),
+                prerequisite_total: 0,
+                prerequisite_pending: 0,
+            };
+            let options = OpEdDetectJobOptions {
+                continue_templates: batch_index > 0,
+                init_anime_state: batch_index == 0,
+                mark_analyzed: batch_index + 1 == batch_count,
+            };
+            let record = JobRecord {
+                view,
+                cancel,
+                kind: JobKind::OpEdDetect {
+                    anime_id: request.anime_id,
+                    episode_ids,
+                    options,
+                },
+                follow_ups: Vec::new(),
+                prerequisite_job_ids,
+            };
+            self.records.insert(id.clone(), record);
+            self.identity_to_id.insert(identity, id.clone());
+
+            if request.priority == JobPriority::High {
+                self.try_start_or_queue(&id, true);
+            } else {
+                self.queued_ids.push(id.clone());
+            }
+
+            if first_detect_id.is_none() {
+                first_detect_id = Some(id.clone());
+            }
+            last_detect_id = Some(id);
         }
 
         self.finish_op_ed_enqueue_batch();
         Ok(EnqueueJobResult {
-            job_id: Some(id),
+            job_id: first_detect_id,
             skipped: false,
         })
     }
@@ -816,7 +872,7 @@ impl JobManager {
 
     fn chroma_episode_path(&self, job_id: &str) -> Option<&str> {
         self.records.get(job_id).and_then(|r| match &r.kind {
-            JobKind::OpEdChroma { episode } => Some(episode.path.as_str()),
+            JobKind::OpEdChroma { episode, .. } => Some(episode.path.as_str()),
             _ => None,
         })
     }
@@ -854,6 +910,26 @@ impl JobManager {
             self.last_chroma_start_on_volume
                 .insert(volume, now_ms());
         }
+    }
+
+    /// Let the next chroma job on this volume start without waiting for the HDD gap.
+    fn release_chroma_volume_stagger(&mut self, path: &str) {
+        if !disk_volume::path_requires_chroma_stagger(path) {
+            return;
+        }
+        let Some(volume) = disk_volume::volume_key_for_path(path) else {
+            return;
+        };
+        let backdated = now_ms().saturating_sub(disk_volume::CHROMA_HDD_MIN_GAP_MS);
+        self.last_chroma_start_on_volume.insert(volume, backdated);
+    }
+
+    fn has_active_op_ed_detect(&self, anime_id: i64) -> bool {
+        let prefix = op_ed_detect_job_identity_prefix(anime_id);
+        self.records.values().any(|r| {
+            (r.view.identity.starts_with(&prefix) || r.view.identity == op_ed::op_ed_job_identity(anime_id))
+                && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+        })
     }
 
     /// Global cap applies to low/medium only (high may bypass). Resource-type caps apply to all.
@@ -985,9 +1061,23 @@ impl JobManager {
         if record.view.status != JobStatus::Queued {
             return;
         }
+        let chroma_cache_hit = matches!(&record.kind, JobKind::OpEdChroma { episode, .. } if {
+            op_ed::full_episode_fingerprint_cached_for_enqueue(episode).unwrap_or(false)
+        });
+        if let JobKind::OpEdChroma {
+            skip_volume_stagger,
+            ..
+        } = &mut record.kind
+        {
+            *skip_volume_stagger = chroma_cache_hit;
+        }
         record.view.status = JobStatus::Running;
         record.view.started_at = Some(now_ms());
-        record.view.step_label = "Starting".to_string();
+        record.view.step_label = if chroma_cache_hit {
+            "Cached fingerprint".to_string()
+        } else {
+            "Starting".to_string()
+        };
         self.queued_ids.retain(|id| id != job_id);
 
         let cancel = record.cancel.clone();
@@ -996,6 +1086,14 @@ impl JobManager {
         let app = self.app.clone();
 
         if let Some(path) = chroma_path.as_deref() {
+            if chroma_cache_hit {
+                self.release_chroma_volume_stagger(path);
+                self.complete_worker(
+                    job_id,
+                    WorkerOutcome::Done("Cached fingerprint".to_string(), None),
+                );
+                return;
+            }
             self.record_chroma_volume_start(path);
         }
 
@@ -1003,17 +1101,29 @@ impl JobManager {
             JobKind::ScrubSprite { path } => {
                 super::spawn_scrub_worker(app, job_id_owned, path, cancel);
             }
-            JobKind::OpEdChroma { episode } => {
+            JobKind::OpEdChroma { episode, .. } => {
                 super::spawn_op_ed_chroma_worker(app, job_id_owned, episode, cancel);
             }
-            JobKind::OpEdDetect { anime_id } => {
-                super::spawn_op_ed_worker(app, job_id_owned, anime_id, cancel);
+            JobKind::OpEdDetect {
+                anime_id,
+                episode_ids,
+                options,
+            } => {
+                super::spawn_op_ed_worker(app, job_id_owned, anime_id, episode_ids, options, cancel);
             }
         }
         self.emit_snapshot();
     }
 
     pub fn complete_worker(&mut self, job_id: &str, outcome: WorkerOutcome) {
+        let chroma_release_stagger = self.records.get(job_id).and_then(|r| match &r.kind {
+            JobKind::OpEdChroma {
+                episode,
+                skip_volume_stagger: true,
+            } => Some(episode.path.clone()),
+            _ => None,
+        });
+
         let scrub_path_for_emit = self.records.get(job_id).and_then(|r| match &r.kind {
             JobKind::ScrubSprite { path } => Some(path.clone()),
             JobKind::OpEdChroma { .. } | JobKind::OpEdDetect { .. } => None,
@@ -1060,6 +1170,10 @@ impl JobManager {
                 self.finish_job(job_id, JobStatus::Canceled, Some("Canceled".to_string()));
             }
         }
+        if let Some(path) = chroma_release_stagger {
+            self.release_chroma_volume_stagger(&path);
+        }
+
         self.pump();
         self.emit_snapshot();
     }
@@ -1130,6 +1244,8 @@ pub fn run_scrub_job_worker(
 pub fn run_op_ed_job_worker(
     app: &AppHandle,
     anime_id: i64,
+    episode_ids: Vec<i64>,
+    options: OpEdDetectJobOptions,
     cancel: &AtomicBool,
     on_step: impl Fn(u32, u32, &str),
 ) -> WorkerOutcome {
@@ -1137,8 +1253,8 @@ pub fn run_op_ed_job_worker(
         return WorkerOutcome::Canceled;
     }
     let db = app.state::<AppDatabase>();
-    match op_ed::run_op_ed_detect_job(&db, anime_id, cancel, on_step) {
-        Ok(()) => WorkerOutcome::Done("OP/ED analysis complete".to_string(), None),
+    match op_ed::run_op_ed_detect_job(&db, anime_id, &episode_ids, options, cancel, on_step) {
+        Ok(()) => WorkerOutcome::Done("OP/ED batch complete".to_string(), None),
         Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
         Err(e) => WorkerOutcome::Failed(e),
     }
