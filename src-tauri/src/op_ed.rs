@@ -16,7 +16,9 @@ use crate::media_tools::{
 
 pub const ANALYSIS_VERSION: i32 = 1;
 pub const SKIP_OP_ED_SETTING_KEY: &str = "skip_op_ed";
-const FINGERPRINT_DIR: &str = "op-ed-fingerprints";
+/// Parent folder under portable `data/` for all OP/ED artifacts.
+pub const OP_ED_DATA_DIR: &str = "op-ed";
+const FINGERPRINTS_SUBDIR: &str = "fingerprints";
 const JOB_NAME: &str = "op_ed_detect";
 
 pub const SAMPLE_RATE: u32 = 11025;
@@ -158,14 +160,84 @@ impl Fingerprint {
     }
 }
 
+fn op_ed_data_dir() -> Result<PathBuf, String> {
+    let dir = portable_data_dir()?.join(OP_ED_DATA_DIR);
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
+    Ok(dir)
+}
+
 fn fingerprint_cache_dir() -> Result<PathBuf, String> {
-    let dir = portable_data_dir()?.join(FINGERPRINT_DIR);
+    let dir = op_ed_data_dir()?.join(FINGERPRINTS_SUBDIR);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
     Ok(dir)
 }
 
 fn fingerprint_path(cache_key: &str) -> Result<PathBuf, String> {
     Ok(fingerprint_cache_dir()?.join(format!("{cache_key}.fp")))
+}
+
+fn directory_size(path: &Path) -> Result<u64, String> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut total = 0_u64;
+    for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        if metadata.is_dir() {
+            total += directory_size(&entry.path())?;
+        } else {
+            total += metadata.len();
+        }
+    }
+    Ok(total)
+}
+
+fn episode_path_cache_keys(conn: &Connection, anime_id: i64) -> Result<HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT path FROM episodes WHERE anime_id = ?1 AND missing = 0",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![anime_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut keys = HashSet::new();
+    for row in rows {
+        let path = row.map_err(|e| e.to_string())?;
+        let path_buf = normalized_video_path(&path)?;
+        keys.insert(cache_key(&path_buf)?);
+    }
+    Ok(keys)
+}
+
+/// Remove cached `.fp` files for this anime's episodes (including keys never stored in SQLite).
+fn purge_fingerprint_cache_for_anime(conn: &Connection, anime_id: i64) -> Result<(), String> {
+    let path_keys = episode_path_cache_keys(conn, anime_id)?;
+    if path_keys.is_empty() {
+        return Ok(());
+    }
+    let cache_dir = fingerprint_cache_dir()?;
+    if !cache_dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&cache_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("fp") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let belongs_to_anime = path_keys.iter().any(|key| {
+            stem == key.as_str() || stem.starts_with(&format!("{key}_"))
+        });
+        if belongs_to_anime {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    Ok(())
 }
 
 pub fn op_ed_job_identity(anime_id: i64) -> String {
@@ -1016,6 +1088,7 @@ pub fn reset_anime_op_ed_analysis(conn: &Connection, anime_id: i64) -> Result<()
             let _ = fs::remove_file(path);
         }
     }
+    purge_fingerprint_cache_for_anime(conn, anime_id)?;
     Ok(())
 }
 
@@ -1182,18 +1255,8 @@ pub fn list_referenced_op_ed_fingerprint_keys(conn: &Connection) -> Result<HashS
 }
 
 pub fn op_ed_cache_directory_size() -> Result<u64, String> {
-    let dir = fingerprint_cache_dir()?;
-    if !dir.is_dir() {
-        return Ok(0);
-    }
-    let mut total = 0u64;
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.path().is_file() {
-            total += entry.metadata().map(|m| m.len()).unwrap_or(0);
-        }
-    }
-    Ok(total)
+    let dir = portable_data_dir()?.join(OP_ED_DATA_DIR);
+    directory_size(&dir)
 }
 
 #[tauri::command]

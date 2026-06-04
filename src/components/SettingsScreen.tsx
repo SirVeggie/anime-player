@@ -177,7 +177,7 @@ export function SettingsScreen(props: {
             <strong>{localDataStats ? formatBytes(localDataStats.scrub_sprites_bytes) : "-"}</strong>
           </div>
           <div className="local-data-stat">
-            <span>OP/ED fingerprints</span>
+            <span>OP/ED cache</span>
             <strong>{localDataStats ? formatBytes(localDataStats.op_ed_fingerprints_bytes) : "-"}</strong>
           </div>
         </div>

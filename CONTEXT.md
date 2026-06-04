@@ -246,7 +246,7 @@ view components. Per-screen UI lives in `src/components/`:
 - **OP/ED detection** is manual per title: the episode page **Detect OP/ED** button
   enqueues a background job (`jobs_enqueue_op_ed_detect`, identity
   `op_ed_detect:{anime_id}`) that extracts mono PCM via ffmpeg, builds spectral
-  fingerprints under `data/op-ed-fingerprints/`, and stores templates plus
+  fingerprints under `data/op-ed/fingerprints/`, and stores templates plus
   per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
   `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
   saved rows. Optimistic search windows (first ~3 minutes / last ~3 minutes,
@@ -255,7 +255,8 @@ view components. Per-screen UI lives in `src/components/`:
   average-score threshold and consistency checks (enough strong frames plus a
   lower-quartile floor) before it can mark an episode segment as matched, which
   reduces false-positive skips on episodes without OP/ED. Title settings
-  **Reset OP/ED analysis** clears DB + cache. Global **Skip detected OP/ED**
+  **Reset OP/ED analysis** clears DB rows and all fingerprint cache files for
+  that title's episodes (not only keys recorded in SQLite). Global **Skip detected OP/ED**
   (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
   segments on `mpv://time-pos`.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
