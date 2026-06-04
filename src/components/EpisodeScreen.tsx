@@ -13,10 +13,10 @@ import {
 } from "../api";
 import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
+import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
 import {
   activeOpEdChromaJobs,
   findActiveOpEdJob,
-  jobProgressPercent,
   opEdSegmentLabel,
 } from "../opEd";
 import type {
@@ -1112,7 +1112,7 @@ export function EpisodeScreen(props: {
                 <span className="muted">
                   #{activeOpEdJob.shortId} {activeOpEdJob.stepLabel}
                 </span>
-                <span>{jobProgressPercent(activeOpEdJob)}%</span>
+                <span>{jobProgressBarPercent(activeOpEdJob)}%</span>
               </div>
               {activeOpEdJob.waitingFor.length > 0 ?
                 <div className="job-row-prerequisites">
@@ -1124,12 +1124,14 @@ export function EpisodeScreen(props: {
                   ))}
                 </div>
               : null}
-              <div className="job-progress-track" aria-hidden>
-                <div
-                  className="job-progress-fill"
-                  style={{ width: `${jobProgressPercent(activeOpEdJob)}%` }}
-                />
-              </div>
+              {shouldShowJobProgressBar(activeOpEdJob) ?
+                <div className="job-progress-track" aria-hidden>
+                  <div
+                    className="job-progress-fill"
+                    style={{ width: `${jobProgressBarPercent(activeOpEdJob)}%` }}
+                  />
+                </div>
+              : null}
               {activeOpEdJob.cancelable ?
                 <button type="button" onClick={() => void handleCancelOpEdJob()}>
                   Cancel

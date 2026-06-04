@@ -1,4 +1,5 @@
 import type { JobRecord, JobsSnapshot, OpEdSegmentInfo } from "./types";
+import { jobStepProgressPercent } from "./jobs/jobUi";
 import { formatTime } from "./utils";
 
 export function opEdJobIdentity(animeId: number): string {
@@ -38,8 +39,7 @@ export function findActiveOpEdJob(
 }
 
 export function jobProgressPercent(job: JobRecord): number {
-  if (job.progress.totalSteps <= 0) return 0;
-  return Math.round((job.progress.currentStep / job.progress.totalSteps) * 100);
+  return jobStepProgressPercent(job);
 }
 
 /** Time range for episode list OP/ED pills; null hides the pill for that kind. */

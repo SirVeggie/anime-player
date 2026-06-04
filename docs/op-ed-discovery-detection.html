@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OP/ED discovery &amp; detection — conceptual walkthrough</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2d3348;
+      --text: #e8eaef;
+      --muted: #9aa3b8;
+      --accent: #7c9cff;
+      --disk: #f0b429;
+      --sqlite: #5cdb95;
+      --ffmpeg: #ff6b6b;
+      --ffprobe: #ff9f43;
+      --fpcalc: #c77dff;
+      --memory: #6bcbef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    header {
+      padding: 2rem 2.5rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #161a24 0%, var(--bg) 100%);
+    }
+    header h1 { margin: 0 0 0.35rem; font-size: 1.65rem; font-weight: 600; }
+    header p { margin: 0; color: var(--muted); max-width: 52rem; }
+  main {
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 1.75rem 2.5rem 3rem;
+    }
+    h2 {
+      margin: 2.25rem 0 0.75rem;
+      font-size: 1.2rem;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.35rem;
+    }
+    h3 { margin: 1.5rem 0 0.5rem; font-size: 1.05rem; }
+    p, li { color: var(--text); }
+    li { margin: 0.35rem 0; }
+    a { color: var(--accent); }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1rem 0 1.5rem;
+      padding: 1rem;
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      vertical-align: middle;
+      margin-right: 0.25rem;
+    }
+    .badge--disk { background: rgba(240, 180, 41, 0.2); color: var(--disk); }
+    .badge--sqlite { background: rgba(92, 219, 149, 0.15); color: var(--sqlite); }
+    .badge--ffmpeg { background: rgba(255, 107, 107, 0.15); color: var(--ffmpeg); }
+    .badge--ffprobe { background: rgba(255, 159, 67, 0.15); color: var(--ffprobe); }
+    .badge--fpcalc { background: rgba(199, 125, 255, 0.15); color: var(--fpcalc); }
+    .badge--memory { background: rgba(107, 203, 239, 0.15); color: var(--memory); }
+    ol.steps {
+      counter-reset: step;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    ol.steps > li {
+      counter-increment: step;
+      position: relative;
+      padding: 1rem 1rem 1rem 3.25rem;
+      margin: 0.75rem 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    ol.steps > li::before {
+      content: counter(step);
+      position: absolute;
+      left: 1rem;
+      top: 1rem;
+      width: 1.75rem;
+      height: 1.75rem;
+      line-height: 1.75rem;
+      text-align: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      background: var(--accent);
+      color: var(--bg);
+      border-radius: 50%;
+    }
+    ol.steps li strong { display: block; margin-bottom: 0.25rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.75rem 0 1.25rem;
+      font-size: 0.9rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.65rem;
+      border: 1px solid var(--border);
+    }
+    th { background: #222633; color: var(--muted); font-weight: 600; }
+    td code, li code {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.88em;
+      background: #252a38;
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+    .flow {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.82rem;
+      background: #12151c;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .note {
+      border-left: 3px solid var(--accent);
+      padding: 0.65rem 1rem;
+      margin: 1rem 0;
+      background: rgba(124, 156, 255, 0.08);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    footer {
+      margin-top: 2.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OP/ED discovery &amp; detection</h1>
+    <p>
+      Conceptual step-by-step reference for the per-title opening/ending detector
+      (<code>src-tauri/src/op_ed.rs</code>). This is separate from library filename
+      scanning (<code>scanner.rs</code> / <code>rescan_library</code>).
+    </p>
+  </header>
+
+  <main>
+    <section id="legend">
+      <h2>Operation tags</h2>
+      <p>Steps below are tagged when they touch disk or spawn external tools:</p>
+      <div class="legend">
+        <span class="badge badge--disk">Disk read</span>
+        <span class="badge badge--disk">Disk write</span>
+        <span class="badge badge--sqlite">SQLite</span>
+        <span class="badge badge--ffmpeg">ffmpeg</span>
+        <span class="badge badge--ffprobe">ffprobe</span>
+        <span class="badge badge--fpcalc">fpcalc</span>
+        <span class="badge badge--memory">In-memory only</span>
+      </div>
+    </section>
+
+    <section id="goal">
+      <h2>What we are trying to find</h2>
+      <p>
+        For one anime title with multiple episode files, find audio segments that repeat
+        across episodes (typical OP ~90s near the start, ED ~90s near the end), build a
+        <strong>template fingerprint</strong> from the best candidate, then locate that
+        template in every episode with conservative matching so false skips are rare.
+      </p>
+      <p>
+        Results are stored in SQLite (<code>op_ed_templates</code>,
+        <code>episode_op_ed_segments</code>, <code>anime.no_op_ed</code>). Raw Chromaprint
+        vectors are cached on disk under <code>data/op-ed/fingerprints/*.fp</code>.
+      </p>
+    </section>
+
+    <section id="constants">
+      <h2>Key constants</h2>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Value</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ANALYSIS_VERSION</code></td><td>2</td><td>Invalidates fingerprint cache keys when logic changes</td></tr>
+          <tr><td><code>SAMPLE_RATE</code></td><td>11025 Hz</td><td>Mono PCM for ffmpeg decode and fpcalc</td></tr>
+          <tr><td><code>SEED_WINDOW_SEC</code></td><td>15 s</td><td>Short window slid during discovery</td></tr>
+          <tr><td><code>SEGMENT_DURATION_SEC</code></td><td>90 s</td><td>Template length and matched segment span</td></tr>
+          <tr><td><code>OP_SEARCH_SEC</code></td><td>180 s</td><td>First ~3 minutes searched for OP</td></tr>
+          <tr><td><code>ED_TAIL_SEC</code></td><td>180 s</td><td>Last ~3 minutes searched for ED</td></tr>
+          <tr><td><code>MAX_SEED_EPISODES</code></td><td>10</td><td>Cap on episodes used in discovery scan</td></tr>
+          <tr><td><code>SEED_MATCH_THRESHOLD</code></td><td>0.82</td><td>Pairwise similarity to cluster seed windows</td></tr>
+          <tr><td><code>MATCH_AVERAGE_THRESHOLD</code></td><td>0.84</td><td>Per-episode template match (average frame score)</td></tr>
+          <tr><td><code>MATCH_MIN_STRONG_FRAME_RATIO</code></td><td>0.60</td><td>Fraction of frames ≥ strong threshold</td></tr>
+          <tr><td><code>MATCH_MIN_LOWER_QUARTILE</code></td><td>0.78</td><td>Lower quartile of frame scores must clear floor</td></tr>
+          <tr><td><code>MIN_EPISODES_FOR_NO_OP_ED</code></td><td>3</td><td>Title may be marked “no OP/ED” after failed discovery</td></tr>
+          <tr><td><code>FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED</code></td><td>3</td><td>Stop matching remaining episodes after 3 consecutive misses</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="orchestration">
+      <h2>How the user triggers work (jobs)</h2>
+      <ol class="steps">
+        <li>
+          <strong>“Fingerprint audio” (optional pre-pass)</strong>
+          Enqueues one <code>op_ed_chroma</code> job per episode (resource type <code>chroma</code>,
+          staggered ≥1s apart on HDD). Each job calls
+          <code>run_episode_chroma_fingerprint</code> → full-episode fingerprint cache only.
+          <span class="badge badge--sqlite">SQLite</span> list episodes.
+          <span class="badge badge--disk">Disk</span> read/write <code>.fp</code> cache.
+          <span class="badge badge--ffprobe">ffprobe</span> if duration missing in DB.
+          <span class="badge badge--ffmpeg">ffmpeg</span> + <span class="badge badge--fpcalc">fpcalc</span> per uncached range.
+        </li>
+        <li>
+          <strong>“Detect OP/ED”</strong>
+          Enqueues <code>op_ed_detect</code> (identity <code>op_ed_detect:{anime_id}</code>,
+          resource type <code>ffmpeg</code>). Before starting, the job manager enqueues any
+          missing chroma jobs and sets them as <strong>prerequisites</strong> so detection
+          reuses full-episode fingerprints when chroma jobs finish first.
+          <span class="badge badge--sqlite">SQLite</span>
+          <span class="badge badge--disk">Disk</span> cache check per episode.
+        </li>
+        <li>
+          <strong>Worker thread</strong>
+          <code>run_op_ed_detect_job</code> runs on <code>spawn_blocking</code>. SQLite access is
+          kept to brief <code>with_conn</code> bursts; ffmpeg/ffprobe/fpcalc never run while
+          holding the DB mutex.
+        </li>
+      </ol>
+    </section>
+
+    <section id="fingerprint-pipeline">
+      <h2>Core building block: one audio fingerprint</h2>
+      <p>Almost every step eventually calls <code>ensure_episode_fingerprint(path, start_sec, duration_sec)</code>:</p>
+      <ol class="steps">
+        <li>
+          <strong>Resolve video path</strong>
+          <code>normalized_video_path</code> — canonical path must exist.
+          <span class="badge badge--disk">Disk read</span> stat + canonicalize.
+        </li>
+        <li>
+          <strong>Cache key</strong>
+          <code>cp{ANALYSIS_VERSION}_{file_hash}_{start_ms}_{duration_ms}</code> where
+          <code>file_hash</code> comes from path + size + mtime.
+          <span class="badge badge--disk">Disk read</span> metadata for hash.
+        </li>
+        <li>
+          <strong>Cache hit</strong>
+          If <code>data/op-ed/fingerprints/{key}.fp</code> exists, load signed Chromaprint
+          integers from the binary file and return.
+          <span class="badge badge--disk">Disk read</span>
+          <span class="badge badge--memory">In-memory only</span> thereafter.
+        </li>
+        <li>
+          <strong>Cache miss — decode audio</strong>
+          <code>extract_pcm_range</code> runs ffmpeg:
+          <code>-ss start -t duration -i video -vn -ac 1 -ar 11025 -f s16le</code> (stdout PCM).
+          <span class="badge badge--ffmpeg">ffmpeg</span>
+          <span class="badge badge--disk">Disk read</span> source video file.
+        </li>
+        <li>
+          <strong>Cache miss — fingerprint PCM</strong>
+          <code>pcm_to_chromaprint</code> writes a temporary <code>.s16le</code> under the
+          fingerprint cache dir, runs <code>fpcalc -raw -json -signed …</code>, deletes the temp file,
+          parses JSON fingerprint array.
+          <span class="badge badge--disk">Disk write</span> temp raw (deleted immediately after).
+          <span class="badge badge--fpcalc">fpcalc</span>
+        </li>
+        <li>
+          <strong>Persist cache</strong>
+          Save frame count + little-endian <code>i32</code> values to <code>{key}.fp</code>.
+          <span class="badge badge--disk">Disk write</span>
+        </li>
+      </ol>
+      <p class="note">
+        <strong>Duration lookup:</strong> If <code>episodes.duration_seconds</code> in SQLite is
+        already &gt; 0, ffprobe is skipped. Otherwise
+        <code>probe_duration</code> runs ffprobe on the file.
+        <span class="badge badge--ffprobe">ffprobe</span>
+        <span class="badge badge--disk">Disk read</span>
+      </p>
+    </section>
+
+    <section id="detect-job-start">
+      <h2>Detect job — initialization</h2>
+      <ol class="steps">
+        <li>
+          <strong>Load episodes</strong>
+          Non-missing episodes for the anime, ordered by episode number then path.
+          <span class="badge badge--sqlite">SQLite read</span>
+        </li>
+        <li>
+          <strong>Reset title flags</strong>
+          Set <code>no_op_ed = 0</code>, <code>op_ed_analysis_version = ANALYSIS_VERSION</code>.
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+        <li>
+          <strong>Ensure segment rows exist</strong>
+          Insert <code>episode_op_ed_segments</code> with status <code>pending</code> for OP and ED
+          if missing (preserves prior terminal rows on re-run).
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+        <li>
+          <strong>Run OP, then ED</strong>
+          <code>run_kind_detection</code> is called twice (OP block index 0, ED block index 0).
+          Progress steps are precomputed from episode count.
+        </li>
+      </ol>
+    </section>
+
+    <section id="discovery">
+      <h2>Phase A — Discovery (<code>discover_repeated_seed</code>)</h2>
+      <p>Goal: find a 15-second audio window that appears on multiple episodes before building the 90s template.</p>
+      <ol class="steps">
+        <li>
+          <strong>Seed pool</strong>
+          Take up to the first <code>MAX_SEED_EPISODES</code> (10) episodes. Need at least 2 episodes
+          or discovery is skipped.
+          <span class="badge badge--memory">In-memory only</span>
+        </li>
+        <li>
+          <strong>Per seed episode — choose search region</strong>
+          <ul>
+            <li><strong>OP:</strong> from t=0, length = min(duration, 180s).</li>
+            <li><strong>ED:</strong> last min(duration, 180s) of file.</li>
+          </ul>
+          Duration from DB or <span class="badge badge--ffprobe">ffprobe</span>.
+          Skip episode if region &lt; 20s (15s window + 5s margin).
+        </li>
+        <li>
+          <strong>Slide 15s windows</strong>
+          Within the region, extract fingerprints every 7.5s (half of <code>SEED_WINDOW_SEC</code>):
+          offsets 0, 7.5, 15, … while <code>offset + 15 ≤ extract_len</code>.
+          Each window → <code>ensure_episode_fingerprint(path, start+offset, 15)</code>
+          (cache / ffmpeg / fpcalc as above). Collect <code>SeedCandidate</code> entries.
+        </li>
+        <li>
+          <strong>Cluster by cross-episode similarity</strong>
+          For each candidate window A, compare to every other window B on a <em>different</em>
+          episode. Use <code>segment_fingerprint_similarity</code> (average per-frame Hamming
+          similarity on Chromaprint subfingerprints).
+          <span class="badge badge--memory">In-memory only</span>
+        </li>
+        <li>
+          <strong>Pick best cluster</strong>
+          Keep the seed whose cluster has the most distinct episode IDs with similarity ≥
+          <code>SEED_MATCH_THRESHOLD</code> (0.82). Need cluster size ≥ 2 or discovery fails.
+          <span class="badge badge--memory">In-memory only</span>
+        </li>
+      </ol>
+      <p class="note">
+        Discovery does <em>not</em> write templates yet; it only returns the winning seed’s
+        episode id, start time, and the list of supporting episode ids.
+      </p>
+    </section>
+
+    <section id="template">
+      <h2>Phase B — Build template</h2>
+      <ol class="steps">
+        <li>
+          <strong>If discovery failed</strong>
+          Mark all non-terminal segments <code>not_found</code> (search_pass <code>seed</code>).
+          If the title has ≥ 3 episodes, set <code>anime.no_op_ed = 1</code>.
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+        <li>
+          <strong>Extract 90s template fingerprint</strong>
+          From the seed episode at <code>seed.start_sec</code>, duration
+          <code>SEGMENT_DURATION_SEC</code> via <code>ensure_episode_fingerprint</code>.
+          <span class="badge badge--disk">Disk</span>
+          <span class="badge badge--ffmpeg">ffmpeg</span>
+          <span class="badge badge--fpcalc">fpcalc</span> on cache miss.
+        </li>
+        <li>
+          <strong>Insert template row</strong>
+          <code>op_ed_templates</code> stores kind (op/ed), start, duration 90s, confidence 1.0,
+          fingerprint cache key, JSON list of source episode ids.
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+      </ol>
+    </section>
+
+    <section id="matching">
+      <h2>Phase C — Per-episode matching</h2>
+      <p>For each episode (skipping rows already in a terminal status: matched / not_found / skipped):</p>
+      <ol class="steps">
+        <li>
+          <strong>Status → analyzing</strong>
+          Link segment to template id, search_pass initially <code>optimistic</code>.
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+        <li>
+          <strong>Load full-episode candidate fingerprint</strong>
+          Fingerprint from t=0 for <code>max(duration, 91s)</code> so the template can slide anywhere
+          needed. Reuses chroma pre-cache when the key matches the full-episode chroma job.
+          <span class="badge badge--disk">Disk</span>
+          <span class="badge badge--ffmpeg">ffmpeg</span>
+          <span class="badge badge--fpcalc">fpcalc</span> on miss.
+        </li>
+        <li>
+          <strong>Optimistic search pass</strong>
+          Slide the 90s template across candidate frames only inside:
+          <ul>
+            <li><strong>OP:</strong> first 180s (in frames).</li>
+            <li><strong>ED:</strong> last 180s.</li>
+          </ul>
+          For each offset, compute sliding average similarity; track best offset; then run
+          <code>match_quality_at_offset</code> (average, strong-frame ratio, lower quartile).
+          Accept only if all three thresholds pass.
+          <span class="badge badge--memory">In-memory only</span>
+        </li>
+        <li>
+          <strong>Full search pass (fallback)</strong>
+          If optimistic pass finds nothing, repeat sliding match over the entire episode duration.
+          search_pass → <code>full</code>.
+          <span class="badge badge--memory">In-memory only</span>
+        </li>
+        <li>
+          <strong>Record result</strong>
+          <ul>
+            <li><strong>Matched:</strong> store start/end seconds, confidence, template id, candidate fp key.</li>
+            <li><strong>Not found:</strong> increment fail streak; after 3 consecutive failures on titles with ≥3 episodes, stop processing further episodes for this kind.</li>
+          </ul>
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+      </ol>
+    </section>
+
+    <section id="finish">
+      <h2>Detect job — completion</h2>
+      <ol class="steps">
+        <li>
+          <strong>After both OP and ED</strong>
+          Set <code>anime.op_ed_analyzed_at = CURRENT_TIMESTAMP</code>.
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+        <li>
+          <strong>Playback (separate from detection)</strong>
+          When <code>settings.skip_op_ed</code> is on, the player listens to
+          <code>mpv://time-pos</code> and seeks past segments with status <code>matched</code>.
+          No ffmpeg during skip; reads segment times from SQLite / in-memory player state.
+        </li>
+      </ol>
+    </section>
+
+    <section id="flow-diagram">
+      <h2>End-to-end flow (one kind: OP or ED)</h2>
+      <div class="flow">User: Detect OP/ED
+  → Job queue (optional chroma prerequisites per episode)
+  → run_op_ed_detect_job
+       → load episodes [SQLite]
+       → discover_repeated_seed
+            → for ≤10 episodes × sliding 15s windows in OP/ED region
+                 → ensure_fingerprint [disk cache | ffmpeg + fpcalc]
+            → cluster windows across episodes [memory]
+       → if cluster found:
+            → build 90s template fingerprint [disk | ffmpeg | fpcalc]
+            → insert op_ed_templates [SQLite]
+            → for each episode:
+                 → full-episode candidate fp [disk | ffmpeg | fpcalc]
+                 → match in optimistic window [memory]
+                 → else match full timeline [memory]
+                 → upsert episode_op_ed_segments [SQLite]
+       → else: not_found + maybe no_op_ed [SQLite]
+  → op_ed_analyzed_at [SQLite]</div>
+    </section>
+
+    <section id="reset">
+      <h2>Reset OP/ED analysis (title settings)</h2>
+      <ol class="steps">
+        <li>
+          Delete segment rows and templates for the anime.
+          <span class="badge badge--sqlite">SQLite write</span>
+        </li>
+        <li>
+          Remove fingerprint files referenced in DB, then scan
+          <code>data/op-ed/fingerprints/</code> and delete any <code>.fp</code> whose key stem
+          matches any episode path hash for that title (catches orphans).
+          <span class="badge badge--disk">Disk read</span> directory listing.
+          <span class="badge badge--disk">Disk write</span> deletes.
+        </li>
+      </ol>
+    </section>
+
+    <section id="similarity">
+      <h2>Similarity math (in-memory)</h2>
+      <ul>
+        <li>Each Chromaprint “frame” is a signed 32-bit subfingerprint; frame period ≈ 0.1238s.</li>
+        <li>Frame similarity = 1 − (popcount(a XOR b) / 32).</li>
+        <li>Segment similarity = mean over aligned frames.</li>
+        <li>Template match slides template across candidate; best offset must pass average, strong-frame ratio, and lower-quartile gates.</li>
+      </ul>
+      <span class="badge badge--memory">In-memory only</span> — no disk or subprocess during comparison.
+    </section>
+
+    <footer>
+      Generated for code review. Implementation:
+      <code>src-tauri/src/op_ed.rs</code>,
+      <code>src-tauri/src/media_tools.rs</code>,
+      <code>src-tauri/src/jobs/manager.rs</code>.
+      Open this file in a browser (file:// or via dev server).
+    </footer>
+  </main>
+</body>
+</html>

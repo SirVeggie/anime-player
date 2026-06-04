@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { jobsCancel, jobsCancelAll, jobsSetMaxParallel, jobsSetTypeMaxParallel } from "../api";
 import { subscribeJobsSnapshot } from "../jobs/jobClient";
+import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
 import type { JobPriority, JobRecord, JobResourceType, JobsSnapshot } from "../types";
 import { errorMessage, formatDurationMs } from "../utils";
 import { ViewHeader } from "./ViewHeader";
@@ -86,8 +87,7 @@ function ParallelLimitStepper(props: {
 }
 
 function progressPercent(job: JobRecord) {
-  if (job.progress.totalSteps <= 0) return 0;
-  return Math.round((job.progress.currentStep / job.progress.totalSteps) * 100);
+  return jobProgressBarPercent(job);
 }
 
 function sortJobsOldestFirst(
@@ -95,6 +95,13 @@ function sortJobsOldestFirst(
   sortKey: (job: JobRecord) => number,
 ): JobRecord[] {
   return [...jobs].sort((a, b) => sortKey(a) - sortKey(b));
+}
+
+function sortJobsNewestFirst(
+  jobs: JobRecord[],
+  sortKey: (job: JobRecord) => number,
+): JobRecord[] {
+  return [...jobs].sort((a, b) => sortKey(b) - sortKey(a));
 }
 
 function JobList(props: {
@@ -134,6 +141,8 @@ function JobRow(props: {
     job.cancelable &&
     (job.status === "queued" || job.status === "running");
   const durationLabel = jobDurationLabel(job, nowMs, history);
+  const showProgressBar =
+    showProgress && (job.status === "queued" || job.status === "running") && shouldShowJobProgressBar(job);
 
   return (
     <div className="job-row">
@@ -166,9 +175,11 @@ function JobRow(props: {
                 {job.stepLabel ? <span>{job.stepLabel}</span> : null}
               </p>
             : null}
-            <div className="job-progress-track" aria-hidden>
-              <div className="job-progress-fill" style={{ width: `${progressPercent(job)}%` }} />
-            </div>
+            {showProgressBar ?
+              <div className="job-progress-track" aria-hidden>
+                <div className="job-progress-fill" style={{ width: `${progressPercent(job)}%` }} />
+              </div>
+            : null}
           </>
         : durationLabel || job.completionMessage ?
           <p className="muted job-row-meta">
@@ -309,7 +320,10 @@ export function JobsScreen(props: {
 
   const historyJobs = useMemo(
     () =>
-      sortJobsOldestFirst(snapshot?.history ?? [], (j) => j.startedAt ?? j.createdAt),
+      sortJobsNewestFirst(
+        snapshot?.history ?? [],
+        (j) => j.finishedAt ?? j.startedAt ?? j.createdAt,
+      ),
     [snapshot?.history],
   );
 

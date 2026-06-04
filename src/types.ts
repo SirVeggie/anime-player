@@ -276,6 +276,7 @@ export type JobRecord = {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  prerequisiteTotal: number;
   waitingFor: JobPrerequisiteView[];
 };
 

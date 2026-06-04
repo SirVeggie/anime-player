@@ -36,7 +36,7 @@ const DEFAULT_MAX_PARALLEL: u32 = 5;
 const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
 const DEFAULT_CHROMA_MAX_PARALLEL: u32 = 4;
 const MAX_PARALLEL_CAP: u32 = 20;
-const CHROMA_START_STAGGER_MS: u64 = 0000;
+const CHROMA_START_STAGGER_MS: u64 = 2000;
 const HISTORY_CAP: usize = 200;
 
 const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
@@ -190,6 +190,7 @@ impl JobManager {
     fn view_with_waiting_for(&self, record: &JobRecord) -> JobView {
         let mut view = record.view.clone();
         view.waiting_for = self.pending_prerequisites(record);
+        view.prerequisite_total = record.prerequisite_job_ids.len() as u32;
         if !view.waiting_for.is_empty() && view.status == JobStatus::Queued {
             view.step_label = "Waiting for prerequisites".to_string();
         }
@@ -425,6 +426,7 @@ impl JobManager {
             started_at: None,
             finished_at: None,
             waiting_for: Vec::new(),
+            prerequisite_total: 0,
         };
         let record = JobRecord {
             view,
@@ -529,7 +531,7 @@ impl JobManager {
             cancelable: true,
             progress: JobProgress {
                 current_step: 0,
-                total_steps: 2,
+                total_steps: 1,
             },
             step_label: "Queued".to_string(),
             completion_message: None,
@@ -537,6 +539,7 @@ impl JobManager {
             started_at: None,
             finished_at: None,
             waiting_for: Vec::new(),
+            prerequisite_total: 0,
         };
         let record = JobRecord {
             view,
@@ -637,6 +640,7 @@ impl JobManager {
             started_at: None,
             finished_at: None,
             waiting_for: Vec::new(),
+            prerequisite_total: 0,
         };
         let record = JobRecord {
             view,

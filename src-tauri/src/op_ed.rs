@@ -298,11 +298,11 @@ pub fn run_episode_chroma_fingerprint(
     if cancel.load(Ordering::Relaxed) {
         return Err("Fingerprinting cancelled".to_string());
     }
-    on_step(0, 2, "Extracting audio");
+    on_step(0, 1, "Extracting audio");
     let duration = episode_duration_seconds(ep)?;
     let extract_len = duration.max(SEGMENT_DURATION_SEC + 1.0);
     ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
-    on_step(2, 2, "Done");
+    on_step(1, 1, "Done");
     Ok(())
 }
 

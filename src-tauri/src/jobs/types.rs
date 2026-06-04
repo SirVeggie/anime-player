@@ -86,6 +86,9 @@ pub struct JobView {
     /// Prerequisite jobs still queued or running (completed ones are omitted).
     #[serde(default)]
     pub waiting_for: Vec<JobPrerequisiteView>,
+    /// Total prerequisites registered at enqueue time (for queued progress UI).
+    #[serde(default)]
+    pub prerequisite_total: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
