@@ -287,7 +287,10 @@ view components. Per-screen UI lives in `src/components/`:
   is intentionally conservative: the best audio offset must clear both an
   average-score threshold and consistency checks (enough strong frames plus a
   lower-quartile floor) before it can mark an episode segment as matched, which
-  reduces false-positive skips on episodes without OP/ED. The worker commits
+  reduces false-positive skips on episodes without OP/ED. Per-episode match
+  fallbacks (after optimistic + full fail): trim ~3s from the template lead and
+  retry (`trim_*` passes), then for OP only a near-miss at offset ≤ ~2.5s with
+  slightly relaxed gates (`edge_near`). The worker commits
   progress through many short `with_conn` calls while ffmpeg/fpcalc run unlocked.
   On completion the job emits `op-ed://analysis-updated`; the UI reloads that title
   via `list_episodes` plus `get_anime_op_ed_summary` only (not a full `get_library_state`).
