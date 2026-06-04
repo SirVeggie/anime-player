@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
-  getFileThumbnail,
   getMatchingDetectionRuleName,
   jobsCancel,
   jobsEnqueueOpEdDetect,
@@ -11,6 +10,7 @@ import {
   jobsSetScrubSpritePriorityForPaths,
   resetAnimeOpEdAnalysis,
 } from "../api";
+import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import { findActiveOpEdJob, jobProgressPercent, opEdSegmentLabel } from "../opEd";
 import type {
@@ -105,6 +105,7 @@ function shortestEpisodeParentFolder(episodes: Episode[], firstEpisodePath: stri
 export function EpisodeScreen(props: {
   anime: AnimeSummary;
   episodes: Episode[];
+  episodesLoading?: boolean;
   categories: Category[];
   onBack: () => void;
   onPlay: (episode: Episode) => void;
@@ -134,6 +135,7 @@ export function EpisodeScreen(props: {
   const {
     anime,
     episodes,
+    episodesLoading = false,
     categories,
     preferAnilistDisplayTitle,
     onBack,
@@ -366,30 +368,29 @@ export function EpisodeScreen(props: {
   }, []);
 
   useEffect(() => {
+    if (episodesLoading || episodes.length === 0) {
+      setEpisodeThumbnails({});
+      return;
+    }
+
     let cancelled = false;
     setEpisodeThumbnails({});
 
-    void Promise.all(
-      episodes.map(async (episode) => {
-        try {
-          const thumbnail = await getFileThumbnail(episode.path, 184);
-          return thumbnail ? ([episode.id, thumbnail] as const) : null;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-
-      setEpisodeThumbnails(
-        Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)),
-      );
-    });
+    void loadEpisodeThumbnailUrls(
+      episodes,
+      184,
+      (episodeId, url) => {
+        setEpisodeThumbnails((current) =>
+          cancelled ? current : { ...current, [episodeId]: url },
+        );
+      },
+      () => !cancelled,
+    );
 
     return () => {
       cancelled = true;
     };
-  }, [episodes]);
+  }, [episodes, episodesLoading]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1082,7 +1083,11 @@ export function EpisodeScreen(props: {
       : null}
 
       <section className="episode-list">
-        {episodeListItems.map((item) => {
+        {episodesLoading ?
+          <p className="muted episode-list-loading">Loading episodes…</p>
+        : null}
+        {!episodesLoading ?
+          episodeListItems.map((item) => {
           if (item.kind === "gap") {
             return (
               <div key={item.key} className="episode-gap-separator stat-warning" role="presentation">
@@ -1138,7 +1143,8 @@ export function EpisodeScreen(props: {
               </div>
             </button>
           );
-        })}
+        })
+        : null}
       </section>
     </>
   );

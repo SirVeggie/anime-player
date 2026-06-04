@@ -75,7 +75,9 @@ export async function loadAnimePosterUrls(
 
   if (!shouldContinue()) return;
 
-  const anilistCandidates = anime.filter((item) => !resolved.has(item.id) && (item.anilist_cover_path || item.anilist_id));
+  const anilistCandidates = anime.filter(
+    (item) => !resolved.has(item.id) && (item.anilist_cover_path || item.anilist_id),
+  );
 
   await runLimited(anilistCandidates, ANILIST_COVER_CONCURRENCY, async (item) => {
     if (!shouldContinue()) return;
@@ -98,6 +100,25 @@ export async function loadAnimePosterUrls(
       const url = await getFileThumbnail(item.first_episode_path, POSTER_THUMB_PX);
       if (!url || !shouldContinue()) return;
       onPoster(item.id, url);
+    } catch {
+      /* ignore missing or unsupported file thumbnails */
+    }
+  });
+}
+
+/** Load episode row thumbnails with limited concurrency (shell extraction, no DB). */
+export async function loadEpisodeThumbnailUrls(
+  episodes: { id: number; path: string }[],
+  size: number,
+  onThumbnail: (episodeId: number, url: string) => void,
+  shouldContinue: () => boolean,
+): Promise<void> {
+  await runLimited(episodes, FILE_THUMBNAIL_CONCURRENCY, async (episode) => {
+    if (!shouldContinue()) return;
+    try {
+      const url = await getFileThumbnail(episode.path, size);
+      if (!url || !shouldContinue()) return;
+      onThumbnail(episode.id, url);
     } catch {
       /* ignore missing or unsupported file thumbnails */
     }

@@ -152,6 +152,7 @@ function App() {
   const [anilistAuth, setAnilistAuth] = useState<AnilistAuthState | null>(null);
   const [localDataStats, setLocalDataStats] = useState<LocalDataStats | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodesLoading, setEpisodesLoading] = useState(false);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -520,10 +521,12 @@ function App() {
       selectedAnimeIdRef.current = anime.id;
       setSelectedAnime(anime);
       setEpisodeReturnView(returnView);
+      setEpisodes([]);
+      setEpisodesLoading(true);
+      navigateToView("episodes");
       try {
         const nextEpisodes = await listEpisodes(anime.id);
         setEpisodes(nextEpisodes);
-        navigateToView("episodes");
         const shouldImportAnilistProgress =
           anime.anilist_id && nextEpisodes.length > 0 && nextEpisodes.every((episode) => !hasEpisodeProgress(episode));
         if (shouldImportAnilistProgress) {
@@ -536,6 +539,8 @@ function App() {
         }
       } catch (e) {
         showToast("error", errorMessage(e));
+      } finally {
+        setEpisodesLoading(false);
       }
     },
     [applyLocalAnilistProgress, navigateToView, refreshAnimePageData, showToast],
@@ -1408,6 +1413,7 @@ function App() {
             <EpisodeScreen
               anime={selectedAnime}
               episodes={episodes}
+              episodesLoading={episodesLoading}
               categories={library.categories}
               onBack={() => navigateToView(episodeReturnView, "restore")}
               onPlay={openEpisode}
