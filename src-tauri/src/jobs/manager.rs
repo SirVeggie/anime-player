@@ -8,6 +8,7 @@ use rusqlite::OptionalExtension;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::AppDatabase;
+use crate::disk_volume;
 use crate::op_ed::{self, op_ed_chroma_job_identity, op_ed_job_identity, OpEdEpisode};
 use crate::scrub_preview::{
     self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity, scrub_sprite_is_cached,
@@ -701,6 +702,20 @@ impl JobManager {
         )
     }
 
+    fn chroma_episode_path(&self, job_id: &str) -> Option<&str> {
+        self.records.get(job_id).and_then(|r| match &r.kind {
+            JobKind::OpEdChroma { episode } => Some(episode.path.as_str()),
+            _ => None,
+        })
+    }
+
+    fn chroma_job_requires_start_stagger(&self, job_id: &str) -> bool {
+        let Some(path) = self.chroma_episode_path(job_id) else {
+            return true;
+        };
+        disk_volume::path_requires_chroma_stagger(path)
+    }
+
     fn chroma_stagger_remaining_ms(&self) -> u64 {
         let Some(last) = self.last_chroma_start_ms else {
             return 0;
@@ -714,6 +729,9 @@ impl JobManager {
             return true;
         };
         if record.view.resource_type != JobResourceType::Chroma {
+            return false;
+        }
+        if !self.chroma_job_requires_start_stagger(job_id) {
             return false;
         }
         self.chroma_stagger_remaining_ms() > 0
@@ -754,6 +772,7 @@ impl JobManager {
             self.records.get(id).is_some_and(|r| {
                 r.view.resource_type == JobResourceType::Chroma
                     && r.view.status == JobStatus::Queued
+                    && self.chroma_job_requires_start_stagger(id)
                     && self.can_start_without_stagger(id)
             })
         })
@@ -827,6 +846,11 @@ impl JobManager {
     }
 
     fn start_job(&mut self, job_id: &str) {
+        let track_chroma_stagger = self.chroma_job_requires_start_stagger(job_id)
+            && self
+                .records
+                .get(job_id)
+                .is_some_and(|r| r.view.resource_type == JobResourceType::Chroma);
         let Some(record) = self.records.get_mut(job_id) else {
             return;
         };
@@ -837,7 +861,7 @@ impl JobManager {
         let started_at = now_ms();
         record.view.started_at = Some(started_at);
         record.view.step_label = "Starting".to_string();
-        if record.view.resource_type == JobResourceType::Chroma {
+        if track_chroma_stagger {
             self.last_chroma_start_ms = Some(started_at);
         }
         self.queued_ids.retain(|id| id != job_id);

@@ -18,6 +18,8 @@ mod thumbnails;
 mod scrub_preview;
 mod op_ed;
 #[cfg(windows)]
+mod disk_volume;
+#[cfg(windows)]
 mod jobs;
 
 #[cfg(windows)]
