@@ -262,8 +262,11 @@ view components. Per-screen UI lives in `src/components/`:
   full-episode Chromaprint cache entry used during matching. **Detect OP/ED**
   reuses cached fingerprints when present; otherwise it enqueues the same chroma
   jobs and queues detection with those jobs as prerequisites (reusing jobs already
-  running from an earlier fingerprint pass). Optimistic search windows (first ~3 minutes / last ~3 minutes,
-  15s seed steps) run before a full-episode pass for failed episodes. Matching
+  running from an earlier fingerprint pass). Building the full-episode fingerprint also
+  writes discovery slice caches (120 Chromaprint frames, stepped every 60 frames) for
+  the first/last ~3 minutes so detection scans slices from disk instead of re-running
+  ffmpeg per window. Optimistic search windows run before a full-episode pass for
+  failed episodes. Matching
   is intentionally conservative: the best audio offset must clear both an
   average-score threshold and consistency checks (enough strong frames plus a
   lower-quartile floor) before it can mark an episode segment as matched, which
