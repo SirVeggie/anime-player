@@ -627,7 +627,7 @@ impl JobManager {
             desc,
             identity: identity.clone(),
             job_type: "op_ed_detect".to_string(),
-            resource_type: JobResourceType::Ffmpeg,
+            resource_type: JobResourceType::None,
             priority: request.priority,
             status: JobStatus::Queued,
             cancelable: true,
@@ -823,26 +823,16 @@ impl JobManager {
     }
 
     fn pick_startable_queued_id(&self) -> Option<String> {
-        let has_medium = self.queued_ids.iter().any(|id| {
+        pick_startable_from_queue(&self.queued_ids, |id| {
             self.records
                 .get(id)
-                .is_some_and(|r| r.view.priority == JobPriority::Medium)
-        });
-        for id in &self.queued_ids {
-            let Some(record) = self.records.get(id) else {
-                continue;
-            };
-            if record.view.status != JobStatus::Queued {
-                continue;
-            }
-            if has_medium && record.view.priority == JobPriority::Low {
-                continue;
-            }
-            if self.can_start(id) {
-                return Some(id.clone());
-            }
-        }
-        None
+                .is_some_and(|r| r.view.status == JobStatus::Queued && self.can_start(id))
+        }, |id| {
+            self.records
+                .get(id)
+                .map(|r| r.view.priority)
+                .unwrap_or(JobPriority::Low)
+        })
     }
 
     fn start_job(&mut self, job_id: &str) {
@@ -1049,6 +1039,26 @@ fn build_scrub_desc(request: &EnqueueScrubSpriteJob) -> String {
     }
 }
 
+/// Low-priority jobs wait only while some queued medium job can actually start.
+fn pick_startable_from_queue<'a>(
+    queued_ids: &'a [String],
+    can_start: impl Fn(&'a str) -> bool,
+    job_priority: impl Fn(&'a str) -> JobPriority,
+) -> Option<String> {
+    let block_low = queued_ids.iter().any(|id| {
+        job_priority(id) == JobPriority::Medium && can_start(id)
+    });
+    for id in queued_ids {
+        if block_low && job_priority(id) == JobPriority::Low {
+            continue;
+        }
+        if can_start(id) {
+            return Some(id.clone());
+        }
+    }
+    None
+}
+
 fn load_max_parallel(db: &AppDatabase) -> u32 {
     db.with_conn(|conn| {
         let value: Option<String> = conn
@@ -1129,4 +1139,61 @@ fn load_type_max_parallel(db: &AppDatabase) -> HashMap<String, u32> {
         limits.insert(resource_type.as_str().to_string(), value);
     }
     limits
+}
+
+#[cfg(test)]
+mod scheduler_tests {
+    use super::*;
+
+    fn id(s: &str) -> String {
+        s.to_string()
+    }
+
+    #[test]
+    fn low_runs_when_medium_is_queued_but_not_startable() {
+        let queue = vec![id("detect"), id("scrub-low")];
+        let can = |id: &str| id == "scrub-low";
+        let pri = |id: &str| {
+            if id == "detect" {
+                JobPriority::Medium
+            } else {
+                JobPriority::Low
+            }
+        };
+        assert_eq!(
+            pick_startable_from_queue(&queue, can, pri).as_deref(),
+            Some("scrub-low")
+        );
+    }
+
+    #[test]
+    fn low_waits_while_a_startable_medium_is_queued() {
+        let queue = vec![id("chroma"), id("scrub-low")];
+        let can = |_| true;
+        let pri = |id: &str| {
+            if id == "chroma" {
+                JobPriority::Medium
+            } else {
+                JobPriority::Low
+            }
+        };
+        assert_eq!(
+            pick_startable_from_queue(&queue, can, pri).as_deref(),
+            Some("chroma")
+        );
+    }
+
+    #[test]
+    fn picks_first_startable_medium_before_low() {
+        let queue = vec![id("detect-blocked"), id("chroma"), id("scrub-low")];
+        let can = |id: &str| id != "detect-blocked";
+        let pri = |id: &str| match id {
+            "scrub-low" => JobPriority::Low,
+            _ => JobPriority::Medium,
+        };
+        assert_eq!(
+            pick_startable_from_queue(&queue, can, pri).as_deref(),
+            Some("chroma")
+        );
+    }
 }

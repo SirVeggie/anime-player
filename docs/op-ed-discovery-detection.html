@@ -237,7 +237,8 @@
         <li>
           <strong>“Detect OP/ED”</strong>
           Enqueues <code>op_ed_detect</code> (identity <code>op_ed_detect:{anime_id}</code>,
-          resource type <code>ffmpeg</code>). Before starting, the job manager enqueues any
+          resource type <code>none</code>; ffmpeg/fpcalc run only in prerequisite chroma jobs).
+          Before starting, the job manager enqueues any
           missing chroma jobs and sets them as <strong>prerequisites</strong> so detection
           reuses full-episode fingerprints when chroma jobs finish first.
           <span class="badge badge--sqlite">SQLite</span>

@@ -72,7 +72,9 @@ view components. Per-screen UI lives in `src/components/`:
   via WMI, with a PowerShell fallback); SSD volumes skip stagger; unknown classification
   keeps stagger enabled. A job starts only when
   both caps allow it: low/medium respect `min(global, type)`; high bypasses the
-  global cap but **not** the type cap. Jobs may list **prerequisite job ids**;
+  global cap but **not** the type cap. While a queued **medium** job can start,
+  **low** jobs wait; a medium job that is blocked (prerequisites, caps, chroma
+  stagger) does not hold low jobs back. Jobs may list **prerequisite job ids**;
   a queued job stays blocked until every prerequisite finishes successfully (failed
   or canceled prerequisites fail the dependent). Each job has a short numeric
   `#id` in the UI. Jobs dedupe by `identity`, support cancel/cancel-all,
@@ -255,16 +257,16 @@ view components. Per-screen UI lives in `src/components/`:
   via CSS `background-position`.
 - **OP/ED detection** is manual per title: the episode page **Detect OP/ED** button
   enqueues a background job (`jobs_enqueue_op_ed_detect`, identity
-  `op_ed_detect:{anime_id}`) that extracts mono PCM via ffmpeg, fingerprints it
-  with Chromaprint `fpcalc.exe`, stores raw signed Chromaprint vectors under
-  `data/op-ed/fingerprints/`, and stores templates plus per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
-  `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
-  saved rows. The episode page **Fingerprint audio** button enqueues one
-  `op_ed_chroma` job per episode (resource type `chroma`) to pre-compute the
-  full-episode Chromaprint cache entry used during matching. **Detect OP/ED**
-  reuses cached fingerprints when present; otherwise it enqueues the same chroma
-  jobs and queues detection with those jobs as prerequisites (reusing jobs already
-  running from an earlier fingerprint pass). Building the full-episode fingerprint also
+  `op_ed_detect:{anime_id}`, resource type `none`) that scans cached Chromaprint
+  fingerprints and writes templates plus per-episode OP/ED rows in SQLite
+  (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`). Progress survives
+  app restarts; re-running resumes from saved rows. The episode page **Fingerprint
+  audio** button enqueues one `op_ed_chroma` job per episode (resource type `chroma`;
+  ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) to pre-compute the
+  full-episode Chromaprint cache used during matching. **Detect OP/ED** reuses cached
+  fingerprints when present; otherwise it enqueues the same chroma jobs and queues
+  detection with those jobs as prerequisites (reusing jobs already running from an
+  earlier fingerprint pass). Building the full-episode fingerprint also
   writes discovery slice caches (120 Chromaprint frames, stepped every 60 frames) for
   the first/last ~3 minutes so detection scans slices from disk instead of re-running
   ffmpeg per window. Optimistic search windows run before a full-episode pass for
