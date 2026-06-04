@@ -245,9 +245,9 @@ view components. Per-screen UI lives in `src/components/`:
   via CSS `background-position`.
 - **OP/ED detection** is manual per title: the episode page **Detect OP/ED** button
   enqueues a background job (`jobs_enqueue_op_ed_detect`, identity
-  `op_ed_detect:{anime_id}`) that extracts mono PCM via ffmpeg, builds spectral
-  fingerprints under `data/op-ed/fingerprints/`, and stores templates plus
-  per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
+  `op_ed_detect:{anime_id}`) that extracts mono PCM via ffmpeg, fingerprints it
+  with Chromaprint `fpcalc.exe`, stores raw signed Chromaprint vectors under
+  `data/op-ed/fingerprints/`, and stores templates plus per-episode OP/ED rows in SQLite (`op_ed_templates`, `episode_op_ed_segments`,
   `anime.no_op_ed`). Progress survives app restarts; re-running resumes from
   saved rows. Optimistic search windows (first ~3 minutes / last ~3 minutes,
   15s seed steps) run before a full-episode pass for failed episodes. Matching
@@ -418,7 +418,9 @@ view components. Per-screen UI lives in `src/components/`:
   Windows executable resources are rebuilt
   after icon changes.
 - For installer builds, `tauri.conf.json` `bundle.resources` ships
-  `libs/mpv/libmpv-2.dll` next to the exe.
+  `libs/mpv/libmpv-2.dll`, `libs/ffmpeg/ffmpeg.exe`,
+  `libs/ffmpeg/ffprobe.exe`, and `libs/chromaprint/fpcalc.exe` next to
+  the exe.
 
 ### Tauri configuration — `src-tauri/tauri.conf.json`, `capabilities/default.json`
 
@@ -522,6 +524,9 @@ got. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
   ignored local libmpv artifacts into `src-tauri/libs/mpv/`.
 - `scripts/update-mpv-libs.mjs` — compatibility updater for the same
   artifacts from the latest `shinchiro/mpv-winbuild-cmake` release.
+- `scripts/download-ffmpeg.mjs`, `scripts/download-chromaprint.mjs` —
+  setup entry points for ignored local `ffmpeg.exe`/`ffprobe.exe` and
+  Chromaprint `fpcalc.exe` artifacts.
 - `scripts/release-notes.mjs` and `scripts/publish-github-release.mjs` — automated
   GitHub release flow (run `npm run release:notes` then `npm run release:publish`).
 - `scripts/update.bat` and `scripts/_update.ps1` — portable end-user
@@ -558,6 +563,10 @@ cargo check --manifest-path src-tauri/Cargo.toml
 # Download / refresh local libmpv
 npm run setup:mpv
 
+# Download / refresh media helper tools
+npm run setup:ffmpeg
+npm run setup:chromaprint
+
 # Regenerate Tauri icons from a square SVG or PNG
 npm run icon:setup -- path\to\icon.svg
 
@@ -569,9 +578,10 @@ npm run tauri build
 
 # Portable release: `tauri build` then versioned folder + zip under `releases/`
 # (that directory is listed in `.gitignore` so build artifacts stay local).
-# Package includes libmpv-2.dll, ffmpeg.exe, ffprobe.exe, update.bat,
-# _update.ps1, and VERSION.txt (release only). Scrub thumbnails prefer
-# ffmpeg beside the exe; PATH is a fallback if those files are removed.
+# Package includes libmpv-2.dll, ffmpeg.exe, ffprobe.exe, fpcalc.exe,
+# update.bat, _update.ps1, and VERSION.txt (release only). Scrub thumbnails
+# and OP/ED detection prefer bundled tools beside the exe; PATH is a fallback
+# if those files are removed.
 # Publish GitHub release with the zip, standalone anime-player.exe, and
 # anime-player.exe.sha256.
 npm run release

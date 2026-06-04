@@ -31,7 +31,8 @@
     "resources": [
       "libs/mpv/libmpv-2.dll",
       "libs/ffmpeg/ffmpeg.exe",
-      "libs/ffmpeg/ffprobe.exe"
+      "libs/ffmpeg/ffprobe.exe",
+      "libs/chromaprint/fpcalc.exe"
     ],
     "icon": [
       "icons/32x32.png",

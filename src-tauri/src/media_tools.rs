@@ -68,9 +68,31 @@ pub fn ffprobe_path() -> Result<PathBuf, String> {
     if let Some(path_probe) = find_on_path("ffprobe.exe") {
         return Ok(path_probe);
     }
-    Err(
-        "ffprobe.exe not found beside ffmpeg or on PATH — \
+    Err("ffprobe.exe not found beside ffmpeg or on PATH — \
          run: npm run setup:ffmpeg, or install ffmpeg and add it to PATH"
+        .to_string())
+}
+
+pub fn fpcalc_path() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "failed to resolve exe directory".to_string())?;
+    let beside = dir.join("fpcalc.exe");
+    if beside.is_file() {
+        return Ok(beside);
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dev = manifest.join("libs").join("chromaprint").join("fpcalc.exe");
+    if dev.is_file() {
+        return Ok(dev);
+    }
+    if let Some(path_fpcalc) = find_on_path("fpcalc.exe") {
+        return Ok(path_fpcalc);
+    }
+    Err(
+        "fpcalc.exe not found beside the app, in the dev tree, or on PATH — \
+         run: npm run setup:chromaprint, or install Chromaprint fpcalc and add it to PATH"
             .to_string(),
     )
 }
@@ -147,7 +169,12 @@ pub fn extract_pcm_range(
     let ffmpeg = ffmpeg_path()?;
     let output = hidden_command(&ffmpeg)
         .args(["-hide_banner", "-loglevel", "error"])
-        .args(["-ss", &format!("{start_sec:.3}"), "-t", &format!("{duration_sec:.3}")])
+        .args([
+            "-ss",
+            &format!("{start_sec:.3}"),
+            "-t",
+            &format!("{duration_sec:.3}"),
+        ])
         .arg("-i")
         .arg(path)
         .args([

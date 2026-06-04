@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "setup:mpv": "node scripts/download-mpv-libs.mjs",
     "setup:ffmpeg": "node scripts/download-ffmpeg.mjs",
+    "setup:chromaprint": "node scripts/download-chromaprint.mjs",
     "icon:setup": "node scripts/setup-icon.mjs",
     "update:mpv": "node scripts/update-mpv-libs.mjs",
     "portable": "npm run tauri build && node scripts/portable.mjs",

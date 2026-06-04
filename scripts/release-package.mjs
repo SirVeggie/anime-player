@@ -17,6 +17,7 @@ async function packageRelease() {
   const ffmpegPaths = ['ffmpeg.exe', 'ffprobe.exe'].map((name) =>
     path.join(ffmpegDir, name),
   );
+  const fpcalcPath = path.join(root, 'src-tauri', 'libs', 'chromaprint', 'fpcalc.exe');
   const updateBat = path.join(root, 'scripts', 'update.bat');
   const updatePs1 = path.join(root, 'scripts', '_update.ps1');
 
@@ -44,6 +45,14 @@ async function packageRelease() {
       console.error('Please run `npm run setup:ffmpeg` first.');
       process.exit(1);
     }
+  }
+
+  try {
+    await fs.access(fpcalcPath);
+  } catch {
+    console.error('Error: fpcalc.exe not found in src-tauri/libs/chromaprint.');
+    console.error('Please run `npm run setup:chromaprint` first.');
+    process.exit(1);
   }
 
   for (const scriptPath of [updateBat, updatePs1]) {
@@ -79,6 +88,7 @@ async function packageRelease() {
   for (const toolPath of ffmpegPaths) {
     await fs.copyFile(toolPath, path.join(destDir, path.basename(toolPath)));
   }
+  await fs.copyFile(fpcalcPath, path.join(destDir, 'fpcalc.exe'));
   await fs.copyFile(updateBat, path.join(destDir, 'update.bat'));
   await fs.copyFile(updatePs1, path.join(destDir, '_update.ps1'));
   await fs.writeFile(destVersion, version, 'utf8');

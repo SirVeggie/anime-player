@@ -2,8 +2,10 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -11,10 +13,11 @@ use tauri::State;
 
 use crate::db::AppDatabase;
 use crate::media_tools::{
-    cache_key, extract_pcm_range, normalized_video_path, portable_data_dir, probe_duration,
+    cache_key, extract_pcm_range, fpcalc_path, hidden_command, normalized_video_path,
+    portable_data_dir, probe_duration,
 };
 
-pub const ANALYSIS_VERSION: i32 = 1;
+pub const ANALYSIS_VERSION: i32 = 2;
 pub const SKIP_OP_ED_SETTING_KEY: &str = "skip_op_ed";
 /// Parent folder under portable `data/` for all OP/ED artifacts.
 pub const OP_ED_DATA_DIR: &str = "op-ed";
@@ -22,18 +25,16 @@ const FINGERPRINTS_SUBDIR: &str = "fingerprints";
 const JOB_NAME: &str = "op_ed_detect";
 
 pub const SAMPLE_RATE: u32 = 11025;
-const FRAME_SAMPLES: usize = 2048;
-const HOP_SAMPLES: usize = 1024;
-const BAND_COUNT: usize = 32;
+const CHROMAPRINT_FRAME_SEC: f64 = 0.1238;
 const SEED_WINDOW_SEC: f64 = 15.0;
 const SEGMENT_DURATION_SEC: f64 = 90.0;
 const OP_SEARCH_SEC: f64 = 180.0;
 const ED_TAIL_SEC: f64 = 180.0;
-const MATCH_AVERAGE_THRESHOLD: f32 = 0.78;
-const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.72;
-const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.55;
-const MATCH_MIN_LOWER_QUARTILE: f32 = 0.60;
-const SEED_MATCH_THRESHOLD: f32 = 0.68;
+const MATCH_AVERAGE_THRESHOLD: f32 = 0.84;
+const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
+const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
+const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
+const SEED_MATCH_THRESHOLD: f32 = 0.82;
 const MAX_SEED_EPISODES: usize = 10;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
 const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
@@ -139,24 +140,17 @@ struct EpisodeRow {
 
 #[derive(Debug, Clone)]
 struct Fingerprint {
-    /// Band energies per frame (flattened `frames * BAND_COUNT`).
-    data: Vec<f32>,
-    frame_count: usize,
-    sample_rate: u32,
+    /// Raw signed Chromaprint subfingerprints from `fpcalc -raw -signed`.
+    values: Vec<i32>,
 }
 
 impl Fingerprint {
-    fn frame_slice(&self, frame: usize) -> &[f32] {
-        let start = frame * BAND_COUNT;
-        &self.data[start..start + BAND_COUNT]
+    fn frame_count(&self) -> usize {
+        self.values.len()
     }
 
     fn frames_for_duration(duration_sec: f64) -> usize {
-        let samples = (duration_sec * SAMPLE_RATE as f64) as usize;
-        if samples < FRAME_SAMPLES {
-            return 0;
-        }
-        1 + (samples - FRAME_SAMPLES) / HOP_SAMPLES
+        (duration_sec / CHROMAPRINT_FRAME_SEC).floor() as usize
     }
 }
 
@@ -195,9 +189,7 @@ fn directory_size(path: &Path) -> Result<u64, String> {
 
 fn episode_path_cache_keys(conn: &Connection, anime_id: i64) -> Result<HashSet<String>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT path FROM episodes WHERE anime_id = ?1 AND missing = 0",
-        )
+        .prepare("SELECT path FROM episodes WHERE anime_id = ?1 AND missing = 0")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![anime_id], |row| row.get::<_, String>(0))
@@ -230,9 +222,9 @@ fn purge_fingerprint_cache_for_anime(conn: &Connection, anime_id: i64) -> Result
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let belongs_to_anime = path_keys.iter().any(|key| {
-            stem == key.as_str() || stem.starts_with(&format!("{key}_"))
-        });
+        let belongs_to_anime = path_keys
+            .iter()
+            .any(|key| stem == key.as_str() || stem.starts_with(&format!("{key}_")));
         if belongs_to_anime {
             let _ = fs::remove_file(&path);
         }
@@ -244,66 +236,86 @@ pub fn op_ed_job_identity(anime_id: i64) -> String {
     format!("{JOB_NAME}:{anime_id}")
 }
 
-fn pcm_to_fingerprint(samples: &[i16]) -> Fingerprint {
-    let mut data = Vec::new();
-    let mut frame_count = 0usize;
-    let mut i = 0usize;
-    while i + FRAME_SAMPLES <= samples.len() {
-        let frame = &samples[i..i + FRAME_SAMPLES];
-        let bands = frame_to_bands(frame);
-        data.extend_from_slice(&bands);
-        frame_count += 1;
-        i += HOP_SAMPLES;
-    }
-    Fingerprint {
-        data,
-        frame_count,
-        sample_rate: SAMPLE_RATE,
-    }
+#[derive(Debug, Deserialize)]
+struct FpcalcOutput {
+    fingerprint: Vec<i32>,
 }
 
-fn frame_to_bands(frame: &[i16]) -> [f32; BAND_COUNT] {
-    let mut bands = [0.0f32; BAND_COUNT];
-    let chunk = frame.len() / BAND_COUNT;
-    for (b, band) in bands.iter_mut().enumerate() {
-        let start = b * chunk;
-        let end = (start + chunk).min(frame.len());
-        let mut sum = 0.0f64;
-        for &s in &frame[start..end] {
-            let x = f64::from(s);
-            sum += x * x;
+fn samples_to_temp_raw_file(samples: &[i16], cache_key: &str) -> Result<PathBuf, String> {
+    let mut path = fingerprint_cache_dir()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    path.push(format!("{cache_key}_{}_{}.s16le", std::process::id(), now));
+
+    let mut file =
+        fs::File::create(&path).map_err(|e| format!("failed to create {}: {e}", path.display()))?;
+    for sample in samples {
+        file.write_all(&sample.to_le_bytes())
+            .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    }
+    Ok(path)
+}
+
+fn pcm_to_chromaprint(samples: &[i16], cache_key: &str) -> Result<Fingerprint, String> {
+    if samples.is_empty() {
+        return Ok(Fingerprint { values: Vec::new() });
+    }
+
+    let fpcalc = fpcalc_path()?;
+    let raw_path = samples_to_temp_raw_file(samples, cache_key)?;
+    let sample_rate = SAMPLE_RATE.to_string();
+    let output = hidden_command(&fpcalc)
+        .args([
+            "-raw",
+            "-json",
+            "-signed",
+            "-length",
+            "0",
+            "-format",
+            "s16le",
+            "-rate",
+            sample_rate.as_str(),
+            "-channels",
+            "1",
+        ])
+        .arg(&raw_path)
+        .output()
+        .map_err(|e| format!("failed to run fpcalc: {e}"));
+    let _ = fs::remove_file(&raw_path);
+    let output = output?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("Empty fingerprint") {
+            return Ok(Fingerprint { values: Vec::new() });
         }
-        *band = (sum / (end - start).max(1) as f64).sqrt() as f32;
+        return Err(format!("fpcalc failed: {stderr}"));
     }
-    let max = bands.iter().copied().fold(1e-6f32, f32::max);
-    for b in &mut bands {
-        *b /= max;
-    }
-    bands
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: FpcalcOutput = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("failed to parse fpcalc JSON: {e}: {stdout}"))?;
+    Ok(Fingerprint {
+        values: parsed.fingerprint,
+    })
+}
+
+fn fingerprint_item_similarity(a: i32, b: i32) -> f32 {
+    let distance = ((a as u32) ^ (b as u32)).count_ones();
+    1.0 - distance as f32 / 32.0
 }
 
 fn fingerprint_similarity(a: &Fingerprint, a_frame: usize, b: &Fingerprint, b_frame: usize) -> f32 {
-    if a_frame >= a.frame_count || b_frame >= b.frame_count {
+    if a_frame >= a.frame_count() || b_frame >= b.frame_count() {
         return 0.0;
     }
-    let va = a.frame_slice(a_frame);
-    let vb = b.frame_slice(b_frame);
-    let mut dot = 0.0f32;
-    let mut na = 0.0f32;
-    let mut nb = 0.0f32;
-    for i in 0..BAND_COUNT {
-        dot += va[i] * vb[i];
-        na += va[i] * va[i];
-        nb += vb[i] * vb[i];
-    }
-    if na <= 1e-9 || nb <= 1e-9 {
-        return 0.0;
-    }
-    dot / (na.sqrt() * nb.sqrt())
+    fingerprint_item_similarity(a.values[a_frame], b.values[b_frame])
 }
 
 fn segment_fingerprint_similarity(template: &Fingerprint, candidate: &Fingerprint) -> f32 {
-    let frames = template.frame_count.min(candidate.frame_count);
+    let frames = template.frame_count().min(candidate.frame_count());
     if frames == 0 {
         return 0.0;
     }
@@ -320,8 +332,8 @@ fn sliding_match_score(
     offset_frames: usize,
 ) -> f32 {
     let overlap = template
-        .frame_count
-        .min(candidate.frame_count.saturating_sub(offset_frames));
+        .frame_count()
+        .min(candidate.frame_count().saturating_sub(offset_frames));
     if overlap == 0 {
         return 0.0;
     }
@@ -345,8 +357,8 @@ fn match_quality_at_offset(
     offset_frames: usize,
 ) -> Option<MatchQuality> {
     let overlap = template
-        .frame_count
-        .min(candidate.frame_count.saturating_sub(offset_frames));
+        .frame_count()
+        .min(candidate.frame_count().saturating_sub(offset_frames));
     if overlap == 0 {
         return None;
     }
@@ -379,24 +391,20 @@ fn match_quality_is_accepted(quality: MatchQuality) -> bool {
 }
 
 fn frames_for_seconds(sec: f64) -> usize {
-    ((sec * SAMPLE_RATE as f64) / HOP_SAMPLES as f64).floor() as usize
+    Fingerprint::frames_for_duration(sec)
 }
 
 fn seconds_for_frames(frames: usize) -> f64 {
-    frames as f64 * HOP_SAMPLES as f64 / SAMPLE_RATE as f64
+    frames as f64 * CHROMAPRINT_FRAME_SEC
 }
 
 fn save_fingerprint(cache_key: &str, fp: &Fingerprint) -> Result<(), String> {
     let path = fingerprint_path(cache_key)?;
-    let bytes: Vec<u8> = fp
-        .data
-        .iter()
-        .flat_map(|v| v.to_le_bytes())
-        .collect();
     let mut payload = Vec::new();
-    payload.extend_from_slice(&(fp.frame_count as u32).to_le_bytes());
-    payload.extend_from_slice(&(fp.sample_rate as u32).to_le_bytes());
-    payload.extend_from_slice(&bytes);
+    payload.extend_from_slice(&(fp.values.len() as u32).to_le_bytes());
+    for value in &fp.values {
+        payload.extend_from_slice(&value.to_le_bytes());
+    }
     fs::write(&path, payload).map_err(|e| format!("failed to write {}: {e}", path.display()))
 }
 
@@ -406,33 +414,29 @@ fn load_fingerprint(cache_key: &str) -> Result<Option<Fingerprint>, String> {
         return Ok(None);
     }
     let payload = fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    if payload.len() < 8 {
+    if payload.len() < 4 {
         return Ok(None);
     }
     let frame_count = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
-    let sample_rate = u32::from_le_bytes(payload[4..8].try_into().unwrap());
-    let expected_len = frame_count * BAND_COUNT * 4;
-    if payload.len() < 8 + expected_len {
+    let expected_len = frame_count * 4;
+    if payload.len() < 4 + expected_len {
         return Ok(None);
     }
-    let mut data = Vec::with_capacity(frame_count * BAND_COUNT);
-    for chunk in payload[8..].chunks_exact(4) {
-        data.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+    let mut values = Vec::with_capacity(frame_count);
+    for chunk in payload[4..4 + expected_len].chunks_exact(4) {
+        values.push(i32::from_le_bytes(chunk.try_into().unwrap()));
     }
-    Ok(Some(Fingerprint {
-        data,
-        frame_count,
-        sample_rate,
-    }))
+    Ok(Some(Fingerprint { values }))
 }
 
 fn extract_fingerprint_from_file(
     path: &Path,
     start_sec: f64,
     duration_sec: f64,
+    cache_key: &str,
 ) -> Result<Fingerprint, String> {
     let samples = extract_pcm_range(path, start_sec, duration_sec, SAMPLE_RATE)?;
-    Ok(pcm_to_fingerprint(&samples))
+    pcm_to_chromaprint(&samples, cache_key)
 }
 
 fn ensure_episode_fingerprint(
@@ -442,7 +446,8 @@ fn ensure_episode_fingerprint(
 ) -> Result<(String, Fingerprint), String> {
     let path_buf = normalized_video_path(path)?;
     let key = format!(
-        "{}_{}_{}",
+        "cp{}_{}_{}_{}",
+        ANALYSIS_VERSION,
         cache_key(&path_buf)?,
         (start_sec * 1000.0) as i64,
         (duration_sec * 1000.0) as i64
@@ -450,7 +455,7 @@ fn ensure_episode_fingerprint(
     if let Some(fp) = load_fingerprint(&key)? {
         return Ok((key, fp));
     }
-    let fp = extract_fingerprint_from_file(&path_buf, start_sec, duration_sec)?;
+    let fp = extract_fingerprint_from_file(&path_buf, start_sec, duration_sec, &key)?;
     save_fingerprint(&key, &fp)?;
     Ok((key, fp))
 }
@@ -460,7 +465,6 @@ struct TemplateMatch {
     start_sec: f64,
     end_sec: f64,
     confidence: f32,
-    offset_frames: usize,
 }
 
 fn find_best_match_in_candidate(
@@ -469,11 +473,11 @@ fn find_best_match_in_candidate(
     search_start_frame: usize,
     search_end_frame: usize,
 ) -> Option<TemplateMatch> {
-    let template_frames = template.frame_count;
-    if template_frames == 0 || candidate.frame_count < template_frames {
+    let template_frames = template.frame_count();
+    if template_frames == 0 || candidate.frame_count() < template_frames {
         return None;
     }
-    let end = search_end_frame.min(candidate.frame_count.saturating_sub(template_frames));
+    let end = search_end_frame.min(candidate.frame_count().saturating_sub(template_frames));
     if search_start_frame > end {
         return None;
     }
@@ -491,12 +495,11 @@ fn find_best_match_in_candidate(
         return None;
     }
     let start_sec = seconds_for_frames(best_offset);
-    let end_sec = start_sec + seconds_for_frames(template_frames);
+    let end_sec = start_sec + SEGMENT_DURATION_SEC;
     Some(TemplateMatch {
         start_sec,
         end_sec,
         confidence: quality.average,
-        offset_frames: best_offset,
     })
 }
 
@@ -504,7 +507,6 @@ fn find_best_match_in_candidate(
 struct SeedCandidate {
     start_sec: f64,
     episode_id: i64,
-    fingerprint_key: String,
     fingerprint: Fingerprint,
 }
 
@@ -569,12 +571,11 @@ fn discover_repeated_seed(
             if cancel.load(Ordering::Relaxed) {
                 return Err("OP/ED detection cancelled".to_string());
             }
-            let (key, fp) =
+            let (_, fp) =
                 ensure_episode_fingerprint(&ep.path, start_sec + offset, SEED_WINDOW_SEC)?;
             seeds.push(SeedCandidate {
                 start_sec: start_sec + offset,
                 episode_id: ep.id,
-                fingerprint_key: key,
                 fingerprint: fp,
             });
             offset += SEED_WINDOW_SEC / 2.0;
@@ -600,7 +601,10 @@ fn discover_repeated_seed(
                 }
             }
         }
-        if best_cluster.as_ref().is_none_or(|(_, _, count)| matching_eps.len() > *count) {
+        if best_cluster
+            .as_ref()
+            .is_none_or(|(_, _, count)| matching_eps.len() > *count)
+        {
             let count = matching_eps.len();
             best_cluster = Some((seed_a.clone(), matching_eps, count));
         }
@@ -765,7 +769,11 @@ fn insert_template(
     Ok(conn.last_insert_rowid())
 }
 
-fn segment_is_terminal(conn: &Connection, episode_id: i64, kind: SegmentKind) -> Result<bool, String> {
+fn segment_is_terminal(
+    conn: &Connection,
+    episode_id: i64,
+    kind: SegmentKind,
+) -> Result<bool, String> {
     let status: Option<String> = conn
         .query_row(
             "SELECT status FROM episode_op_ed_segments WHERE episode_id = ?1 AND kind = ?2",
@@ -902,25 +910,16 @@ fn run_kind_detection(
         let (search_start, search_end) = ctx.optimistic_search_range(kind, duration);
         let (full_start, full_end) = ctx.full_search_range(duration);
 
-        let candidate_key = format!("{}_full", cache_key(&normalized_video_path(&ep.path)?)?);
         let extract_len = duration.max(SEGMENT_DURATION_SEC + 1.0);
-        let (_, candidate_fp) = ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
+        let (candidate_key, candidate_fp) = ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
 
-        let mut matched = find_best_match_in_candidate(
-            &template_fp,
-            &candidate_fp,
-            search_start,
-            search_end,
-        );
+        let mut matched =
+            find_best_match_in_candidate(&template_fp, &candidate_fp, search_start, search_end);
         let mut search_pass = "optimistic";
 
         if matched.is_none() {
-            matched = find_best_match_in_candidate(
-                &template_fp,
-                &candidate_fp,
-                full_start,
-                full_end,
-            );
+            matched =
+                find_best_match_in_candidate(&template_fp, &candidate_fp, full_start, full_end);
             search_pass = "full";
         }
 
@@ -1207,7 +1206,9 @@ pub fn remove_op_ed_cache_for_anime(anime_id: i64, conn: &Connection) -> Result<
     Ok(0)
 }
 
-pub fn delete_unreferenced_op_ed_fingerprints(referenced_keys: &HashSet<String>) -> Result<(usize, u64), String> {
+pub fn delete_unreferenced_op_ed_fingerprints(
+    referenced_keys: &HashSet<String>,
+) -> Result<(usize, u64), String> {
     let cache_dir = fingerprint_cache_dir()?;
     if !cache_dir.is_dir() {
         return Ok((0, 0));
@@ -1233,7 +1234,9 @@ pub fn delete_unreferenced_op_ed_fingerprints(referenced_keys: &HashSet<String>)
     Ok((removed, bytes))
 }
 
-pub fn list_referenced_op_ed_fingerprint_keys(conn: &Connection) -> Result<HashSet<String>, String> {
+pub fn list_referenced_op_ed_fingerprint_keys(
+    conn: &Connection,
+) -> Result<HashSet<String>, String> {
     let mut keys = HashSet::new();
     let mut stmt = conn
         .prepare(
@@ -1279,28 +1282,23 @@ pub fn get_anime_op_ed_summary_cmd(
 mod tests {
     use super::*;
 
-    fn fingerprint_from_frame_scores(scores: &[f32]) -> Fingerprint {
-        let mut data = Vec::with_capacity(scores.len() * BAND_COUNT);
-        for &score in scores {
-            let clamped = score.clamp(0.0, 1.0);
-            let orthogonal = (1.0 - clamped * clamped).sqrt();
-            data.push(clamped);
-            data.push(orthogonal);
-            data.extend(std::iter::repeat_n(0.0, BAND_COUNT - 2));
-        }
+    fn fingerprint_from_values(values: &[i32]) -> Fingerprint {
         Fingerprint {
-            data,
-            frame_count: scores.len(),
-            sample_rate: SAMPLE_RATE,
+            values: values.to_vec(),
+        }
+    }
+
+    fn value_with_bit_diffs(count: u32) -> i32 {
+        if count == 0 {
+            0
+        } else {
+            ((1_u32 << count) - 1) as i32
         }
     }
 
     #[test]
-    fn fingerprint_similarity_identical_frames_score_high() {
-        let samples: Vec<i16> = (0..FRAME_SAMPLES * 4)
-            .map(|i| ((i as f32 * 0.01).sin() * 3000.0) as i16)
-            .collect();
-        let fp = pcm_to_fingerprint(&samples);
+    fn fingerprint_similarity_identical_items_score_high() {
+        let fp = fingerprint_from_values(&[12345, -98765]);
         let score = fingerprint_similarity(&fp, 0, &fp, 0);
         assert!(score > 0.99, "score={score}");
     }
@@ -1319,8 +1317,9 @@ mod tests {
 
     #[test]
     fn match_requires_consistent_strong_frames() {
-        let template = fingerprint_from_frame_scores(&[1.0; 8]);
-        let candidate = fingerprint_from_frame_scores(&[1.0, 0.70, 1.0, 0.70, 1.0, 0.70, 1.0, 0.70]);
+        let template = fingerprint_from_values(&[0; 8]);
+        let weak = value_with_bit_diffs(12);
+        let candidate = fingerprint_from_values(&[0, weak, 0, weak, 0, weak, 0, 0]);
 
         assert!(sliding_match_score(&template, &candidate, 0) >= MATCH_AVERAGE_THRESHOLD);
         assert!(find_best_match_in_candidate(&template, &candidate, 0, 0).is_none());
@@ -1328,12 +1327,15 @@ mod tests {
 
     #[test]
     fn match_accepts_consistent_high_quality_segment() {
-        let template = fingerprint_from_frame_scores(&[1.0; 8]);
-        let candidate = fingerprint_from_frame_scores(&[0.0, 0.0, 0.92, 0.90, 0.94, 0.91, 0.93, 0.90, 0.92, 0.91]);
+        let template = fingerprint_from_values(&[0; 8]);
+        let near = value_with_bit_diffs(2);
+        let far = value_with_bit_diffs(16);
+        let candidate =
+            fingerprint_from_values(&[far, far, near, near, near, near, near, near, near, near]);
 
         let matched = find_best_match_in_candidate(&template, &candidate, 0, 2)
             .expect("consistent high-quality segment should match");
-        assert_eq!(matched.offset_frames, 2);
+        assert!((matched.start_sec - seconds_for_frames(2)).abs() < f64::EPSILON);
         assert!(matched.confidence >= MATCH_AVERAGE_THRESHOLD);
     }
 }

@@ -15,7 +15,7 @@ These steps are for the pre-built Windows release. To build from source, see [De
 
 1. Open [GitHub Releases](https://github.com/SirVeggie/anime-player/releases).
 2. Download the **versioned zip** `AnimePlayer-vX.X.zip`, **not** the standalone `anime-player.exe`.
-   - The zip includes `anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `update.bat`, and `_update.ps1`. The loose exe on the release page is only for updating an existing install and will not run on its own without the DLL beside it. You may delete the bundled ffmpeg tools if you already have them on PATH (scrub thumbnails will use those instead).
+   - The zip includes `anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `fpcalc.exe`, `update.bat`, and `_update.ps1`. The loose exe on the release page is only for updating an existing install and will not run on its own without the DLL beside it. You may delete the bundled ffmpeg/Chromaprint tools if you already have them on PATH (scrub thumbnails and OP/ED detection will use those instead).
 3. Extract the folder anywhere you like (the app is portable) and run `anime-player.exe`.
 4. Your library database and settings are stored in `data/` next to the executable, so you can move the whole folder later.
 
@@ -117,11 +117,12 @@ Install dependencies and download the local libmpv artifacts:
 npm install
 npm run setup:mpv
 npm run setup:ffmpeg
+npm run setup:chromaprint
 ```
 
 You do not need a separate `mpv.exe` install. The setup script downloads `libmpv-2.dll` and `mpv.lib` into `src-tauri/libs/mpv/`; these generated files are intentionally not committed.
 
-Scrub-preview thumbnails use `ffmpeg.exe` and `ffprobe.exe` from `npm run setup:ffmpeg` (stored under `src-tauri/libs/ffmpeg/`, also gitignored). Portable releases ship them beside the exe; you can remove them and rely on PATH instead.
+Scrub-preview thumbnails use `ffmpeg.exe` and `ffprobe.exe` from `npm run setup:ffmpeg` (stored under `src-tauri/libs/ffmpeg/`, also gitignored). OP/ED detection uses Chromaprint `fpcalc.exe` from `npm run setup:chromaprint` (stored under `src-tauri/libs/chromaprint/`). Portable releases ship these tools beside the exe; you can remove them and rely on PATH instead.
 
 ## Development: run and release builds
 
@@ -149,7 +150,7 @@ For a local-only portable build from the latest code (no git tag, zip, or publis
 npm run portable
 ```
 
-Output goes to `releases/dev/` (`anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `update.bat`, `_update.ps1`).
+Output goes to `releases/dev/` (`anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `fpcalc.exe`, `update.bat`, `_update.ps1`).
 
 When publishing a GitHub release, attach the versioned zip, a standalone `anime-player.exe`, and `anime-player.exe.sha256` (written under `releases/` by the package script).
 
