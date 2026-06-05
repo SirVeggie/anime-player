@@ -289,10 +289,15 @@ view components. Per-screen UI lives in `src/components/`:
   find an on-disk fingerprint at start finish immediately and release the HDD stagger
   gap (enqueue skips chroma when the cache file exists, using the same canonical path key as
   fingerprinting)
-  gap so the next chroma can start without a 500ms wait. Discovery slides 15s windows by slicing the in-memory
-  full-episode fingerprint (no per-window cache files). After the coarse cluster wins, a **refinement pass** builds a
-  temporary 90s template, anchors it on each seed episode, slides 5s windows at ±8s (1s steps) around each anchor,
-  and re-clusters to correct 1–2s misalignment before the final template is stored. Optimistic search windows run before a full-episode pass for
+  gap so the next chroma can start without a 500ms wait. Chroma jobs fingerprint the full episode plus phase-1
+  discovery windows (one ffmpeg decode per OP/ED search band, then isolated fpcalc per 15s window on that PCM). Detect
+  loads cached windows for discovery; templates and phase-2 refine windows still use isolated segment fpcalc (refine
+  uses one ffmpeg decode per anchor band). Match candidates use the cached full-episode fingerprint. Slicing
+  subfingerprints out of a full-episode Chromaprint is not used — segment-boundary fpcalc differs from full-file slices.
+  After coarse discovery, a **refinement pass**
+  anchors the coarse template on seed episodes and re-clusters 2.5s windows at ±8s (1s steps); the refined start is
+  kept only when its template matches at least as many batch episodes as the coarse template (and coarse already
+  matches ≥2). Optimistic search windows run before a full-episode pass for
   failed episodes. Titles with multiple OP/ED sets in one folder (e.g. two seasons
   merged) use **block detection**: after three consecutive per-kind match failures,
   discovery re-runs on episodes not yet `matched` for that kind (`op_ed_templates.block_index`
