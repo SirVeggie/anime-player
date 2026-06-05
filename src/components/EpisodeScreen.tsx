@@ -8,7 +8,7 @@ import {
   jobsEnqueueEpisodePageOpEd,
   jobsEnqueueEpisodePageScrubSprites,
   jobsEnqueueOpEdDetect,
-  jobsSetOpEdDetectPriorityForAnime,
+  jobsSetOpEdChromaPriorityForAnime,
   jobsSetScrubSpritePriorityForPaths,
   resetAnimeOpEdAnalysis,
 } from "../api";
@@ -426,6 +426,20 @@ export function EpisodeScreen(props: {
   }, [anime.anilist_title, anime.id, anime.title, episodes]);
 
   useEffect(() => {
+    if (episodes.length === 0) return;
+
+    void jobsSetOpEdChromaPriorityForAnime(anime.id, "medium").catch(() => {
+      /* background queue; ignore */
+    });
+
+    return () => {
+      void jobsSetOpEdChromaPriorityForAnime(anime.id, "low").catch(() => {
+        /* background queue; ignore */
+      });
+    };
+  }, [anime.id, episodes.length]);
+
+  useEffect(() => {
     if (!autoOpEdDetect) return;
 
     void jobsEnqueueEpisodePageOpEd({
@@ -435,12 +449,6 @@ export function EpisodeScreen(props: {
     }).catch(() => {
       /* background queue; ignore */
     });
-
-    return () => {
-      void jobsSetOpEdDetectPriorityForAnime(anime.id, "low").catch(() => {
-        /* background queue; ignore */
-      });
-    };
   }, [anime.id, autoOpEdDetect, preferAnilistDisplayTitle]);
 
   const closeLinkSearch = useCallback(() => {

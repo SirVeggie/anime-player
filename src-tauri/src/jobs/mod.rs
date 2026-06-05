@@ -253,6 +253,39 @@ pub async fn jobs_set_op_ed_detect_priority_for_anime(
 
 #[cfg(windows)]
 #[tauri::command]
+pub async fn jobs_set_op_ed_chroma_priority_for_anime(
+    app: AppHandle,
+    anime_id: i64,
+    priority: JobPriority,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let db = app.state::<AppDatabase>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.set_op_ed_chroma_priority_for_anime(&db, anime_id, priority)
+    })
+    .await
+    .map_err(|e| format!("op-ed chroma priority thread failed: {e}"))?
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn jobs_set_op_ed_chroma_priority_for_episodes(
+    app: AppHandle,
+    episode_ids: Vec<i64>,
+    priority: JobPriority,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.set_op_ed_chroma_priority_for_episodes(&episode_ids, priority)
+    })
+    .await
+    .map_err(|e| format!("op-ed chroma priority thread failed: {e}"))?
+}
+
+#[cfg(windows)]
+#[tauri::command]
 pub fn jobs_set_job_priority(
     jobs: State<'_, JobsState>,
     db: State<'_, AppDatabase>,
@@ -398,6 +431,22 @@ pub async fn jobs_enqueue_op_ed_chroma_for_anime(
         let jobs = app.state::<JobsState>();
         let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
         guard.enqueue_op_ed_chroma_for_anime(&db, request)
+    })
+    .await
+    .map_err(|e| format!("enqueue thread failed: {e}"))?
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn jobs_enqueue_op_ed_chroma_for_episode(
+    app: AppHandle,
+    request: EnqueueOpEdChromaEpisodeJob,
+) -> Result<EnqueueJobResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<AppDatabase>();
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.enqueue_op_ed_chroma_for_episode(&db, request)
     })
     .await
     .map_err(|e| format!("enqueue thread failed: {e}"))?

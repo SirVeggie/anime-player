@@ -19,8 +19,8 @@ use crate::scrub_preview::{
 
 use super::types::{
     EnqueueEpisodePageScrubSprites, EnqueueJobResult, EnqueueOpEdChromaAnimeJob,
-    EnqueueOpEdDetectJob, EnqueueScrubSpriteJob, JobPrerequisiteView, JobPriority, JobProgress,
-    JobResourceType, JobStatus, JobView, JobsSnapshot, TypeMaxParallel,
+    EnqueueOpEdChromaEpisodeJob, EnqueueOpEdDetectJob, EnqueueScrubSpriteJob, JobPrerequisiteView,
+    JobPriority, JobProgress, JobResourceType, JobStatus, JobView, JobsSnapshot, TypeMaxParallel,
 };
 
 /// Episode newly imported during `rescan_library` (auto scrub enqueue).
@@ -526,6 +526,88 @@ impl JobManager {
         Ok(())
     }
 
+    pub fn set_op_ed_chroma_priority_for_anime(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        priority: JobPriority,
+    ) -> Result<(), String> {
+        let episode_ids: Vec<i64> = db
+            .with_conn(|conn| {
+                Ok(op_ed::list_anime_episodes(conn, anime_id)?
+                    .into_iter()
+                    .map(|ep| ep.id)
+                    .collect())
+            })?;
+        self.set_op_ed_chroma_priority_for_episodes(&episode_ids, priority)
+    }
+
+    pub fn set_op_ed_chroma_priority_for_episodes(
+        &mut self,
+        episode_ids: &[i64],
+        priority: JobPriority,
+    ) -> Result<(), String> {
+        let wanted: std::collections::HashSet<i64> = episode_ids.iter().copied().collect();
+        let mut job_ids: Vec<String> = self
+            .records
+            .iter()
+            .filter(|(_, r)| {
+                r.view.status == JobStatus::Queued
+                    && r.view.job_type == "op_ed_chroma"
+                    && r.view
+                        .identity
+                        .strip_prefix("op_ed_chroma:")
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .is_some_and(|ep_id| wanted.contains(&ep_id))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut changed = false;
+        for job_id in job_ids.drain(..) {
+            if self.set_job_priority_inner(&job_id, priority)? {
+                changed = true;
+            }
+        }
+        if changed {
+            self.emit_snapshot_now();
+        }
+        Ok(())
+    }
+
+    fn ensure_op_ed_detect_jobs_high_for_anime(&mut self, anime_id: i64) -> Result<(), String> {
+        let prefix = op_ed_detect_job_identity_prefix(anime_id);
+        let legacy = op_ed::op_ed_job_identity(anime_id);
+        let job_ids: Vec<String> = self
+            .records
+            .iter()
+            .filter(|(_, r)| {
+                r.view.status == JobStatus::Queued
+                    && r.view.priority != JobPriority::High
+                    && (r.view.identity.starts_with(&prefix) || r.view.identity == legacy)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut changed = false;
+        for job_id in job_ids {
+            if self.set_job_priority_inner(&job_id, JobPriority::High)? {
+                changed = true;
+            }
+        }
+        if changed {
+            self.emit_snapshot_now();
+        }
+        Ok(())
+    }
+
+    fn bump_queued_chroma_for_anime(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        priority: JobPriority,
+    ) -> Result<(), String> {
+        self.set_op_ed_chroma_priority_for_anime(db, anime_id, priority)
+    }
+
     pub fn enqueue_scrub_sprite(
         &mut self,
         request: EnqueueScrubSpriteJob,
@@ -636,6 +718,29 @@ impl JobManager {
             job_id: Some(id),
             skipped: false,
         })
+    }
+
+    pub fn enqueue_op_ed_chroma_for_episode(
+        &mut self,
+        db: &AppDatabase,
+        request: EnqueueOpEdChromaEpisodeJob,
+    ) -> Result<EnqueueJobResult, String> {
+        let ep = db.with_conn(|conn| op_ed::load_episode_by_id(conn, request.episode_id))?;
+        let Some(ep) = ep else {
+            return Ok(EnqueueJobResult {
+                job_id: None,
+                skipped: true,
+            });
+        };
+        let result = self.enqueue_op_ed_chroma_episode(
+            db,
+            &ep,
+            request.priority,
+            request.anime_title.as_deref(),
+            false,
+        )?;
+        self.finish_op_ed_enqueue_batch();
+        Ok(result)
     }
 
     pub fn enqueue_op_ed_chroma_for_anime(
@@ -780,13 +885,10 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<EnqueueJobResult, String> {
+        let chroma_priority = request.priority;
         if let Some(existing_id) = self.active_op_ed_detect_job_id(request.anime_id) {
-            if self.records.get(&existing_id).is_some_and(|r| {
-                r.view.status == JobStatus::Queued
-                    && priority_rank(request.priority) > priority_rank(r.view.priority)
-            }) {
-                self.set_job_priority(&existing_id, request.priority)?;
-            }
+            self.bump_queued_chroma_for_anime(db, request.anime_id, chroma_priority)?;
+            self.ensure_op_ed_detect_jobs_high_for_anime(request.anime_id)?;
             return Ok(EnqueueJobResult {
                 job_id: Some(existing_id),
                 skipped: false,
@@ -826,7 +928,7 @@ impl JobManager {
             let chroma = self.enqueue_op_ed_chroma_episode(
                 db,
                 ep,
-                request.priority,
+                chroma_priority,
                 request.anime_title.as_deref(),
                 false,
             )?;
@@ -870,7 +972,7 @@ impl JobManager {
                 identity: identity.clone(),
                 job_type: "op_ed_detect".to_string(),
                 resource_type: JobResourceType::None,
-                priority: request.priority,
+                priority: JobPriority::High,
                 status: JobStatus::Queued,
                 cancelable: true,
                 progress: JobProgress {
@@ -901,11 +1003,7 @@ impl JobManager {
             self.records.insert(id.clone(), record);
             self.identity_to_id.insert(identity, id.clone());
 
-            if request.priority == JobPriority::High {
-                self.try_start_or_queue(&id, true);
-            } else {
-                self.queued_ids.push(id.clone());
-            }
+            self.try_start_or_queue(&id, true);
 
             if first_detect_id.is_none() {
                 first_detect_id = Some(id.clone());

@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addMpvSubtitleFile,
   getScrubSpriteIfReady,
+  jobsEnqueueOpEdChromaForEpisode,
   jobsEnqueueScrubSprite,
   getMinPositionSecondsToPersist,
   getMpvTimePos,
@@ -19,6 +20,7 @@ import {
   syncAnilistEpisodeProgress,
 } from "../api";
 import { opEdSeekMarkers, type OpEdSeekMarker } from "../opEd";
+import { animeDisplayTitle } from "../utils";
 import type {
   AnilistProgressSyncResult,
   AnimeSummary,
@@ -413,6 +415,9 @@ export function PlayerView(props: {
   const sessionOpenedAsWatchedRef = useRef(episode.watched);
   const sessionEpisodeSnapshotRef = useRef(episode);
   const userRequestedStartResetRef = useRef(false);
+  const lastPersistEpisodeIdRef = useRef<number | null>(null);
+  const lastPersistAtMsRef = useRef(0);
+  const wasVisibleForAutoPersistRef = useRef(visible);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -467,11 +472,18 @@ export function PlayerView(props: {
       }
 
       try {
-        await jobsEnqueueScrubSprite({
-          path,
-          priority: "high",
-          episodeLabel: episode.file_name,
-        });
+        await Promise.all([
+          jobsEnqueueScrubSprite({
+            path,
+            priority: "high",
+            episodeLabel: episode.file_name,
+          }),
+          jobsEnqueueOpEdChromaForEpisode({
+            episodeId: episode.id,
+            priority: "high",
+            animeTitle: anime ? animeDisplayTitle(anime, preferAnilistDisplayTitle) : null,
+          }),
+        ]);
       } catch {
         /* keep time-only tooltip */
       }
@@ -486,7 +498,7 @@ export function PlayerView(props: {
       scrubSpritePathRef.current = null;
       void unlisten?.();
     };
-  }, [episode.path, episode.file_name]);
+  }, [anime, episode.file_name, episode.id, episode.path, preferAnilistDisplayTitle]);
 
   // App passes inline-arrow handlers that change identity every render
   // (`onError`, `onClose`, etc.). If the listener-setup useEffect depends on
@@ -651,39 +663,75 @@ export function PlayerView(props: {
       });
   }, []);
 
+  const resolvePlaybackSnapshot = useCallback(async () => {
+    const current = playbackRef.current;
+    let position = current.position;
+    let duration = current.duration;
+    if (loadedPathRef.current && mediaPathsEqual(loadedPathRef.current, current.episode.path)) {
+      try {
+        const actualSeconds = await getMpvTimePos();
+        if (Number.isFinite(actualSeconds) && actualSeconds >= 0) {
+          position = actualSeconds;
+        }
+      } catch {
+        /* keep React-tracked position */
+      }
+    }
+    if (duration <= 0 && current.episode.duration_seconds > 0) {
+      duration = current.episode.duration_seconds;
+    }
+    return { episode: current.episode, position, duration };
+  }, []);
+
+  const isNearEndPlayback = useCallback(
+    (position: number, duration: number) =>
+      duration > 0 && position / duration >= NEAR_END_PROGRESS_RATIO,
+    [],
+  );
+
+  const shouldSkipAutoPersist = useCallback((episodeId: number) => {
+    return lastPersistEpisodeIdRef.current === episodeId && Date.now() - lastPersistAtMsRef.current < 1000;
+  }, []);
+
   const persistProgress = useCallback(
     async (forceWatched = false, options?: { deferAnilistSync?: boolean }) => {
-      const current = playbackRef.current;
+      const current = await resolvePlaybackSnapshot();
+      playbackRef.current = current;
+      const nearEnd = isNearEndPlayback(current.position, current.duration);
+      const shouldMarkWatched = forceWatched || nearEnd;
 
-      if (userRequestedStartResetRef.current) {
+      if (userRequestedStartResetRef.current && !shouldMarkWatched) {
         const saved = await saveEpisodeProgress(
           current.episode.id,
           current.position,
           current.duration,
           false,
         );
+        lastPersistEpisodeIdRef.current = saved.id;
+        lastPersistAtMsRef.current = Date.now();
         propsRef.current.onProgressSaved(saved);
         return saved;
       }
 
       if (
         !forceWatched &&
+        !shouldMarkWatched &&
+        !userRequestedStartResetRef.current &&
         sessionOpenedAsWatchedRef.current &&
         Date.now() - sessionOpenedAtMsRef.current < WATCHED_PEEK_MAX_MS
       ) {
         return sessionEpisodeSnapshotRef.current;
       }
 
-      const watched =
-        forceWatched ||
-        (current.duration > 0 &&
-          current.position / current.duration >= NEAR_END_PROGRESS_RATIO);
+      const watched = shouldMarkWatched;
       const saved = await saveEpisodeProgress(
         current.episode.id,
         current.position,
         current.duration,
         watched,
       );
+      lastPersistEpisodeIdRef.current = saved.id;
+      lastPersistAtMsRef.current = Date.now();
       propsRef.current.onProgressSaved(saved);
       if (watched) {
         if (options?.deferAnilistSync) {
@@ -699,18 +747,30 @@ export function PlayerView(props: {
       }
       return saved;
     },
-    [syncAnilistProgressInBackground],
+    [isNearEndPlayback, resolvePlaybackSnapshot, syncAnilistProgressInBackground],
   );
+
+  const persistProgressRef = useRef(persistProgress);
+  persistProgressRef.current = persistProgress;
+
+  useEffect(() => {
+    const wasVisible = wasVisibleForAutoPersistRef.current;
+    wasVisibleForAutoPersistRef.current = visible;
+    if (!wasVisible || visible) return;
+    const episodeId = playbackRef.current.episode.id;
+    if (shouldSkipAutoPersist(episodeId)) return;
+    void persistProgressRef.current().catch((err) => propsRef.current.onError(errorMessage(err)));
+  }, [shouldSkipAutoPersist, visible]);
 
   useEffect(() => {
     const r = playbackProgressFlushRef;
     r.current = async () => {
-      await persistProgress();
+      await persistProgressRef.current();
     };
     return () => {
       r.current = null;
     };
-  }, [persistProgress, playbackProgressFlushRef]);
+  }, [playbackProgressFlushRef]);
 
   const refreshTracks = useCallback(async () => {
     try {
@@ -871,6 +931,14 @@ export function PlayerView(props: {
   // Only reset when switching episodes. Progress saves refresh `position_seconds` on the same
   // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
   // while mpv still had the file loaded, which broke reopening the same episode from the list.
+  useEffect(() => {
+    return () => {
+      const episodeId = playbackRef.current.episode.id;
+      if (shouldSkipAutoPersist(episodeId)) return;
+      void persistProgressRef.current().catch((err) => propsRef.current.onError(errorMessage(err)));
+    };
+  }, [episode.id, shouldSkipAutoPersist]);
+
   useEffect(() => {
     sessionOpenedAtMsRef.current = Date.now();
     sessionOpenedAsWatchedRef.current = episode.watched;
@@ -1220,25 +1288,20 @@ export function PlayerView(props: {
       if (!next) return;
       void persistProgress(false, { deferAnilistSync: true })
         .catch((e) => onError(errorMessage(e)))
-        .then(async () => {
-          if (delta === 1) {
-            const cur = playbackRef.current;
-            const nearEnd =
-              cur.duration > 0 && cur.position / cur.duration >= NEAR_END_PROGRESS_RATIO;
-            if (nearEnd) {
-              pendingResumeSecondsRef.current = null;
-              try {
-                const [saved] = await Promise.all([
-                  saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
-                  invoke("mpv_load", { path: next.path }),
-                ]);
-                loadedPathRef.current = next.path;
-                onProgressSaved(saved);
-                onSelectEpisode(saved);
-                return;
-              } catch (e) {
-                onError(errorMessage(e));
-              }
+        .then(async (saved) => {
+          if (delta === 1 && saved?.watched) {
+            pendingResumeSecondsRef.current = null;
+            try {
+              const [nextSaved] = await Promise.all([
+                saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
+                invoke("mpv_load", { path: next.path }),
+              ]);
+              loadedPathRef.current = next.path;
+              onProgressSaved(nextSaved);
+              onSelectEpisode(nextSaved);
+              return;
+            } catch (e) {
+              onError(errorMessage(e));
             }
           }
           onSelectEpisode(next);

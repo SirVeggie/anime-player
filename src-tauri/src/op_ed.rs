@@ -402,6 +402,22 @@ pub fn list_anime_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<OpEdE
         .collect())
 }
 
+pub fn load_episode_by_id(conn: &Connection, episode_id: i64) -> Result<Option<OpEdEpisode>, String> {
+    conn.query_row(
+        "SELECT id, path, duration_seconds FROM episodes WHERE id = ?1 AND missing = 0",
+        params![episode_id],
+        |row| {
+            Ok(OpEdEpisode {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                duration_seconds: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 pub fn episode_duration_seconds(ep: &OpEdEpisode) -> Result<f64, String> {
     if ep.duration_seconds > 0.0 {
         return Ok(ep.duration_seconds);

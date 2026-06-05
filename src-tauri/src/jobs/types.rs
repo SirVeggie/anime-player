@@ -170,3 +170,11 @@ pub struct EnqueueOpEdChromaAnimeJob {
     pub priority: JobPriority,
     pub anime_title: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueOpEdChromaEpisodeJob {
+    pub episode_id: i64,
+    pub priority: JobPriority,
+    pub anime_title: Option<String>,
+}

@@ -265,17 +265,22 @@ view components. Per-screen UI lives in `src/components/`:
   via CSS `background-position`.
 - **OP/ED detection** is queued automatically like scrub sprites when
   `settings.auto_op_ed_detect` is enabled (default off): opening a title’s
-  episode page calls `jobs_enqueue_episode_page_op_ed` (medium priority; downgrades
-  queued detect batches to **low** on leave via
-  `jobs_set_op_ed_detect_priority_for_anime`). A rescan that imports at most
-  **20** new episodes (`RESCAN_AUTO_SCRUB_MAX`, shared with scrub) also enqueues
-  detect per affected anime (low priority). The worker (`jobs_enqueue_op_ed_detect` /
-  identity `op_ed_detect:{anime_id}`, resource type `none`) scans cached Chromaprint
-  fingerprints and writes templates plus per-episode OP/ED rows in SQLite
-  (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`). Progress survives
-  app restarts; re-running resumes from saved rows. Detect reuses cached fingerprints
-  when present; otherwise it enqueues `op_ed_chroma` jobs (resource type `chroma`;
-  ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) as prerequisites. Detect is
+  episode page calls `jobs_enqueue_episode_page_op_ed` (the request’s `priority`
+  field controls **chroma** scheduling only — medium on the episode page).
+  Detect jobs (`op_ed_detect:{anime_id}`, resource type `none`) always enqueue at
+  **high** priority so they start as soon as chroma prerequisites finish (including
+  small-rescan auto-enqueue). A rescan that imports at most **20** new episodes
+  (`RESCAN_AUTO_SCRUB_MAX`, shared with scrub) also enqueues detect per affected
+  anime (detect high, chroma low). The worker (`jobs_enqueue_op_ed_detect`) scans
+  cached Chromaprint fingerprints and writes templates plus per-episode OP/ED rows
+  in SQLite (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`).
+  Progress survives app restarts; re-running resumes from saved rows. Detect reuses
+  cached fingerprints when present; otherwise it enqueues `op_ed_chroma` jobs
+  (resource type `chroma`; ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`)
+  as prerequisites. **Chroma** priority mirrors scrub: medium while browsing a
+  title’s episode list (`jobs_set_op_ed_chroma_priority_for_anime`), low on leave,
+  high for the episode open in the player (`jobs_enqueue_op_ed_chroma_for_episode`).
+  Detect is
   For titles with **more than 12** episodes, detect runs in two jobs: a **preview**
   pass on the first 12 episodes (fast timestamps for early watching), then a **full**
   pass on every episode with the same block-detection logic as a single job on the

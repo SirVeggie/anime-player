@@ -290,6 +290,12 @@ export type EnqueueOpEdChromaAnimeJob = {
   animeTitle?: string | null;
 };
 
+export type EnqueueOpEdChromaEpisodeJob = {
+  episodeId: number;
+  priority: JobPriority;
+  animeTitle?: string | null;
+};
+
 export type TypeMaxParallel = {
   resourceType: string;
   maxParallel: number;

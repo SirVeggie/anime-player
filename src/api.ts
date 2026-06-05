@@ -17,6 +17,7 @@ import type {
   AnimeOpEdAnalysisSummary,
   EnqueueJobResult,
   EnqueueOpEdChromaAnimeJob,
+  EnqueueOpEdChromaEpisodeJob,
   EnqueueOpEdDetectJob,
   EnqueueEpisodePageScrubSprites,
   EnqueueScrubSpriteJob,
@@ -218,6 +219,12 @@ export function jobsEnqueueOpEdChromaForAnime(
   return invoke("jobs_enqueue_op_ed_chroma_for_anime", { request });
 }
 
+export function jobsEnqueueOpEdChromaForEpisode(
+  request: EnqueueOpEdChromaEpisodeJob,
+): Promise<EnqueueJobResult> {
+  return invoke("jobs_enqueue_op_ed_chroma_for_episode", { request });
+}
+
 export function resetAnimeOpEdAnalysis(animeId: number): Promise<void> {
   return invoke("reset_anime_op_ed_analysis_cmd", { animeId });
 }
@@ -242,6 +249,20 @@ export function jobsSetOpEdDetectPriorityForAnime(
   priority: JobPriority,
 ): Promise<void> {
   return invoke("jobs_set_op_ed_detect_priority_for_anime", { animeId, priority });
+}
+
+export function jobsSetOpEdChromaPriorityForAnime(
+  animeId: number,
+  priority: JobPriority,
+): Promise<void> {
+  return invoke("jobs_set_op_ed_chroma_priority_for_anime", { animeId, priority });
+}
+
+export function jobsSetOpEdChromaPriorityForEpisodes(
+  episodeIds: number[],
+  priority: JobPriority,
+): Promise<void> {
+  return invoke("jobs_set_op_ed_chroma_priority_for_episodes", { episodeIds, priority });
 }
 
 export function getMpvTracks(): Promise<MpvTrack[]> {
