@@ -39,6 +39,13 @@ const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
 const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
 const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
 const SEED_MATCH_THRESHOLD: f32 = 0.82;
+/// Refinement pass: shorter window for sharper alignment once anchors are close.
+const SEED_REFINE_WINDOW_SEC: f64 = 2.5;
+/// After coarse discovery, slide refine windows ± this many seconds around per-episode anchors.
+const SEED_REFINE_OFFSET_SEC: i32 = 8;
+const SEED_REFINE_OFFSET_STEP_SEC: f64 = 1.0;
+/// Minimum sliding score when anchoring the 90s template on a seed episode for refinement.
+const SEED_REFINE_ANCHOR_THRESHOLD: f32 = 0.82;
 const MAX_SEED_EPISODES: usize = 10;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
 /// Consecutive per-kind match misses that indicate a new OP/ED block (e.g. season change).
@@ -926,12 +933,57 @@ struct SeedCandidate {
     fingerprint: Fingerprint,
 }
 
-/// Steps reserved per segment kind: scan each seed episode, compare, then build or bail.
+fn kind_optimistic_search_range(kind: SegmentKind, duration: f64) -> (usize, usize) {
+    match kind {
+        SegmentKind::Op => {
+            let end_sec = OP_SEARCH_SEC.min(duration);
+            (0, frames_for_seconds(end_sec))
+        }
+        SegmentKind::Ed => {
+            let tail = ED_TAIL_SEC.min(duration);
+            let start = (duration - tail).max(0.0);
+            (frames_for_seconds(start), frames_for_seconds(duration))
+        }
+    }
+}
+
+/// Best template offset in a search region (no consistency gates — used for seed refinement).
+fn find_anchor_offset(
+    template: &Fingerprint,
+    candidate: &Fingerprint,
+    search_start_frame: usize,
+    search_end_frame: usize,
+) -> Option<usize> {
+    let template_frames = template.frame_count();
+    if template_frames == 0 || candidate.frame_count() < template_frames {
+        return None;
+    }
+    let end = search_end_frame.min(candidate.frame_count().saturating_sub(template_frames));
+    if search_start_frame > end {
+        return None;
+    }
+    let mut best_score = 0.0f32;
+    let mut best_offset = search_start_frame;
+    for offset in search_start_frame..=end {
+        let score = sliding_match_score(template, candidate, offset);
+        if score > best_score {
+            best_score = score;
+            best_offset = offset;
+        }
+    }
+    if best_score >= SEED_REFINE_ANCHOR_THRESHOLD {
+        Some(best_offset)
+    } else {
+        None
+    }
+}
+
+/// Steps reserved per segment kind: scan each seed episode, compare, refine, then build or bail.
 fn discovery_steps_per_kind(episode_count: usize) -> u32 {
     if episode_count < 2 {
         return 0;
     }
-    episode_count.min(MAX_SEED_EPISODES) as u32 + 2
+    episode_count.min(MAX_SEED_EPISODES) as u32 + 4
 }
 
 fn max_detection_blocks(episode_count: usize) -> u32 {
@@ -1028,6 +1080,10 @@ fn discover_repeated_seed(
         kind.display_name()
     ));
 
+    Ok(cluster_seed_candidates(&seeds))
+}
+
+fn cluster_seed_candidates(seeds: &[SeedCandidate]) -> Option<(SeedCandidate, Vec<i64>)> {
     let mut best_cluster: Option<(SeedCandidate, Vec<i64>, usize)> = None;
     for (i, seed_a) in seeds.iter().enumerate() {
         let mut matching_eps = vec![seed_a.episode_id];
@@ -1050,14 +1106,88 @@ fn discover_repeated_seed(
             best_cluster = Some((seed_a.clone(), matching_eps, count));
         }
     }
-
-    let Some((seed, episode_ids, count)) = best_cluster else {
-        return Ok(None);
-    };
+    let (seed, episode_ids, count) = best_cluster?;
     if count < 2 {
-        return Ok(None);
+        return None;
     }
-    Ok(Some((seed, episode_ids)))
+    Some((seed, episode_ids))
+}
+
+/// Second discovery pass: anchor the coarse 90s template on each seed episode, then
+/// re-cluster `SEED_REFINE_WINDOW_SEC` windows within ±`SEED_REFINE_OFFSET_SEC` at 1s steps.
+fn refine_discovered_seed(
+    initial_seed: &SeedCandidate,
+    source_ids: &[i64],
+    episodes: &[EpisodeRow],
+    template_fp: &Fingerprint,
+    kind: SegmentKind,
+    cancel: &AtomicBool,
+    report: &mut dyn FnMut(&str),
+) -> Result<(SeedCandidate, Vec<i64>), String> {
+    report(&format!(
+        "{} discovery: refining seed alignment",
+        kind.display_name()
+    ));
+
+    let refine_window_frames = frames_for_seconds(SEED_REFINE_WINDOW_SEC);
+    let mut refined_seeds: Vec<SeedCandidate> = Vec::new();
+    for ep_id in source_ids {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("OP/ED detection cancelled".to_string());
+        }
+        let Some(ep) = episodes.iter().find(|e| e.id == *ep_id) else {
+            continue;
+        };
+        let duration = if ep.duration_seconds > 0.0 {
+            ep.duration_seconds
+        } else {
+            let path = normalized_video_path(&ep.path)?;
+            probe_duration(&path)?
+        };
+        let full_extract_len = full_episode_extract_len(duration);
+        let (_, full) = ensure_episode_fingerprint(&ep.path, 0.0, full_extract_len)?;
+        let (search_start, search_end) = kind_optimistic_search_range(kind, duration);
+        let Some(anchor_frame) =
+            find_anchor_offset(template_fp, &full, search_start, search_end)
+        else {
+            continue;
+        };
+        let anchor_sec = seconds_for_frames(anchor_frame);
+        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
+        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 {
+            let window_start_sec = anchor_sec + offset_sec;
+            if window_start_sec < 0.0 {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            let window_start_frame = frames_for_seconds(window_start_sec);
+            if window_start_frame + refine_window_frames > full.frame_count() {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            if let Some(fp) =
+                slice_fingerprint(&full, window_start_frame, refine_window_frames)
+            {
+                refined_seeds.push(SeedCandidate {
+                    start_sec: window_start_sec,
+                    episode_id: ep.id,
+                    fingerprint: fp,
+                });
+            }
+            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+        }
+    }
+
+    report(&format!(
+        "{} discovery: comparing refined fingerprints",
+        kind.display_name()
+    ));
+
+    if let Some((refined, ids)) = cluster_seed_candidates(&refined_seeds) {
+        Ok((refined, ids))
+    } else {
+        Ok((initial_seed.clone(), source_ids.to_vec()))
+    }
 }
 
 fn build_template_fingerprint(
@@ -1263,17 +1393,7 @@ impl DetectContext<'_> {
     }
 
     fn optimistic_search_range(&self, kind: SegmentKind, duration: f64) -> (usize, usize) {
-        match kind {
-            SegmentKind::Op => {
-                let end_sec = OP_SEARCH_SEC.min(duration);
-                (0, frames_for_seconds(end_sec))
-            }
-            SegmentKind::Ed => {
-                let tail = ED_TAIL_SEC.min(duration);
-                let start = (duration - tail).max(0.0);
-                (frames_for_seconds(start), frames_for_seconds(duration))
-            }
-        }
+        kind_optimistic_search_range(kind, duration)
     }
 
     fn full_search_range(&self, duration: f64) -> (usize, usize) {
@@ -1671,31 +1791,58 @@ fn run_kind_detection(
                 block_index + 1
             ));
 
-            let source_path = episodes
+            let coarse_path = episodes
                 .iter()
                 .find(|e| e.id == seed.episode_id)
                 .map(|e| e.path.as_str())
                 .ok_or("seed episode not found")?;
-            let seed_duration = episodes
+            let coarse_duration = episodes
                 .iter()
                 .find(|e| e.id == seed.episode_id)
                 .map(|e| ctx.episode_duration(e))
                 .transpose()?
                 .unwrap_or(0.0);
+            let (coarse_template_fp, _) = build_template_fingerprint(
+                coarse_path,
+                seed.start_sec,
+                coarse_duration,
+                ctx.cancel,
+            )?;
+            let (refined_seed, refined_source_ids) = refine_discovered_seed(
+                &seed,
+                &source_ids,
+                episodes,
+                &coarse_template_fp,
+                kind,
+                ctx.cancel,
+                &mut |label| tick(label),
+            )?;
+
+            let source_path = episodes
+                .iter()
+                .find(|e| e.id == refined_seed.episode_id)
+                .map(|e| e.path.as_str())
+                .ok_or("refined seed episode not found")?;
+            let seed_duration = episodes
+                .iter()
+                .find(|e| e.id == refined_seed.episode_id)
+                .map(|e| ctx.episode_duration(e))
+                .transpose()?
+                .unwrap_or(0.0);
             let (template_fp, template_key) = build_template_fingerprint(
                 source_path,
-                seed.start_sec,
+                refined_seed.start_sec,
                 seed_duration,
                 ctx.cancel,
             )?;
             let template_id = ctx.insert_template(
                 kind,
                 block_index,
-                seed.start_sec,
+                refined_seed.start_sec,
                 SEGMENT_DURATION_SEC,
                 1.0,
                 &template_key,
-                &source_ids,
+                &refined_source_ids,
             )?;
             break 'template Some((template_fp, template_id));
         };
@@ -2180,6 +2327,45 @@ mod tests {
         assert_eq!(slice.frame_count(), SEED_WINDOW_FRAMES);
         assert_eq!(slice.values[0], 60);
         assert_eq!(slice.values[SEED_WINDOW_FRAMES - 1], (60 + SEED_WINDOW_FRAMES - 1) as i32);
+    }
+
+    #[test]
+    fn cluster_seed_candidates_requires_cross_episode_agreement() {
+        let near = value_with_bit_diffs(2);
+        let window = fingerprint_from_values(&[near; SEED_WINDOW_FRAMES]);
+        let seeds = vec![
+            SeedCandidate {
+                start_sec: 0.0,
+                episode_id: 1,
+                fingerprint: window.clone(),
+            },
+            SeedCandidate {
+                start_sec: 1.0,
+                episode_id: 2,
+                fingerprint: window.clone(),
+            },
+            SeedCandidate {
+                start_sec: 90.0,
+                episode_id: 3,
+                fingerprint: fingerprint_from_values(&[value_with_bit_diffs(16); SEED_WINDOW_FRAMES]),
+            },
+        ];
+        let (seed, ids) = cluster_seed_candidates(&seeds).expect("cluster");
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&1) && ids.contains(&2));
+        assert!(seed.episode_id == 1 || seed.episode_id == 2);
+    }
+
+    #[test]
+    fn find_anchor_offset_picks_best_sliding_match() {
+        let near = value_with_bit_diffs(2);
+        let far = value_with_bit_diffs(16);
+        let template = fingerprint_from_values(&[near; 40]);
+        let mut candidate_vals = vec![far; 8];
+        candidate_vals.extend(vec![near; 40]);
+        let candidate = fingerprint_from_values(&candidate_vals);
+        let offset = find_anchor_offset(&template, &candidate, 0, 12).expect("anchor");
+        assert_eq!(offset, 8);
     }
 
     #[test]
