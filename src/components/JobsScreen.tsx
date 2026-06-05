@@ -276,7 +276,7 @@ export function JobsScreen(props: {
   const snapshot = useJobsSnapshot();
   const { onBack, onError } = props;
   const [activeTab, setActiveTab] = useState<JobsTab>("active");
-  const [maxParallelDraft, setMaxParallelDraft] = useState(5);
+  const [maxParallelDraft, setMaxParallelDraft] = useState(12);
   const [typeMaxParallelDraft, setTypeMaxParallelDraft] = useState<Record<string, number>>({});
   const [cancelBusy, setCancelBusy] = useState(false);
   const [limitsSaving, setLimitsSaving] = useState(false);

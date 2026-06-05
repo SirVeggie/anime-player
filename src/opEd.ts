@@ -23,6 +23,12 @@ export function activeOpEdChromaJobs(
   );
 }
 
+/** e.g. `Detect OP/ED (2/5)` → `(2/5)`. */
+export function opEdDetectBatchFraction(jobName: string): string | null {
+  const match = jobName.match(/\((\d+\/\d+)\)\s*$/);
+  return match ? `(${match[1]})` : null;
+}
+
 export function findActiveOpEdJob(
   snapshot: JobsSnapshot | null | undefined,
   animeId: number,

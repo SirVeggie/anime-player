@@ -196,6 +196,10 @@ export function jobsEnqueueEpisodePageScrubSprites(
   return invoke("jobs_enqueue_episode_page_scrub_sprites", { request });
 }
 
+export function jobsEnqueueEpisodePageOpEd(request: EnqueueOpEdDetectJob): Promise<void> {
+  return invoke("jobs_enqueue_episode_page_op_ed", { request });
+}
+
 export function jobsEnqueueOpEdDetect(request: EnqueueOpEdDetectJob): Promise<EnqueueJobResult> {
   return invoke("jobs_enqueue_op_ed_detect", { request });
 }
@@ -223,6 +227,13 @@ export function jobsSetScrubSpritePriorityForPaths(
   priority: JobPriority,
 ): Promise<void> {
   return invoke("jobs_set_scrub_sprite_priority_for_paths", { paths, priority });
+}
+
+export function jobsSetOpEdDetectPriorityForAnime(
+  animeId: number,
+  priority: JobPriority,
+): Promise<void> {
+  return invoke("jobs_set_op_ed_detect_priority_for_anime", { animeId, priority });
 }
 
 export function getMpvTracks(): Promise<MpvTrack[]> {

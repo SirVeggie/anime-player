@@ -770,11 +770,27 @@
   border: 1px solid var(--border-subtle);
 }
 
-.op-ed-analysis-banner__row {
+.op-ed-analysis-banner__header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  gap: 6px 12px;
+}
+
+.op-ed-analysis-banner__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.op-ed-analysis-banner__batch {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.op-ed-analysis-banner__step {
+  margin: 0;
+  font-size: 13px;
 }
 
 .episode-op-ed {

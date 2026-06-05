@@ -31,14 +31,21 @@ pub struct RescanScrubImport {
     pub episode_label: String,
 }
 
-/// When a rescan imports at most this many episodes, queue scrub thumbnails for them.
+/// When a rescan imports at most this many episodes, queue scrub thumbnails and OP/ED detect for them.
 pub const RESCAN_AUTO_SCRUB_MAX: usize = 20;
+
+/// Title affected by a small rescan import batch (OP/ED detect is per anime, not per file).
+#[derive(Debug, Clone)]
+pub struct RescanOpEdImport {
+    pub anime_id: i64,
+    pub anime_title: String,
+}
 
 const MAX_PARALLEL_SETTING: &str = "jobs_max_parallel";
 const TYPE_MAX_PARALLEL_SETTING_PREFIX: &str = "jobs_max_parallel_type_";
-const DEFAULT_MAX_PARALLEL: u32 = 5;
+const DEFAULT_MAX_PARALLEL: u32 = 12;
 const DEFAULT_FFMPEG_MAX_PARALLEL: u32 = 1;
-const DEFAULT_CHROMA_MAX_PARALLEL: u32 = 4;
+const DEFAULT_CHROMA_MAX_PARALLEL: u32 = 12;
 const MAX_PARALLEL_CAP: u32 = 20;
 const HISTORY_CAP: usize = 200;
 /// Coalesce rapid `jobs://updated` emissions so the WebView is not flooded during parallel work.
@@ -440,6 +447,77 @@ impl JobManager {
         Ok(())
     }
 
+    pub fn enqueue_op_ed_for_rescan_imports(
+        &mut self,
+        db: &AppDatabase,
+        imports: &[RescanOpEdImport],
+    ) -> Result<(), String> {
+        if imports.is_empty() || imports.len() > RESCAN_AUTO_SCRUB_MAX {
+            return Ok(());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for item in imports {
+            if !seen.insert(item.anime_id) {
+                continue;
+            }
+            let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, item.anime_id))?;
+            if !needs {
+                continue;
+            }
+            let _ = self.enqueue_op_ed_detect(
+                db,
+                EnqueueOpEdDetectJob {
+                    anime_id: item.anime_id,
+                    priority: JobPriority::Low,
+                    anime_title: Some(item.anime_title.clone()),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn enqueue_episode_page_op_ed(
+        &mut self,
+        db: &AppDatabase,
+        request: EnqueueOpEdDetectJob,
+    ) -> Result<(), String> {
+        let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
+        if !needs {
+            return Ok(());
+        }
+        let _ = self.enqueue_op_ed_detect(db, request)?;
+        self.finish_scheduling_batch();
+        Ok(())
+    }
+
+    pub fn set_op_ed_detect_priority_for_anime(
+        &mut self,
+        anime_id: i64,
+        priority: JobPriority,
+    ) -> Result<(), String> {
+        let prefix = op_ed_detect_job_identity_prefix(anime_id);
+        let legacy = op_ed::op_ed_job_identity(anime_id);
+        let mut job_ids: Vec<String> = self
+            .records
+            .iter()
+            .filter(|(_, r)| {
+                r.view.status == JobStatus::Queued
+                    && (r.view.identity.starts_with(&prefix) || r.view.identity == legacy)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut changed = false;
+        for job_id in job_ids.drain(..) {
+            if self.set_job_priority_inner(&job_id, priority)? {
+                changed = true;
+            }
+        }
+        if changed {
+            self.emit_snapshot_now();
+        }
+        Ok(())
+    }
+
     pub fn enqueue_scrub_sprite(
         &mut self,
         request: EnqueueScrubSpriteJob,
@@ -694,28 +772,26 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<EnqueueJobResult, String> {
-        if self.has_active_op_ed_detect(request.anime_id) {
-            let prefix = op_ed_detect_job_identity_prefix(request.anime_id);
-            if let Some(existing_id) = self
-                .records
-                .iter()
-                .find(|(_, r)| {
-                    r.view.identity.starts_with(&prefix)
-                        && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
-                })
-                .map(|(id, _)| id.clone())
-            {
-                if self.records.get(&existing_id).is_some_and(|r| {
-                    r.view.status == JobStatus::Queued
-                        && priority_rank(request.priority) > priority_rank(r.view.priority)
-                }) {
-                    self.set_job_priority(&existing_id, request.priority)?;
-                }
-                return Ok(EnqueueJobResult {
-                    job_id: Some(existing_id),
-                    skipped: false,
-                });
+        if let Some(existing_id) = self.active_op_ed_detect_job_id(request.anime_id) {
+            if self.records.get(&existing_id).is_some_and(|r| {
+                r.view.status == JobStatus::Queued
+                    && priority_rank(request.priority) > priority_rank(r.view.priority)
+            }) {
+                self.set_job_priority(&existing_id, request.priority)?;
             }
+            return Ok(EnqueueJobResult {
+                job_id: Some(existing_id),
+                skipped: false,
+            });
+        }
+
+        let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
+        if !needs {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult {
+                job_id: None,
+                skipped: true,
+            });
         }
 
         let title = request
@@ -924,12 +1000,16 @@ impl JobManager {
         self.last_chroma_start_on_volume.insert(volume, backdated);
     }
 
-    fn has_active_op_ed_detect(&self, anime_id: i64) -> bool {
+    fn active_op_ed_detect_job_id(&self, anime_id: i64) -> Option<String> {
         let prefix = op_ed_detect_job_identity_prefix(anime_id);
-        self.records.values().any(|r| {
-            (r.view.identity.starts_with(&prefix) || r.view.identity == op_ed::op_ed_job_identity(anime_id))
-                && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
-        })
+        let legacy = op_ed::op_ed_job_identity(anime_id);
+        self.records
+            .iter()
+            .find(|(_, r)| {
+                (r.view.identity.starts_with(&prefix) || r.view.identity == legacy)
+                    && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+            })
+            .map(|(id, _)| id.clone())
     }
 
     /// Global cap applies to low/medium only (high may bypass). Resource-type caps apply to all.
@@ -1130,7 +1210,13 @@ impl JobManager {
         });
 
         let emit_op_ed_updated = self.records.get(job_id).is_some_and(|r| {
-            matches!(r.kind, JobKind::OpEdDetect { .. })
+            matches!(
+                &r.kind,
+                JobKind::OpEdDetect {
+                    options,
+                    ..
+                } if options.mark_analyzed
+            )
         });
 
         match outcome {

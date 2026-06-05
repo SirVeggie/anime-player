@@ -243,6 +243,60 @@ pub struct OpEdEpisode {
     pub duration_seconds: f64,
 }
 
+pub fn count_non_missing_episodes(conn: &Connection, anime_id: i64) -> Result<usize, String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM episodes WHERE anime_id = ?1 AND missing = 0",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(count as usize)
+}
+
+/// Whether this title should be queued for OP/ED detection (episode page / small rescan).
+pub fn anime_needs_op_ed_detect(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    if count_non_missing_episodes(conn, anime_id)? < 2 {
+        return Ok(false);
+    }
+    let (version, analyzed_at): (i32, Option<String>) = conn
+        .query_row(
+            "SELECT op_ed_analysis_version, op_ed_analyzed_at FROM anime WHERE id = ?1",
+            params![anime_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    if version != ANALYSIS_VERSION {
+        return Ok(true);
+    }
+    let analyzed = analyzed_at
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty());
+    if !analyzed {
+        return Ok(true);
+    }
+    let gaps: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM episodes e
+             WHERE e.anime_id = ?1 AND e.missing = 0
+             AND (
+               NOT EXISTS (
+                 SELECT 1 FROM episode_op_ed_segments s
+                 WHERE s.episode_id = e.id AND s.kind = 'op'
+               )
+               OR NOT EXISTS (
+                 SELECT 1 FROM episode_op_ed_segments s
+                 WHERE s.episode_id = e.id AND s.kind = 'ed'
+               )
+             )",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(gaps > 0)
+}
+
 pub fn list_anime_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<OpEdEpisode>, String> {
     let rows = load_episodes(conn, anime_id)?;
     Ok(rows

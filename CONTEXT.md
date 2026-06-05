@@ -61,13 +61,13 @@ view components. Per-screen UI lives in `src/components/`:
 - A **Jobs** sidebar page (between Settings and Rescan) lists queued/running
   background work and job history (two tabs, like Bulk Edit). The nav icon shows
   a badge with the count of queued + running jobs. **Max parallel jobs** (1–20,
-  default 5, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
+  default 12, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
   jobs may run at once for scheduling low/medium work (high-priority jobs count
   toward that cap but are never blocked by it—e.g. six low jobs at the limit can
   still be joined by a seventh high job). Jobs also have a **resource type**
   (`none` by default; scrub thumbnails use `ffmpeg`) with its own max-parallel
   limit (`jobs_max_parallel_type_ffmpeg`, default 1; `jobs_max_parallel_type_chroma`,
-  default 4 for OP/ED pre-fingerprint jobs). On rotational volumes, new chroma jobs wait
+  default 12 for OP/ED pre-fingerprint jobs). On rotational volumes, new chroma jobs wait
   until `PercentDiskTime` for that drive is below 50% (one cached WMI sample for all drives,
   refreshed at most every 500ms on a background thread), with at least 500ms between starts
   on the same volume, and a 3s gap when busy cannot be read; the scheduler polls while deferred.
@@ -263,22 +263,25 @@ view components. Per-screen UI lives in `src/components/`:
   cache synchronously; finished jobs emit `scrub-sprite-ready`. Generation uses
   ffmpeg with `-hwaccel auto` and `-skip_frame nokey`. The UI slices the sheet
   via CSS `background-position`.
-- **OP/ED detection** is manual per title: the episode page **Detect OP/ED** button
-  enqueues a background job (`jobs_enqueue_op_ed_detect`, identity
-  `op_ed_detect:{anime_id}`, resource type `none`) that scans cached Chromaprint
+- **OP/ED detection** is queued automatically like scrub sprites: opening a title’s
+  episode page calls `jobs_enqueue_episode_page_op_ed` (medium priority; downgrades
+  queued detect batches to **low** on leave via
+  `jobs_set_op_ed_detect_priority_for_anime`). A rescan that imports at most
+  **20** new episodes (`RESCAN_AUTO_SCRUB_MAX`, shared with scrub) also enqueues
+  detect per affected anime (low priority). The worker (`jobs_enqueue_op_ed_detect` /
+  identity `op_ed_detect:{anime_id}`, resource type `none`) scans cached Chromaprint
   fingerprints and writes templates plus per-episode OP/ED rows in SQLite
   (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`). Progress survives
-  app restarts; re-running resumes from saved rows. The episode page **Fingerprint
-  audio** button enqueues one `op_ed_chroma` job per episode (resource type `chroma`;
-  ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) in a single batched scheduler
-  pass (`pump` + `jobs://updated` once, enqueue on a background thread) to pre-compute the
-  full-episode Chromaprint cache used during matching. **Detect OP/ED** reuses cached
-  fingerprints when present; otherwise it enqueues the same chroma jobs and queues
-  detection with those jobs as prerequisites (reusing jobs already running from an
-  earlier fingerprint pass). **Detect** is split into batched jobs of twelve episodes:
+  app restarts; re-running resumes from saved rows. Detect reuses cached fingerprints
+  when present; otherwise it enqueues `op_ed_chroma` jobs (resource type `chroma`;
+  ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) as prerequisites. Detect is
+  split into batched jobs of twelve episodes:
   each batch waits only for its chroma prerequisites and the previous batch’s detect
   job; later batches reuse templates from SQLite until block detection needs a new
-  discovery pass. `op-ed://analysis-updated` fires after each batch. Chroma jobs that
+  discovery pass. `op-ed://analysis-updated` fires when the **last** detect batch
+  finishes (`mark_analyzed`). Auto-enqueue is skipped when analysis is already
+  current (`op_ed_analyzed_at`, `ANALYSIS_VERSION`, segment rows for every episode).
+  Chroma jobs that
   find an on-disk fingerprint at start finish immediately and release the HDD stagger
   gap (enqueue skips chroma when the cache file exists, using the same canonical path key as
   fingerprinting)

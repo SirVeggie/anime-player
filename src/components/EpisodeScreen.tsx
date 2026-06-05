@@ -5,9 +5,9 @@ import {
   getAnilistCoverImage,
   getMatchingDetectionRuleName,
   jobsCancel,
-  jobsEnqueueOpEdChromaForAnime,
-  jobsEnqueueOpEdDetect,
+  jobsEnqueueEpisodePageOpEd,
   jobsEnqueueEpisodePageScrubSprites,
+  jobsSetOpEdDetectPriorityForAnime,
   jobsSetScrubSpritePriorityForPaths,
   resetAnimeOpEdAnalysis,
 } from "../api";
@@ -15,11 +15,7 @@ import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
 import { useJobsSnapshot } from "../jobs/jobClient";
-import {
-  activeOpEdChromaJobs,
-  findActiveOpEdJob,
-  opEdSegmentLabel,
-} from "../opEd";
+import { findActiveOpEdJob, opEdDetectBatchFraction, opEdSegmentLabel } from "../opEd";
 import type {
   AnimeSummary,
   AnilistMediaStatus,
@@ -188,18 +184,13 @@ export function EpisodeScreen(props: {
   const [scoreSaving, setScoreSaving] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
-  const [opEdDetectBusy, setOpEdDetectBusy] = useState(false);
-  const [opEdChromaBusy, setOpEdChromaBusy] = useState(false);
   const [opEdResetBusy, setOpEdResetBusy] = useState(false);
   const [opEdError, setOpEdError] = useState<string | null>(null);
   const activeOpEdJob = useMemo(
     () => findActiveOpEdJob(jobsSnapshot, anime.id),
     [anime.id, jobsSnapshot],
   );
-  const activeChromaJobs = useMemo(
-    () => activeOpEdChromaJobs(jobsSnapshot, episodes.map((ep) => ep.id)),
-    [episodes, jobsSnapshot],
-  );
+  const activeOpEdBatch = activeOpEdJob ? opEdDetectBatchFraction(activeOpEdJob.name) : null;
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
@@ -331,38 +322,6 @@ export function EpisodeScreen(props: {
     };
   }, [onOpEdAnalysisUpdated]);
 
-  const handleFingerprintOpEd = useCallback(async () => {
-    if (episodes.length === 0) return;
-    setOpEdChromaBusy(true);
-    try {
-      await jobsEnqueueOpEdChromaForAnime({
-        animeId: anime.id,
-        priority: "medium",
-        animeTitle: animeDisplayTitle(anime, preferAnilistDisplayTitle),
-      });
-    } catch (e) {
-      setOpEdError(errorMessage(e));
-    } finally {
-      setOpEdChromaBusy(false);
-    }
-  }, [anime, episodes.length, preferAnilistDisplayTitle]);
-
-  const handleDetectOpEd = useCallback(async () => {
-    if (episodes.length < 2) return;
-    setOpEdDetectBusy(true);
-    try {
-      await jobsEnqueueOpEdDetect({
-        animeId: anime.id,
-        priority: "medium",
-        animeTitle: animeDisplayTitle(anime, preferAnilistDisplayTitle),
-      });
-    } catch (e) {
-      setOpEdError(errorMessage(e));
-    } finally {
-      setOpEdDetectBusy(false);
-    }
-  }, [anime, episodes.length, preferAnilistDisplayTitle]);
-
   const handleCancelOpEdJob = useCallback(async () => {
     if (!activeOpEdJob) return;
     try {
@@ -444,7 +403,23 @@ export function EpisodeScreen(props: {
         /* background queue; ignore */
       });
     };
-  }, [anime.anilist_title, anime.title, episodes]);
+  }, [anime.anilist_title, anime.id, anime.title, episodes]);
+
+  useEffect(() => {
+    void jobsEnqueueEpisodePageOpEd({
+      animeId: anime.id,
+      priority: "medium",
+      animeTitle: animeDisplayTitle(anime, preferAnilistDisplayTitle),
+    }).catch(() => {
+      /* background queue; ignore */
+    });
+
+    return () => {
+      void jobsSetOpEdDetectPriorityForAnime(anime.id, "low").catch(() => {
+        /* background queue; ignore */
+      });
+    };
+  }, [anime.id, preferAnilistDisplayTitle]);
 
   const closeLinkSearch = useCallback(() => {
     linkSearchRequestRef.current += 1;
@@ -714,40 +689,6 @@ export function EpisodeScreen(props: {
               title="Open episode folder"
             >
               <FolderOpenIcon />
-            </button>
-            <button
-              type="button"
-              disabled={
-                episodes.length === 0 ||
-                opEdChromaBusy ||
-                activeChromaJobs.length > 0
-              }
-              onClick={() => void handleFingerprintOpEd()}
-              title={
-                episodes.length === 0
-                  ? "No episodes"
-                  : activeChromaJobs.length > 0
-                    ? "Fingerprinting in progress"
-                    : "Pre-compute Chromaprint fingerprints for every episode (parallel test)"
-              }
-            >
-              {activeChromaJobs.length > 0
-                ? `Fingerprinting (${activeChromaJobs.length})…`
-                : "Fingerprint audio"}
-            </button>
-            <button
-              type="button"
-              disabled={episodes.length < 2 || opEdDetectBusy || Boolean(activeOpEdJob)}
-              onClick={() => void handleDetectOpEd()}
-              title={
-                episodes.length < 2
-                  ? "Need at least 2 episodes"
-                  : activeOpEdJob
-                    ? "Analysis in progress"
-                    : "Detect opening and ending; queues fingerprinting first when needed"
-              }
-            >
-              {activeOpEdJob ? "Detecting…" : "Detect OP/ED"}
             </button>
             <button
               type="button"
@@ -1103,16 +1044,23 @@ export function EpisodeScreen(props: {
       ) : null}
 
       {episodes.length >= 2 && (activeOpEdJob || opEdError) ?
-        <section className="op-ed-analysis-banner" aria-live="polite">
+        <section
+          className="op-ed-analysis-banner"
+          aria-live="polite"
+          aria-label="OP/ED detection progress"
+        >
           {activeOpEdJob ?
             <>
-              <div className="op-ed-analysis-banner__row">
-                <span className="muted">
-                  #{activeOpEdJob.shortId} {activeOpEdJob.stepLabel}
-                </span>
-                <span>{jobProgressBarPercent(activeOpEdJob)}%</span>
+              <div className="op-ed-analysis-banner__header">
+                <strong className="op-ed-analysis-banner__title">Detecting OP/ED</strong>
+                {activeOpEdBatch ?
+                  <span className="muted op-ed-analysis-banner__batch">{activeOpEdBatch}</span>
+                : null}
               </div>
-              {activeOpEdJob.waitingFor.length > 0 ?
+              {activeOpEdJob.stepLabel ?
+                <p className="muted op-ed-analysis-banner__step">{activeOpEdJob.stepLabel}</p>
+              : null}
+              {activeOpEdJob.prerequisitePending > 0 ?
                 <div className="job-row-prerequisites">
                   <span className="muted">Waiting for</span>
                   {activeOpEdJob.waitingFor.map((prereq) => (
@@ -1120,6 +1068,11 @@ export function EpisodeScreen(props: {
                       #{prereq.shortId}
                     </span>
                   ))}
+                  {activeOpEdJob.prerequisitePending > activeOpEdJob.waitingFor.length ?
+                    <span className="job-prerequisite-pill">
+                      +{activeOpEdJob.prerequisitePending - activeOpEdJob.waitingFor.length} more
+                    </span>
+                  : null}
                 </div>
               : null}
               {shouldShowJobProgressBar(activeOpEdJob) ?

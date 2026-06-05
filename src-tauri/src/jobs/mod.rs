@@ -100,7 +100,7 @@ pub fn notify_job_step(app: &AppHandle, job_id: &str, current: u32, total: u32, 
 }
 
 #[cfg(windows)]
-pub use manager::RescanScrubImport;
+pub use manager::{RescanOpEdImport, RescanScrubImport, RESCAN_AUTO_SCRUB_MAX};
 
 #[cfg(windows)]
 pub fn enqueue_scrub_for_rescan_imports(
@@ -112,6 +112,16 @@ pub fn enqueue_scrub_for_rescan_imports(
     }
     let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
     guard.enqueue_scrub_for_rescan_imports(imports)
+}
+
+#[cfg(windows)]
+pub fn enqueue_op_ed_for_rescan_imports(
+    jobs: &JobsState,
+    db: &crate::db::AppDatabase,
+    imports: &[RescanOpEdImport],
+) -> Result<(), String> {
+    let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+    guard.enqueue_op_ed_for_rescan_imports(db, imports)
 }
 
 #[cfg(windows)]
@@ -207,6 +217,38 @@ pub async fn jobs_enqueue_episode_page_scrub_sprites(
     })
     .await
     .map_err(|e| format!("enqueue thread failed: {e}"))?
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn jobs_enqueue_episode_page_op_ed(
+    app: AppHandle,
+    request: EnqueueOpEdDetectJob,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let db = app.state::<AppDatabase>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.enqueue_episode_page_op_ed(&db, request)
+    })
+    .await
+    .map_err(|e| format!("op-ed enqueue thread failed: {e}"))?
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn jobs_set_op_ed_detect_priority_for_anime(
+    app: AppHandle,
+    anime_id: i64,
+    priority: JobPriority,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.set_op_ed_detect_priority_for_anime(anime_id, priority)
+    })
+    .await
+    .map_err(|e| format!("op-ed priority thread failed: {e}"))?
 }
 
 #[cfg(windows)]

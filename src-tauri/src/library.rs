@@ -1060,6 +1060,7 @@ pub fn save_episode_progress(
 
 #[derive(Debug, Clone)]
 struct RescanImportedEpisode {
+    anime_id: i64,
     path: String,
     anime_title: String,
     episode_label: String,
@@ -1115,6 +1116,7 @@ fn rescan_library_in_conn(conn: &mut Connection) -> Result<(ScanSummary, Vec<Res
             if upsert_episode(&tx, root.id, anime_id, &episode)? {
                 summary.episodes_imported += 1;
                 new_imports.push(RescanImportedEpisode {
+                    anime_id,
                     path: episode.path.clone(),
                     anime_title: episode.title.clone(),
                     episode_label: scrub_episode_label(&episode),
@@ -1163,6 +1165,14 @@ pub fn rescan_library(
     jobs: State<'_, crate::jobs::JobsState>,
 ) -> Result<ScanSummary, String> {
     let (summary, new_imports) = db.with_conn(rescan_library_in_conn)?;
+    let import_count = new_imports.len();
+    let op_ed_imports: Vec<crate::jobs::RescanOpEdImport> = new_imports
+        .iter()
+        .map(|item| crate::jobs::RescanOpEdImport {
+            anime_id: item.anime_id,
+            anime_title: item.anime_title.clone(),
+        })
+        .collect();
     let scrub_imports: Vec<crate::jobs::RescanScrubImport> = new_imports
         .into_iter()
         .map(|item| crate::jobs::RescanScrubImport {
@@ -1181,6 +1191,9 @@ pub fn rescan_library(
         );
     }
     crate::jobs::enqueue_scrub_for_rescan_imports(&jobs, &scrub_imports)?;
+    if import_count > 0 && import_count <= crate::jobs::RESCAN_AUTO_SCRUB_MAX {
+        crate::jobs::enqueue_op_ed_for_rescan_imports(&jobs, &db, &op_ed_imports)?;
+    }
     Ok(summary)
 }
 
