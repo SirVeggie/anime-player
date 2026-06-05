@@ -11,7 +11,7 @@ use crate::db::AppDatabase;
 use crate::disk_volume;
 use crate::op_ed::{
     self, op_ed_chroma_job_identity, op_ed_detect_batch_job_identity, op_ed_detect_job_identity_prefix,
-    OpEdDetectJobOptions, OpEdEpisode, OP_ED_DETECT_BATCH_SIZE,
+    OpEdDetectJobOptions, OpEdEpisode,
 };
 use crate::scrub_preview::{
     self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity, scrub_sprite_is_cached,
@@ -827,15 +827,22 @@ impl JobManager {
             }
         }
 
-        let batches: Vec<Vec<i64>> = episodes
-            .chunks(OP_ED_DETECT_BATCH_SIZE)
-            .map(|chunk| chunk.iter().map(|ep| ep.id).collect())
-            .collect();
-        let batch_count = batches.len();
+        let all_episode_ids: Vec<i64> = episodes.iter().map(|ep| ep.id).collect();
+        let full_pass_only =
+            db.with_conn(|conn| op_ed::anime_redetect_full_pass_only(conn, request.anime_id))?;
+        let plans = op_ed::plan_op_ed_detect_jobs(&all_episode_ids, full_pass_only);
+        if plans.is_empty() {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult {
+                job_id: None,
+                skipped: true,
+            });
+        }
         let mut last_detect_id: Option<String> = None;
         let mut first_detect_id: Option<String> = None;
 
-        for (batch_index, episode_ids) in batches.into_iter().enumerate() {
+        for (batch_index, plan) in plans.into_iter().enumerate() {
+            let episode_ids = plan.episode_ids;
             let mut prerequisite_job_ids: Vec<String> = episode_ids
                 .iter()
                 .filter_map(|ep_id| chroma_job_by_episode.get(ep_id).cloned())
@@ -847,15 +854,10 @@ impl JobManager {
             let identity = op_ed_detect_batch_job_identity(request.anime_id, batch_index);
             let (id, short_id) = alloc_job_ids();
             let cancel = Arc::new(AtomicBool::new(false));
-            let batch_label = format!(
-                "Detect OP/ED ({}/{})",
-                batch_index + 1,
-                batch_count
-            );
             let view = JobView {
                 id: id.clone(),
                 short_id,
-                name: batch_label,
+                name: plan.batch_name,
                 desc: title.clone(),
                 identity: identity.clone(),
                 job_type: "op_ed_detect".to_string(),
@@ -876,11 +878,7 @@ impl JobManager {
                 prerequisite_total: 0,
                 prerequisite_pending: 0,
             };
-            let options = OpEdDetectJobOptions {
-                continue_templates: batch_index > 0,
-                init_anime_state: batch_index == 0,
-                mark_analyzed: batch_index + 1 == batch_count,
-            };
+            let options = plan.options;
             let record = JobRecord {
                 view,
                 cancel,
@@ -1209,15 +1207,10 @@ impl JobManager {
             JobKind::OpEdChroma { .. } | JobKind::OpEdDetect { .. } => None,
         });
 
-        let emit_op_ed_updated = self.records.get(job_id).is_some_and(|r| {
-            matches!(
-                &r.kind,
-                JobKind::OpEdDetect {
-                    options,
-                    ..
-                } if options.mark_analyzed
-            )
-        });
+        let emit_op_ed_updated = self
+            .records
+            .get(job_id)
+            .is_some_and(|r| matches!(r.kind, JobKind::OpEdDetect { .. }));
 
         match outcome {
             WorkerOutcome::Done(message, scrub_ready) => {

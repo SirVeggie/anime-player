@@ -275,12 +275,14 @@ view components. Per-screen UI lives in `src/components/`:
   app restarts; re-running resumes from saved rows. Detect reuses cached fingerprints
   when present; otherwise it enqueues `op_ed_chroma` jobs (resource type `chroma`;
   ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) as prerequisites. Detect is
-  split into batched jobs of twelve episodes:
-  each batch waits only for its chroma prerequisites and the previous batch’s detect
-  job; later batches reuse templates from SQLite until block detection needs a new
-  discovery pass. `op-ed://analysis-updated` fires when the **last** detect batch
-  finishes (`mark_analyzed`). Auto-enqueue is skipped when analysis is already
-  current (`op_ed_analyzed_at`, `ANALYSIS_VERSION`, segment rows for every episode).
+  For titles with **more than 12** episodes, detect runs in two jobs: a **preview**
+  pass on the first 12 episodes (fast timestamps for early watching), then a **full**
+  pass on every episode including those twelve (full seed pool, rematches without
+  clearing existing timestamps until a new match is found). **12 or fewer** episodes
+  use a single full pass. After `op_ed_analyzed_at` is set, newly imported episodes
+  enqueue one full all-episode pass only. `op-ed://analysis-updated` fires after each
+  detect job finishes. Auto-enqueue is skipped when analysis is already current
+  (`op_ed_analyzed_at`, `ANALYSIS_VERSION`, segment rows for every episode).
   Chroma jobs that
   find an on-disk fingerprint at start finish immediately and release the HDD stagger
   gap (enqueue skips chroma when the cache file exists, using the same canonical path key as

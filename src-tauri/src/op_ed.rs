@@ -57,6 +57,9 @@ const MATCH_NEAR_MISS_AVERAGE_THRESHOLD: f32 = 0.82;
 const MATCH_NEAR_MISS_MIN_STRONG_FRAME_RATIO: f32 = 0.55;
 const MATCH_NEAR_MISS_MIN_LOWER_QUARTILE: f32 = 0.74;
 
+/// First-batch episode count for long seasons (preview pass before a full-title pass).
+pub const OP_ED_DETECT_BATCH_SIZE: usize = 12;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentKind {
     Op,
@@ -218,17 +221,91 @@ pub fn op_ed_detect_job_identity_prefix(anime_id: i64) -> String {
     format!("{JOB_NAME}:{anime_id}:")
 }
 
-/// Episodes per detect job when fingerprinting a full season (progressive results).
-pub const OP_ED_DETECT_BATCH_SIZE: usize = 10;
-
 #[derive(Debug, Clone, Copy)]
 pub struct OpEdDetectJobOptions {
     /// Reuse templates already in SQLite (batch 2+), falling back to discovery when needed.
     pub continue_templates: bool,
     /// Reset `no_op_ed` and ensure pending segment rows for every episode in the title.
     pub init_anime_state: bool,
-    /// Set `op_ed_analyzed_at` when this batch finishes (last batch only).
+    /// Set `op_ed_analyzed_at` when this job finishes.
     pub mark_analyzed: bool,
+    /// Re-run matching on episodes already `matched` (full pass); failed rematch keeps old times.
+    pub rematch_matched: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpEdDetectJobPlan {
+    pub episode_ids: Vec<i64>,
+    pub options: OpEdDetectJobOptions,
+    pub batch_name: String,
+}
+
+/// True when the title was fully analyzed before and we only need a single all-episode pass
+/// (e.g. new episodes imported).
+pub fn anime_redetect_full_pass_only(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    let (version, analyzed_at): (i32, Option<String>) = conn
+        .query_row(
+            "SELECT op_ed_analysis_version, op_ed_analyzed_at FROM anime WHERE id = ?1",
+            params![anime_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    if version != ANALYSIS_VERSION {
+        return Ok(false);
+    }
+    Ok(analyzed_at
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty()))
+}
+
+/// Build detect jobs: one job for short seasons; preview (first 12) + full (all eps) when longer.
+pub fn plan_op_ed_detect_jobs(
+    all_episode_ids: &[i64],
+    full_pass_only: bool,
+) -> Vec<OpEdDetectJobPlan> {
+    if all_episode_ids.len() < 2 {
+        return Vec::new();
+    }
+    if full_pass_only || all_episode_ids.len() <= OP_ED_DETECT_BATCH_SIZE {
+        return vec![OpEdDetectJobPlan {
+            episode_ids: all_episode_ids.to_vec(),
+            options: OpEdDetectJobOptions {
+                init_anime_state: !full_pass_only,
+                continue_templates: false,
+                mark_analyzed: true,
+                rematch_matched: full_pass_only,
+            },
+            batch_name: "Detect OP/ED".to_string(),
+        }];
+    }
+    let preview_ids: Vec<i64> = all_episode_ids
+        .iter()
+        .take(OP_ED_DETECT_BATCH_SIZE)
+        .copied()
+        .collect();
+    vec![
+        OpEdDetectJobPlan {
+            episode_ids: preview_ids,
+            options: OpEdDetectJobOptions {
+                init_anime_state: true,
+                continue_templates: false,
+                mark_analyzed: false,
+                rematch_matched: false,
+            },
+            batch_name: "Detect OP/ED (1/2)".to_string(),
+        },
+        OpEdDetectJobPlan {
+            episode_ids: all_episode_ids.to_vec(),
+            options: OpEdDetectJobOptions {
+                init_anime_state: false,
+                continue_templates: false,
+                mark_analyzed: true,
+                rematch_matched: true,
+            },
+            batch_name: "Detect OP/ED (2/2)".to_string(),
+        },
+    ]
 }
 
 const CHROMA_JOB_NAME: &str = "op_ed_chroma";
@@ -1018,12 +1095,12 @@ fn upsert_segment_status_conn(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, CURRENT_TIMESTAMP)
          ON CONFLICT(episode_id, kind) DO UPDATE SET
             status = excluded.status,
-            start_sec = excluded.start_sec,
-            end_sec = excluded.end_sec,
-            confidence = excluded.confidence,
+            start_sec = COALESCE(excluded.start_sec, start_sec),
+            end_sec = COALESCE(excluded.end_sec, end_sec),
+            confidence = COALESCE(excluded.confidence, confidence),
             template_id = excluded.template_id,
             search_pass = excluded.search_pass,
-            fingerprint_cache_key = excluded.fingerprint_cache_key,
+            fingerprint_cache_key = COALESCE(excluded.fingerprint_cache_key, fingerprint_cache_key),
             error_text = excluded.error_text,
             updated_at = CURRENT_TIMESTAMP",
         params![
@@ -1048,6 +1125,7 @@ struct DetectContext<'a> {
     anime_id: i64,
     episodes: &'a [EpisodeRow],
     continue_templates: bool,
+    rematch_matched: bool,
     cancel: &'a AtomicBool,
     on_progress: &'a dyn Fn(u32, u32, &str),
 }
@@ -1099,6 +1177,11 @@ impl DetectContext<'_> {
         episode_id: i64,
         kind: SegmentKind,
     ) -> Result<bool, String> {
+        if self.rematch_matched {
+            return Ok(self.db.with_conn(|conn| {
+                segment_has_status(conn, episode_id, kind, "skipped")
+            })?);
+        }
         self.db.with_conn(|conn| {
             let status: Option<String> = conn
                 .query_row(
@@ -1360,6 +1443,8 @@ fn record_episode_match_result(
             Some(candidate_key),
             None,
         )?;
+    } else if ctx.rematch_matched && ctx.segment_is_matched(ep.id, kind)? {
+        // Full pass: keep previous OP/ED times until a new match is found.
     } else {
         ctx.upsert_segment_status(
             ep.id,
@@ -1620,18 +1705,20 @@ fn run_kind_detection(
                 continue;
             }
 
-            ctx.upsert_segment_status(
-                ep.id,
-                kind,
-                OpEdSegmentStatus::Analyzing,
-                None,
-                None,
-                None,
-                Some(template_id),
-                "optimistic",
-                None,
-                None,
-            )?;
+            if !(ctx.rematch_matched && ctx.segment_is_matched(ep.id, kind)?) {
+                ctx.upsert_segment_status(
+                    ep.id,
+                    kind,
+                    OpEdSegmentStatus::Analyzing,
+                    None,
+                    None,
+                    None,
+                    Some(template_id),
+                    "optimistic",
+                    None,
+                    None,
+                )?;
+            }
 
             let duration = ctx.episode_duration(ep)?;
             let extract_len = full_episode_extract_len(duration);
@@ -1753,6 +1840,7 @@ pub fn run_op_ed_detect_job(
         anime_id,
         episodes: &episodes,
         continue_templates: options.continue_templates,
+        rematch_matched: options.rematch_matched,
         cancel,
         on_progress: &on_step,
     };
@@ -2091,5 +2179,27 @@ mod tests {
             .expect("consistent high-quality segment should match");
         assert!((matched.start_sec - seconds_for_frames(2)).abs() < f64::EPSILON);
         assert!(matched.confidence >= MATCH_AVERAGE_THRESHOLD);
+    }
+
+    #[test]
+    fn plan_detect_jobs_preview_then_full_for_long_seasons() {
+        let ids: Vec<i64> = (1..=20).collect();
+        let plans = plan_op_ed_detect_jobs(&ids, false);
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].episode_ids.len(), OP_ED_DETECT_BATCH_SIZE);
+        assert_eq!(plans[1].episode_ids.len(), 20);
+        assert!(!plans[0].options.mark_analyzed);
+        assert!(plans[1].options.rematch_matched);
+        assert!(plans[1].options.mark_analyzed);
+
+        let short = plan_op_ed_detect_jobs(&(1..=8).collect::<Vec<_>>(), false);
+        assert_eq!(short.len(), 1);
+        assert!(short[0].options.mark_analyzed);
+
+        let rerun = plan_op_ed_detect_jobs(&ids, true);
+        assert_eq!(rerun.len(), 1);
+        assert_eq!(rerun[0].episode_ids.len(), 20);
+        assert!(rerun[0].options.rematch_matched);
+        assert!(!rerun[0].options.init_anime_state);
     }
 }
