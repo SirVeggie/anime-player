@@ -299,7 +299,8 @@ view components. Per-screen UI lives in `src/components/`:
   lower-quartile floor) before it can mark an episode segment as matched, which
   reduces false-positive skips on episodes without OP/ED. Per-episode match
   fallbacks (after optimistic + full fail): trim ~3s from the template lead and
-  retry (`trim_*` passes), then for OP only a near-miss at offset ≤ ~2.5s with
+  retry (`trim_*` passes); for ED also trim ~3s from the tail and retry
+  (`trim_both_*` passes); then for OP only a near-miss at offset ≤ ~2.5s with
   slightly relaxed gates (`edge_near`). The worker commits
   progress through many short `with_conn` calls while ffmpeg/fpcalc run unlocked.
   On completion the job emits `op-ed://analysis-updated`; the UI reloads that title

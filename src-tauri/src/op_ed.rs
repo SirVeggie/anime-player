@@ -47,6 +47,8 @@ const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
 const MAX_OP_ED_BLOCKS: u32 = 8;
 /// Lead seconds trimmed from the template on per-episode match retry (bad file-start frames).
 const MATCH_FALLBACK_LEAD_TRIM_SEC: f64 = 3.0;
+/// Tail seconds trimmed from the ED template on bidirectional match retry (fade/credits noise).
+const MATCH_FALLBACK_TAIL_TRIM_SEC: f64 = 3.0;
 /// Minimum remaining template length after lead trim for a fallback attempt.
 const MATCH_FALLBACK_MIN_TEMPLATE_SEC: f64 = 45.0;
 /// Near-miss fallback: best offset must be within this many seconds of the search region start.
@@ -535,21 +537,33 @@ fn match_quality_near_miss_accepted(quality: MatchQuality) -> bool {
     )
 }
 
-fn with_trimmed_template<R>(
+fn with_center_trimmed_template<R>(
     template: &Fingerprint,
     lead_trim_frames: usize,
+    tail_trim_frames: usize,
     f: impl FnOnce(&Fingerprint) -> Option<R>,
 ) -> Option<R> {
-    if lead_trim_frames == 0 {
+    if lead_trim_frames == 0 && tail_trim_frames == 0 {
         return f(template);
     }
-    let remaining = template.frame_count().saturating_sub(lead_trim_frames);
+    let remaining = template
+        .frame_count()
+        .saturating_sub(lead_trim_frames)
+        .saturating_sub(tail_trim_frames);
     let min_frames = frames_for_seconds(MATCH_FALLBACK_MIN_TEMPLATE_SEC);
     if remaining < min_frames {
         return None;
     }
     let trimmed = slice_fingerprint(template, lead_trim_frames, remaining)?;
     f(&trimmed)
+}
+
+fn with_trimmed_template<R>(
+    template: &Fingerprint,
+    lead_trim_frames: usize,
+    f: impl FnOnce(&Fingerprint) -> Option<R>,
+) -> Option<R> {
+    with_center_trimmed_template(template, lead_trim_frames, 0, f)
 }
 
 fn find_best_offset_and_quality(
@@ -619,12 +633,14 @@ fn bridge_search_pass_label(pass: &str) -> &'static str {
         "full" => "bridge_full",
         "trim_optimistic" => "bridge_trim_optimistic",
         "trim_full" => "bridge_trim_full",
+        "trim_both_optimistic" => "bridge_trim_both_optimistic",
+        "trim_both_full" => "bridge_trim_both_full",
         "edge_near" => "bridge_edge_near",
         _ => "bridge",
     }
 }
 
-/// Optimistic then full match; lead-trim retry; optional edge near-miss for OP at file start.
+/// Optimistic then full match; lead-trim retry; ED bidirectional trim; OP edge near-miss.
 fn match_episode_against_template(
     template_fp: &Fingerprint,
     candidate_fp: &Fingerprint,
@@ -648,7 +664,26 @@ fn match_episode_against_template(
         }
     }
 
-    if kind != SegmentKind::Op {
+    if kind == SegmentKind::Ed {
+        let tail_trim = frames_for_seconds(MATCH_FALLBACK_TAIL_TRIM_SEC);
+        let both_attempts: [(&str, (usize, usize)); 2] = [
+            ("trim_both_optimistic", optimistic_range),
+            ("trim_both_full", full_range),
+        ];
+        for (pass, (search_start, search_end)) in both_attempts {
+            if let Some(matched) =
+                with_center_trimmed_template(template_fp, lead_trim, tail_trim, |work_template| {
+                    find_best_match_in_candidate(
+                        work_template,
+                        candidate_fp,
+                        search_start,
+                        search_end,
+                    )
+                })
+            {
+                return Some((pass, matched));
+            }
+        }
         return None;
     }
 
