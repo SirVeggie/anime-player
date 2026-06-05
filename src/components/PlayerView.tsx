@@ -333,6 +333,8 @@ export function PlayerView(props: {
   onSkipOpEdEnabledChange: (enabled: boolean) => void;
   playlist: Episode[];
   visible: boolean;
+  /** When true, PlayerView must not touch mpv (e.g. manual skip editor owns it). */
+  playbackSuspended?: boolean;
   playbackProgressFlushRef: MutableRefObject<(() => Promise<void>) | null>;
   onSelectEpisode: (episode: Episode) => void;
   onBack: () => void;
@@ -352,6 +354,7 @@ export function PlayerView(props: {
     onSkipOpEdEnabledChange,
     playlist,
     visible,
+    playbackSuspended = false,
     playbackProgressFlushRef,
     onSelectEpisode,
     onBack,
@@ -970,7 +973,7 @@ export function PlayerView(props: {
     wasVisibleRef.current = visible;
     (async () => {
       try {
-        if (!eventListenersReadyRef.current) return;
+        if (playbackSuspended || !eventListenersReadyRef.current) return;
         const sidebarPx = sidebarPxForVisibility(visible);
         if (!mpvReadyRef.current) {
           await invoke("mpv_init", {
@@ -1011,20 +1014,20 @@ export function PlayerView(props: {
     return () => {
       cancelled = true;
     };
-  }, [episode.path, eventListenersReadyVersion, visible]);
+  }, [episode.path, eventListenersReadyVersion, playbackSuspended, visible]);
 
   useEffect(() => {
-    if (!mpvReadyRef.current) return;
+    if (playbackSuspended || !mpvReadyRef.current) return;
     void setMpvVolume(muted ? 0 : volume).catch((e) => onError(errorMessage(e)));
-  }, [muted, onError, volume]);
+  }, [muted, onError, playbackSuspended, volume]);
 
   useEffect(() => {
-    if (!mpvReadyRef.current) return;
+    if (playbackSuspended || !mpvReadyRef.current) return;
     void invoke("mpv_set_layout", {
       windowWidth: window.innerWidth,
       sidebarPx: sidebarPxForVisibility(visible),
     }).catch((err) => onError(errorMessage(err)));
-  }, [onError, visible]);
+  }, [onError, playbackSuspended, visible]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;

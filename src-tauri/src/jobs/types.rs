@@ -122,6 +122,43 @@ pub struct EnqueueJobResult {
     pub job_id: Option<String>,
     /// True when the job was not queued because the work is already satisfied (e.g. cached sprite).
     pub skipped: bool,
+    /// Detect was skipped because manual templates own skip matching; only chroma was queued.
+    #[serde(default)]
+    pub chroma_only: bool,
+}
+
+impl EnqueueJobResult {
+    pub fn queued(job_id: Option<String>) -> Self {
+        Self {
+            job_id,
+            skipped: false,
+            chroma_only: false,
+        }
+    }
+
+    pub fn skipped() -> Self {
+        Self {
+            job_id: None,
+            skipped: true,
+            chroma_only: false,
+        }
+    }
+
+    pub fn chroma_only() -> Self {
+        Self {
+            job_id: None,
+            skipped: false,
+            chroma_only: true,
+        }
+    }
+
+    pub fn with_skip(job_id: Option<String>, skipped: bool) -> Self {
+        Self {
+            job_id,
+            skipped,
+            chroma_only: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

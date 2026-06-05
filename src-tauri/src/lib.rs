@@ -32,6 +32,17 @@ use mpv::MpvHandle;
 const DEFAULT_SIDEBAR_PX: f64 = 360.0;
 
 #[cfg(windows)]
+#[derive(Debug, Clone, Copy)]
+struct MpvPreviewRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    window_width: f64,
+    window_height: f64,
+}
+
+#[cfg(windows)]
 struct AppState {
     pub(crate) mpv: Mutex<Option<MpvHandle>>,
     /// Last sidebar width (CSS px) the frontend asked us to apply. Read
@@ -39,6 +50,7 @@ struct AppState {
     /// `video-margin-ratio-left` on every WM_SIZE without needing a JS
     /// round-trip per frame.
     sidebar_px: Mutex<f64>,
+    preview_rect: Mutex<Option<MpvPreviewRect>>,
 }
 
 #[cfg(windows)]
@@ -47,6 +59,7 @@ impl Default for AppState {
         Self {
             mpv: Mutex::new(None),
             sidebar_px: Mutex::new(DEFAULT_SIDEBAR_PX),
+            preview_rect: Mutex::new(None),
         }
     }
 }
@@ -59,12 +72,46 @@ impl Default for AppState {
 /// sidebar then visually covers the empty strip.
 #[cfg(windows)]
 fn apply_layout_to_mpv(mpv: &MpvHandle, window_width: f64, sidebar_px: f64) -> Result<(), String> {
+    mpv.set_option_string("video-margin-ratio-right", "0.000000")?;
+    mpv.set_option_string("video-margin-ratio-top", "0.000000")?;
+    mpv.set_option_string("video-margin-ratio-bottom", "0.000000")?;
     let ratio = if window_width > 0.0 {
         (sidebar_px / window_width).clamp(0.0, 1.0)
     } else {
         0.0
     };
     mpv.set_option_string("video-margin-ratio-left", &format!("{ratio:.6}"))
+}
+
+#[cfg(windows)]
+fn apply_preview_rect_to_mpv(mpv: &MpvHandle, rect: MpvPreviewRect) -> Result<(), String> {
+    let ww = rect.window_width.max(1.0);
+    let wh = rect.window_height.max(1.0);
+    let left = (rect.x / ww).clamp(0.0, 1.0);
+    let right = ((ww - rect.x - rect.width) / ww).clamp(0.0, 1.0);
+    let top = (rect.y / wh).clamp(0.0, 1.0);
+    let bottom = ((wh - rect.y - rect.height) / wh).clamp(0.0, 1.0);
+    mpv.set_option_string("video-margin-ratio-left", &format!("{left:.6}"))?;
+    mpv.set_option_string("video-margin-ratio-right", &format!("{right:.6}"))?;
+    mpv.set_option_string("video-margin-ratio-top", &format!("{top:.6}"))?;
+    mpv.set_option_string("video-margin-ratio-bottom", &format!("{bottom:.6}"))
+}
+
+#[cfg(windows)]
+fn apply_mpv_layout_from_state(state: &AppState, m: &MpvHandle, window_width: f64) -> Result<(), String> {
+    if let Ok(preview_guard) = state.preview_rect.lock() {
+        if let Some(rect) = *preview_guard {
+            let mut updated = rect;
+            updated.window_width = window_width;
+            return apply_preview_rect_to_mpv(m, updated);
+        }
+    }
+    let sidebar_px = state
+        .sidebar_px
+        .lock()
+        .map(|g| *g)
+        .unwrap_or(DEFAULT_SIDEBAR_PX);
+    apply_layout_to_mpv(m, window_width, sidebar_px)
 }
 
 #[cfg(windows)]
@@ -214,7 +261,7 @@ fn mpv_set_layout(
     }
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
-        apply_layout_to_mpv(m, window_width, sidebar_px)?;
+        apply_mpv_layout_from_state(&state, m, window_width)?;
     }
     Ok(())
 }
@@ -237,12 +284,62 @@ fn handle_native_resize(app_handle: &tauri::AppHandle, physical_width: u32, scal
         return;
     };
     let logical_width = (physical_width as f64 / scale_factor.max(0.01)).max(1.0);
-    let sidebar_px = state
-        .sidebar_px
-        .lock()
-        .map(|g| *g)
-        .unwrap_or(DEFAULT_SIDEBAR_PX);
-    let _ = apply_layout_to_mpv(m, logical_width, sidebar_px);
+    if let Ok(mut preview_guard) = state.preview_rect.lock() {
+        if let Some(rect) = preview_guard.as_mut() {
+            rect.window_width = logical_width;
+        }
+    }
+    let _ = apply_mpv_layout_from_state(&state, m, logical_width);
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_set_preview_rect(
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    window_width: f64,
+    window_height: f64,
+) -> Result<(), String> {
+    let rect = MpvPreviewRect {
+        x,
+        y,
+        width,
+        height,
+        window_width: window_width.max(1.0),
+        window_height: window_height.max(1.0),
+    };
+    if let Ok(mut guard) = state.preview_rect.lock() {
+        *guard = Some(rect);
+    }
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        apply_preview_rect_to_mpv(m, rect)?;
+        m.set_pause(true)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn mpv_clear_preview_rect(
+    state: State<'_, AppState>,
+    window_width: f64,
+    sidebar_px: f64,
+) -> Result<(), String> {
+    if let Ok(mut guard) = state.preview_rect.lock() {
+        *guard = None;
+    }
+    if let Ok(mut g) = state.sidebar_px.lock() {
+        *g = sidebar_px;
+    }
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    if let Some(m) = guard.as_ref() {
+        apply_layout_to_mpv(m, window_width, sidebar_px)?;
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -432,8 +529,17 @@ pub fn run() {
         mpv_seek,
         mpv_seek_relative,
         mpv_set_layout,
+        mpv_set_preview_rect,
+        mpv_clear_preview_rect,
         mpv_set_volume,
         mpv_stop,
+        op_ed::list_manual_op_ed_templates_cmd,
+        op_ed::count_manual_op_ed_templates_cmd,
+        op_ed::save_manual_op_ed_template_cmd,
+        op_ed::update_manual_op_ed_template_cmd,
+        op_ed::delete_manual_op_ed_template_cmd,
+        op_ed::probe_video_fps_cmd,
+        jobs::prepare_manual_op_ed_rematch_cmd,
     ]);
 
     #[cfg(not(windows))]

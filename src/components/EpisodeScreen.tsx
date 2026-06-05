@@ -7,6 +7,7 @@ import {
   jobsCancel,
   jobsEnqueueEpisodePageOpEd,
   jobsEnqueueEpisodePageScrubSprites,
+  countManualOpEdTemplates,
   jobsEnqueueOpEdDetect,
   jobsSetOpEdChromaPriorityForAnime,
   jobsSetScrubSpritePriorityForPaths,
@@ -38,7 +39,8 @@ import {
   progressPercent,
 } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
-import { FolderOpenIcon, SettingsIcon } from "./Icons";
+import { FolderOpenIcon, ManualSkipIcon, SettingsIcon } from "./Icons";
+import { ManualSkipAreasModal } from "./ManualSkipAreasModal";
 import { ViewHeader } from "./ViewHeader";
 
 type AnilistProgressUpdate = {
@@ -134,6 +136,10 @@ export function EpisodeScreen(props: {
   preferAnilistDisplayTitle: boolean;
   autoOpEdDetect: boolean;
   onOpEdAnalysisUpdated: () => void;
+  manualSkipModalOpen: boolean;
+  onManualSkipModalOpenChange: (open: boolean) => void;
+  onManualSkipDirtyClose: () => void;
+  onShowToast: (kind: "success" | "error", message: string) => void;
 }) {
   const {
     anime,
@@ -158,6 +164,10 @@ export function EpisodeScreen(props: {
     onOpenAnilist,
     anilistConnected,
     onOpEdAnalysisUpdated,
+    manualSkipModalOpen,
+    onManualSkipModalOpenChange,
+    onManualSkipDirtyClose,
+    onShowToast,
   } = props;
   const jobsSnapshot = useJobsSnapshot();
   // Highlight whichever episode the Q hotkey would launch right now, so the
@@ -217,7 +227,7 @@ export function EpisodeScreen(props: {
   );
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
   const getRovingItemProps = useRovingListNavigation(episodes.length, {
-    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen,
+    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen && !manualSkipModalOpen,
   });
 
   useEffect(() => {
@@ -339,6 +349,13 @@ export function EpisodeScreen(props: {
     setOpEdRunBusy(true);
     setAnimeSettingsError(null);
     try {
+      const manualCount = await countManualOpEdTemplates(anime.id);
+      if (manualCount > 0) {
+        onShowToast(
+          "success",
+          "This show uses manual skip areas. Analysis will only prepare audio fingerprints — it won't change your skip regions.",
+        );
+      }
       await jobsEnqueueOpEdDetect({
         animeId: anime.id,
         priority: "medium",
@@ -349,7 +366,7 @@ export function EpisodeScreen(props: {
     } finally {
       setOpEdRunBusy(false);
     }
-  }, [anime, preferAnilistDisplayTitle]);
+  }, [anime, onShowToast, preferAnilistDisplayTitle]);
 
   const handleResetOpEdAnalysis = useCallback(async () => {
     if (!window.confirm("Clear all OP/ED analysis data for this title?")) return;
@@ -719,6 +736,16 @@ export function EpisodeScreen(props: {
               title="Open episode folder"
             >
               <FolderOpenIcon />
+            </button>
+            <button
+              type="button"
+              className="header-icon-button"
+              onClick={() => onManualSkipModalOpenChange(true)}
+              disabled={episodes.length === 0}
+              aria-label="Manual skip areas"
+              title="Manual skip areas"
+            >
+              <ManualSkipIcon />
             </button>
             <button
               type="button"
@@ -1197,6 +1224,15 @@ export function EpisodeScreen(props: {
         })
         : null}
       </section>
+
+      <ManualSkipAreasModal
+        open={manualSkipModalOpen}
+        anime={anime}
+        episodes={episodes}
+        onClose={() => onManualSkipModalOpenChange(false)}
+        onDirtyClose={onManualSkipDirtyClose}
+        onError={(message) => onShowToast("error", message)}
+      />
     </>
   );
 }

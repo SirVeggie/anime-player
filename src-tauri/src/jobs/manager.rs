@@ -83,6 +83,9 @@ enum JobKind {
         episode_ids: Vec<i64>,
         options: OpEdDetectJobOptions,
     },
+    OpEdManualRematch {
+        anime_id: i64,
+    },
 }
 
 struct JobRecord {
@@ -679,19 +682,13 @@ impl JobManager {
             if flush_scheduling {
                 self.finish_scheduling_batch();
             }
-            return Ok(EnqueueJobResult {
-                job_id: Some(existing_id),
-                skipped: false,
-            });
+            return Ok(EnqueueJobResult::queued(Some(existing_id)));
         }
         if scrub_sprite_is_cached(&request.path)? {
             if flush_scheduling {
                 self.finish_scheduling_batch();
             }
-            return Ok(EnqueueJobResult {
-                job_id: None,
-                skipped: true,
-            });
+            return Ok(EnqueueJobResult::skipped());
         }
 
         let desc = build_scrub_desc(&request);
@@ -744,10 +741,7 @@ impl JobManager {
         if flush_scheduling {
             self.finish_scheduling_batch();
         }
-        Ok(EnqueueJobResult {
-            job_id: Some(id),
-            skipped: false,
-        })
+        Ok(EnqueueJobResult::queued(Some(id)))
     }
 
     pub fn enqueue_op_ed_chroma_for_episode(
@@ -757,10 +751,7 @@ impl JobManager {
     ) -> Result<EnqueueJobResult, String> {
         let ep = db.with_conn(|conn| op_ed::load_episode_by_id(conn, request.episode_id))?;
         let Some(ep) = ep else {
-            return Ok(EnqueueJobResult {
-                job_id: None,
-                skipped: true,
-            });
+            return Ok(EnqueueJobResult::skipped());
         };
         let result = self.enqueue_op_ed_chroma_episode(
             db,
@@ -797,10 +788,7 @@ impl JobManager {
             }
         }
         self.finish_op_ed_enqueue_batch();
-        Ok(EnqueueJobResult {
-            job_id: last_job_id,
-            skipped: !any_queued,
-        })
+        Ok(EnqueueJobResult::with_skip(last_job_id, !any_queued))
     }
 
     fn finish_op_ed_enqueue_batch(&mut self) {
@@ -830,10 +818,7 @@ impl JobManager {
         flush_scheduling: bool,
     ) -> Result<EnqueueJobResult, String> {
         if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
-            return Ok(EnqueueJobResult {
-                job_id: None,
-                skipped: true,
-            });
+            return Ok(EnqueueJobResult::skipped());
         }
 
         let identity = op_ed_chroma_job_identity(ep.id);
@@ -847,10 +832,7 @@ impl JobManager {
                 }) {
                     self.set_job_priority(&existing_id, priority)?;
                 }
-                return Ok(EnqueueJobResult {
-                    job_id: Some(existing_id),
-                    skipped: false,
-                });
+                return Ok(EnqueueJobResult::queued(Some(existing_id)));
             }
         }
 
@@ -906,10 +888,7 @@ impl JobManager {
             self.finish_op_ed_enqueue_batch();
         }
 
-        Ok(EnqueueJobResult {
-            job_id: Some(id),
-            skipped: false,
-        })
+        Ok(EnqueueJobResult::queued(Some(id)))
     }
 
     pub fn enqueue_op_ed_detect(
@@ -921,19 +900,18 @@ impl JobManager {
         if let Some(existing_id) = self.active_op_ed_detect_job_id(request.anime_id) {
             self.bump_queued_chroma_for_anime(db, request.anime_id, chroma_priority)?;
             self.ensure_op_ed_detect_jobs_high_for_anime(request.anime_id)?;
-            return Ok(EnqueueJobResult {
-                job_id: Some(existing_id),
-                skipped: false,
-            });
+            return Ok(EnqueueJobResult::queued(Some(existing_id)));
+        }
+
+        let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, request.anime_id))?;
+        if has_manual {
+            return self.enqueue_op_ed_chroma_only_for_anime(db, &request);
         }
 
         let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
         if !needs {
             self.finish_op_ed_enqueue_batch();
-            return Ok(EnqueueJobResult {
-                job_id: None,
-                skipped: true,
-            });
+            return Ok(EnqueueJobResult::skipped());
         }
 
         let title = request
@@ -947,10 +925,7 @@ impl JobManager {
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
         if episodes.is_empty() {
             self.finish_op_ed_enqueue_batch();
-            return Ok(EnqueueJobResult {
-                job_id: None,
-                skipped: true,
-            });
+            return Ok(EnqueueJobResult::skipped());
         }
         let mut chroma_job_by_episode: HashMap<i64, String> = HashMap::new();
         for ep in &episodes {
@@ -975,10 +950,7 @@ impl JobManager {
         let plans = op_ed::plan_op_ed_detect_jobs(&all_episode_ids, full_pass_only);
         if plans.is_empty() {
             self.finish_op_ed_enqueue_batch();
-            return Ok(EnqueueJobResult {
-                job_id: None,
-                skipped: true,
-            });
+            return Ok(EnqueueJobResult::skipped());
         }
         let mut last_detect_id: Option<String> = None;
         let mut first_detect_id: Option<String> = None;
@@ -1046,10 +1018,229 @@ impl JobManager {
         }
 
         self.finish_op_ed_enqueue_batch();
-        Ok(EnqueueJobResult {
-            job_id: first_detect_id,
-            skipped: false,
-        })
+        Ok(EnqueueJobResult::queued(first_detect_id))
+    }
+
+    fn enqueue_op_ed_chroma_only_for_anime(
+        &mut self,
+        db: &AppDatabase,
+        request: &EnqueueOpEdDetectJob,
+    ) -> Result<EnqueueJobResult, String> {
+        let episodes =
+            db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
+        for ep in &episodes {
+            if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
+                continue;
+            }
+            let _ = self.enqueue_op_ed_chroma_episode(
+                db,
+                ep,
+                request.priority,
+                request.anime_title.as_deref(),
+                false,
+            )?;
+        }
+        self.finish_op_ed_enqueue_batch();
+        Ok(EnqueueJobResult::chroma_only())
+    }
+
+    pub fn enqueue_op_ed_auto_rematch(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        anime_title: Option<&str>,
+    ) -> Result<EnqueueJobResult, String> {
+        let title = anime_title
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| format!("Anime #{anime_id}"));
+
+        let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, anime_id))?;
+        if episodes.len() < 2 {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult::skipped());
+        }
+
+        let mut chroma_job_by_episode: HashMap<i64, String> = HashMap::new();
+        for ep in &episodes {
+            if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
+                continue;
+            }
+            let chroma = self.enqueue_op_ed_chroma_episode(
+                db,
+                ep,
+                JobPriority::Medium,
+                anime_title,
+                false,
+            )?;
+            if let Some(job_id) = chroma.job_id {
+                chroma_job_by_episode.insert(ep.id, job_id);
+            }
+        }
+
+        let all_episode_ids: Vec<i64> = episodes.iter().map(|ep| ep.id).collect();
+        let identity = op_ed::op_ed_job_identity(anime_id);
+        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult::queued(Some(existing_id)));
+        }
+
+        let prerequisite_job_ids: Vec<String> = all_episode_ids
+            .iter()
+            .filter_map(|ep_id| chroma_job_by_episode.get(ep_id).cloned())
+            .collect();
+
+        let (id, short_id) = alloc_job_ids();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let view = JobView {
+            id: id.clone(),
+            short_id,
+            name: "Rematch OP/ED".to_string(),
+            desc: title,
+            identity: identity.clone(),
+            job_type: "op_ed_detect".to_string(),
+            resource_type: JobResourceType::None,
+            priority: JobPriority::Medium,
+            status: JobStatus::Queued,
+            cancelable: true,
+            progress: JobProgress {
+                current_step: 0,
+                total_steps: 100,
+            },
+            step_label: "Queued".to_string(),
+            completion_message: None,
+            created_at: now_ms(),
+            started_at: None,
+            finished_at: None,
+            waiting_for: Vec::new(),
+            prerequisite_total: 0,
+            prerequisite_pending: 0,
+            prerequisite_progress_current: 0,
+            prerequisite_progress_total: 0,
+        };
+        let record = JobRecord {
+            view,
+            cancel,
+            kind: JobKind::OpEdDetect {
+                anime_id,
+                episode_ids: all_episode_ids,
+                options: op_ed::auto_rematch_job_options(),
+            },
+            follow_ups: Vec::new(),
+            prerequisite_job_ids,
+        };
+        self.records.insert(id.clone(), record);
+        self.identity_to_id.insert(identity, id.clone());
+        self.try_start_or_queue(&id, false);
+        self.queued_ids.push(id.clone());
+        self.finish_op_ed_enqueue_batch();
+        Ok(EnqueueJobResult::queued(Some(id)))
+    }
+
+    pub fn enqueue_manual_op_ed_rematch(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        anime_title: Option<&str>,
+    ) -> Result<EnqueueJobResult, String> {
+        let identity = op_ed::manual_op_ed_rematch_job_identity(anime_id);
+        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
+            if self.records.contains_key(&existing_id) {
+                self.finish_op_ed_enqueue_batch();
+                return Ok(EnqueueJobResult::queued(Some(existing_id)));
+            }
+        }
+
+        let title = anime_title
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| format!("Anime #{anime_id}"));
+
+        let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, anime_id))?;
+        let mut prerequisite_job_ids: Vec<String> = Vec::new();
+        for ep in &episodes {
+            if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
+                continue;
+            }
+            let chroma = self.enqueue_op_ed_chroma_episode(
+                db,
+                ep,
+                JobPriority::Medium,
+                anime_title,
+                false,
+            )?;
+            if let Some(job_id) = chroma.job_id {
+                prerequisite_job_ids.push(job_id);
+            }
+        }
+
+        let (id, short_id) = alloc_job_ids();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let view = JobView {
+            id: id.clone(),
+            short_id,
+            name: "Rematch manual skip areas".to_string(),
+            desc: title,
+            identity: identity.clone(),
+            job_type: "manual_op_ed_rematch".to_string(),
+            resource_type: JobResourceType::None,
+            priority: JobPriority::Medium,
+            status: JobStatus::Queued,
+            cancelable: true,
+            progress: JobProgress {
+                current_step: 0,
+                total_steps: 100,
+            },
+            step_label: "Queued".to_string(),
+            completion_message: None,
+            created_at: now_ms(),
+            started_at: None,
+            finished_at: None,
+            waiting_for: Vec::new(),
+            prerequisite_total: 0,
+            prerequisite_pending: 0,
+            prerequisite_progress_current: 0,
+            prerequisite_progress_total: 0,
+        };
+        let record = JobRecord {
+            view,
+            cancel,
+            kind: JobKind::OpEdManualRematch { anime_id },
+            follow_ups: Vec::new(),
+            prerequisite_job_ids,
+        };
+        self.records.insert(id.clone(), record);
+        self.identity_to_id.insert(identity, id.clone());
+        self.try_start_or_queue(&id, false);
+        self.queued_ids.push(id.clone());
+        self.finish_op_ed_enqueue_batch();
+        Ok(EnqueueJobResult::queued(Some(id)))
+    }
+
+    pub fn prepare_manual_op_ed_rematch(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        anime_title: Option<String>,
+    ) -> Result<op_ed::PrepareManualOpEdRematchResult, String> {
+        db.with_conn(|conn| op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
+        let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, anime_id))?;
+        let title = anime_title.as_deref();
+        if has_manual {
+            let result = self.enqueue_manual_op_ed_rematch(db, anime_id, title)?;
+            Ok(op_ed::PrepareManualOpEdRematchResult {
+                job_id: result.job_id,
+                used_manual_templates: true,
+            })
+        } else {
+            let result = self.enqueue_op_ed_auto_rematch(db, anime_id, title)?;
+            Ok(op_ed::PrepareManualOpEdRematchResult {
+                job_id: result.job_id,
+                used_manual_templates: false,
+            })
+        }
     }
 
     fn running_count(&self) -> u32 {
@@ -1329,6 +1520,9 @@ impl JobManager {
             } => {
                 super::spawn_op_ed_worker(app, job_id_owned, anime_id, episode_ids, options, cancel);
             }
+            JobKind::OpEdManualRematch { anime_id } => {
+                super::spawn_manual_op_ed_rematch_worker(app, job_id_owned, anime_id, cancel);
+            }
         }
         self.emit_snapshot();
     }
@@ -1344,13 +1538,17 @@ impl JobManager {
 
         let scrub_path_for_emit = self.records.get(job_id).and_then(|r| match &r.kind {
             JobKind::ScrubSprite { path } => Some(path.clone()),
-            JobKind::OpEdChroma { .. } | JobKind::OpEdDetect { .. } => None,
+            JobKind::OpEdChroma { .. }
+            | JobKind::OpEdDetect { .. }
+            | JobKind::OpEdManualRematch { .. } => None,
         });
 
-        let emit_op_ed_updated = self
-            .records
-            .get(job_id)
-            .is_some_and(|r| matches!(r.kind, JobKind::OpEdDetect { .. }));
+        let emit_op_ed_updated = self.records.get(job_id).is_some_and(|r| {
+            matches!(
+                r.kind,
+                JobKind::OpEdDetect { .. } | JobKind::OpEdManualRematch { .. }
+            )
+        });
 
         match outcome {
             WorkerOutcome::Done(message, scrub_ready) => {
@@ -1474,6 +1672,23 @@ pub fn run_op_ed_job_worker(
     let db = app.state::<AppDatabase>();
     match op_ed::run_op_ed_detect_job(&db, anime_id, &episode_ids, options, cancel, on_step) {
         Ok(()) => WorkerOutcome::Done("OP/ED batch complete".to_string(), None),
+        Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
+        Err(e) => WorkerOutcome::Failed(e),
+    }
+}
+
+pub fn run_manual_op_ed_rematch_worker(
+    app: &AppHandle,
+    anime_id: i64,
+    cancel: &AtomicBool,
+    on_step: impl Fn(u32, u32, &str),
+) -> WorkerOutcome {
+    if cancel.load(Ordering::Relaxed) {
+        return WorkerOutcome::Canceled;
+    }
+    let db = app.state::<AppDatabase>();
+    match op_ed::run_manual_op_ed_rematch(&db, anime_id, cancel, on_step) {
+        Ok(()) => WorkerOutcome::Done("Manual skip rematch complete".to_string(), None),
         Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
         Err(e) => WorkerOutcome::Failed(e),
     }

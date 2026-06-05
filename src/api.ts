@@ -15,6 +15,8 @@ import type {
   MpvTrack,
   MpvVideoGeometry,
   AnimeOpEdAnalysisSummary,
+  ManualOpEdTemplate,
+  PrepareManualOpEdRematchResult,
   EnqueueJobResult,
   EnqueueOpEdChromaAnimeJob,
   EnqueueOpEdChromaEpisodeJob,
@@ -231,6 +233,72 @@ export function resetAnimeOpEdAnalysis(animeId: number): Promise<void> {
 
 export function getAnimeOpEdSummary(animeId: number): Promise<AnimeOpEdAnalysisSummary> {
   return invoke("get_anime_op_ed_summary_cmd", { animeId });
+}
+
+export function listManualOpEdTemplates(animeId: number): Promise<ManualOpEdTemplate[]> {
+  return invoke("list_manual_op_ed_templates_cmd", { animeId });
+}
+
+export function countManualOpEdTemplates(animeId: number): Promise<number> {
+  return invoke("count_manual_op_ed_templates_cmd", { animeId });
+}
+
+export function saveManualOpEdTemplate(request: {
+  animeId: number;
+  kind: string;
+  episodeId: number;
+  startSec: number;
+  durationSec: number;
+}): Promise<number> {
+  return invoke("save_manual_op_ed_template_cmd", {
+    animeId: request.animeId,
+    kind: request.kind,
+    episodeId: request.episodeId,
+    startSec: request.startSec,
+    durationSec: request.durationSec,
+  });
+}
+
+export function updateManualOpEdTemplate(request: {
+  templateId: number;
+  startSec: number;
+  durationSec: number;
+}): Promise<void> {
+  return invoke("update_manual_op_ed_template_cmd", {
+    templateId: request.templateId,
+    startSec: request.startSec,
+    durationSec: request.durationSec,
+  });
+}
+
+export function deleteManualOpEdTemplate(templateId: number): Promise<void> {
+  return invoke("delete_manual_op_ed_template_cmd", { templateId });
+}
+
+export function probeVideoFps(path: string): Promise<number> {
+  return invoke("probe_video_fps_cmd", { path });
+}
+
+export function prepareManualOpEdRematch(
+  animeId: number,
+  animeTitle?: string | null,
+): Promise<PrepareManualOpEdRematchResult> {
+  return invoke("prepare_manual_op_ed_rematch_cmd", { animeId, animeTitle: animeTitle ?? null });
+}
+
+export function mpvSetPreviewRect(request: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  windowWidth: number;
+  windowHeight: number;
+}): Promise<void> {
+  return invoke("mpv_set_preview_rect", request);
+}
+
+export function mpvClearPreviewRect(windowWidth: number, sidebarPx: number): Promise<void> {
+  return invoke("mpv_clear_preview_rect", { windowWidth, sidebarPx });
 }
 
 export function jobsSetJobPriority(jobId: string, priority: JobPriority): Promise<void> {

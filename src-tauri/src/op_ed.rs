@@ -14,7 +14,7 @@ use tauri::State;
 use crate::db::AppDatabase;
 use crate::media_tools::{
     cache_key, extract_pcm_range, fpcalc_path, hidden_command, normalized_video_path,
-    portable_data_dir, probe_duration,
+    portable_data_dir, probe_duration, probe_video_fps,
 };
 
 pub const ANALYSIS_VERSION: i32 = 2;
@@ -25,6 +25,9 @@ pub const DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY: &str = "dont_skip_first_epi
 pub const OP_ED_DATA_DIR: &str = "op-ed";
 const FINGERPRINTS_SUBDIR: &str = "fingerprints";
 const JOB_NAME: &str = "op_ed_detect";
+const MANUAL_REMATCH_JOB_NAME: &str = "manual_op_ed_rematch";
+pub const MANUAL_TEMPLATE_MIN_SEC: f64 = 5.0;
+pub const MANUAL_TEMPLATE_MAX_SEC: f64 = 180.0;
 
 pub const SAMPLE_RATE: u32 = 11025;
 const CHROMAPRINT_FRAME_SEC: f64 = 0.1238;
@@ -158,6 +161,33 @@ pub struct AnimeOpEdAnalysisSummary {
     pub ed_matched: i64,
     pub ed_pending: i64,
     pub templates_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualOpEdTemplate {
+    pub id: i64,
+    pub kind: String,
+    pub kind_index: i32,
+    pub start_sec: f64,
+    pub duration_sec: f64,
+    pub source_episode_id: i64,
+    pub source_episode_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareManualOpEdRematchResult {
+    pub job_id: Option<String>,
+    pub used_manual_templates: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ManualTemplateRow {
+    id: i64,
+    kind: SegmentKind,
+    duration_sec: f64,
+    fingerprint_cache_key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1558,6 +1588,7 @@ impl DetectContext<'_> {
                 confidence,
                 fp_key,
                 source_ids,
+                "auto",
             )
         })
     }
@@ -1598,7 +1629,7 @@ fn load_latest_kind_template(
         let row: Option<(i64, i32, String)> = conn
             .query_row(
                 "SELECT id, block_index, fingerprint_cache_key FROM op_ed_templates
-                 WHERE anime_id = ?1 AND kind = ?2
+                 WHERE anime_id = ?1 AND kind = ?2 AND source = 'auto'
                  ORDER BY block_index DESC, id DESC
                  LIMIT 1",
                 params![ctx.anime_id, kind.as_str()],
@@ -1697,13 +1728,14 @@ fn insert_template(
     confidence: f32,
     fp_key: &str,
     source_ids: &[i64],
+    source: &str,
 ) -> Result<i64, String> {
     let source_json = serde_json::to_string(source_ids).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO op_ed_templates
             (anime_id, kind, block_index, start_sec, duration_sec, confidence,
-             fingerprint_cache_key, source_episode_ids)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             fingerprint_cache_key, source_episode_ids, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             anime_id,
             kind.as_str(),
@@ -1713,6 +1745,7 @@ fn insert_template(
             confidence,
             fp_key,
             source_json,
+            source,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -2545,6 +2578,533 @@ pub fn list_referenced_op_ed_fingerprint_keys(
 pub fn op_ed_cache_directory_size() -> Result<u64, String> {
     let dir = portable_data_dir()?.join(OP_ED_DATA_DIR);
     directory_size(&dir)
+}
+
+pub fn manual_op_ed_rematch_job_identity(anime_id: i64) -> String {
+    format!("{MANUAL_REMATCH_JOB_NAME}:{anime_id}")
+}
+
+fn clamp_manual_template_duration(duration_sec: f64) -> f64 {
+    duration_sec.clamp(MANUAL_TEMPLATE_MIN_SEC, MANUAL_TEMPLATE_MAX_SEC)
+}
+
+fn episode_display_label(
+    conn: &Connection,
+    episode_id: i64,
+    tracker_offset: i64,
+) -> Result<String, String> {
+    let episode_number: Option<i64> = conn
+        .query_row(
+            "SELECT episode_number FROM episodes WHERE id = ?1",
+            params![episode_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(match episode_number {
+        Some(n) => format!("Episode {}", n - tracker_offset),
+        None => "Episode ?".to_string(),
+    })
+}
+
+pub fn has_manual_templates(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM op_ed_templates WHERE anime_id = ?1 AND source = 'manual'",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+
+pub fn count_manual_templates(conn: &Connection, anime_id: i64) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM op_ed_templates WHERE anime_id = ?1 AND source = 'manual'",
+        params![anime_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn clear_episode_op_ed_segments_for_anime(conn: &Connection, anime_id: i64) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM episode_op_ed_segments
+         WHERE episode_id IN (SELECT id FROM episodes WHERE anime_id = ?1)",
+        params![anime_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn load_manual_templates(conn: &Connection, anime_id: i64) -> Result<Vec<ManualTemplateRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, kind, duration_sec, fingerprint_cache_key
+             FROM op_ed_templates
+             WHERE anime_id = ?1 AND source = 'manual'
+             ORDER BY kind, id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![anime_id], |row| {
+            let kind_str: String = row.get(1)?;
+            Ok(ManualTemplateRow {
+                id: row.get(0)?,
+                kind: SegmentKind::parse(&kind_str).unwrap_or(SegmentKind::Op),
+                duration_sec: row.get(2)?,
+                fingerprint_cache_key: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+pub fn list_manual_op_ed_templates(
+    conn: &Connection,
+    anime_id: i64,
+) -> Result<Vec<ManualOpEdTemplate>, String> {
+    let tracker_offset: i64 = conn
+        .query_row(
+            "SELECT tracker_offset FROM anime WHERE id = ?1",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, kind, start_sec, duration_sec, source_episode_ids
+             FROM op_ed_templates
+             WHERE anime_id = ?1 AND source = 'manual'
+             ORDER BY kind, id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![anime_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    let mut kind_counters: std::collections::HashMap<String, i32> =
+        std::collections::HashMap::new();
+    for row in rows {
+        let (id, kind, start_sec, duration_sec, source_json) = row.map_err(|e| e.to_string())?;
+        let kind_index = {
+            let counter = kind_counters.entry(kind.clone()).or_insert(0);
+            *counter += 1;
+            *counter
+        };
+        let source_episode_id = source_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<Vec<i64>>(json).ok())
+            .and_then(|ids| ids.first().copied())
+            .unwrap_or(0);
+        let source_episode_label = if source_episode_id > 0 {
+            episode_display_label(conn, source_episode_id, tracker_offset)?
+        } else {
+            "Episode ?".to_string()
+        };
+        out.push(ManualOpEdTemplate {
+            id,
+            kind,
+            kind_index,
+            start_sec,
+            duration_sec,
+            source_episode_id,
+            source_episode_label,
+        });
+    }
+    Ok(out)
+}
+
+fn save_manual_template_fingerprint(
+    episode_path: &str,
+    start_sec: f64,
+    duration_sec: f64,
+) -> Result<(Fingerprint, String), String> {
+    let duration_sec = clamp_manual_template_duration(duration_sec);
+    let (key, fp) = ensure_episode_fingerprint(episode_path, start_sec, duration_sec)?;
+    Ok((fp, key))
+}
+
+pub fn save_manual_op_ed_template(
+    conn: &Connection,
+    anime_id: i64,
+    kind: &str,
+    episode_id: i64,
+    start_sec: f64,
+    duration_sec: f64,
+) -> Result<i64, String> {
+    let segment_kind =
+        SegmentKind::parse(kind).ok_or_else(|| format!("invalid template kind: {kind}"))?;
+    let duration_sec = clamp_manual_template_duration(duration_sec);
+    let ep: EpisodeRow = conn
+        .query_row(
+            "SELECT id, path, duration_seconds FROM episodes
+             WHERE id = ?1 AND anime_id = ?2 AND missing = 0",
+            params![episode_id, anime_id],
+            |row| {
+                Ok(EpisodeRow {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    duration_seconds: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| format!("episode not found: {e}"))?;
+    let (_, fp_key) = save_manual_template_fingerprint(&ep.path, start_sec, duration_sec)?;
+    insert_template(
+        conn,
+        anime_id,
+        segment_kind,
+        0,
+        start_sec,
+        duration_sec,
+        1.0,
+        &fp_key,
+        &[episode_id],
+        "manual",
+    )
+}
+
+pub fn update_manual_op_ed_template(
+    conn: &Connection,
+    template_id: i64,
+    start_sec: f64,
+    duration_sec: f64,
+) -> Result<(), String> {
+    let (anime_id, kind_str, source_json): (i64, String, Option<String>) = conn
+        .query_row(
+            "SELECT anime_id, kind, source_episode_ids FROM op_ed_templates
+             WHERE id = ?1 AND source = 'manual'",
+            params![template_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| format!("manual template not found: {e}"))?;
+    let episode_id = source_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<Vec<i64>>(json).ok())
+        .and_then(|ids| ids.first().copied())
+        .ok_or("manual template has no source episode")?;
+    let duration_sec = clamp_manual_template_duration(duration_sec);
+    let ep: EpisodeRow = conn
+        .query_row(
+            "SELECT id, path, duration_seconds FROM episodes WHERE id = ?1 AND anime_id = ?2",
+            params![episode_id, anime_id],
+            |row| {
+                Ok(EpisodeRow {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    duration_seconds: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| format!("source episode not found: {e}"))?;
+    let (_, fp_key) = save_manual_template_fingerprint(&ep.path, start_sec, duration_sec)?;
+    conn.execute(
+        "UPDATE op_ed_templates
+         SET start_sec = ?2, duration_sec = ?3, confidence = 1.0, fingerprint_cache_key = ?4
+         WHERE id = ?1",
+        params![template_id, start_sec, duration_sec, fp_key],
+    )
+    .map_err(|e| e.to_string())?;
+    let _ = kind_str;
+    Ok(())
+}
+
+pub fn delete_manual_op_ed_template(conn: &Connection, template_id: i64) -> Result<(), String> {
+    let changed = conn
+        .execute(
+            "DELETE FROM op_ed_templates WHERE id = ?1 AND source = 'manual'",
+            params![template_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("manual template not found".to_string());
+    }
+    Ok(())
+}
+
+fn template_match_from_offset_variable(
+    duration_sec: f64,
+    offset_frames: usize,
+    quality: MatchQuality,
+) -> TemplateMatch {
+    let start_sec = seconds_for_frames(offset_frames);
+    TemplateMatch {
+        start_sec,
+        end_sec: start_sec + duration_sec,
+        confidence: quality.average,
+    }
+}
+
+fn find_best_match_variable_in_range(
+    template: &Fingerprint,
+    candidate: &Fingerprint,
+    template_duration_sec: f64,
+    search_start_frame: usize,
+    search_end_frame: usize,
+) -> Option<TemplateMatch> {
+    let (offset, quality) = find_best_offset_and_quality(
+        template,
+        candidate,
+        search_start_frame,
+        search_end_frame,
+    )?;
+    if !match_quality_is_accepted(quality) {
+        return None;
+    }
+    Some(template_match_from_offset_variable(
+        template_duration_sec,
+        offset,
+        quality,
+    ))
+}
+
+/// Band-hinted full-episode search for a variable-length manual template.
+fn match_template_variable_duration(
+    template_fp: &Fingerprint,
+    candidate_fp: &Fingerprint,
+    kind: SegmentKind,
+    template_duration_sec: f64,
+    episode_duration: f64,
+) -> Option<TemplateMatch> {
+    let optimistic = kind_optimistic_search_range(kind, episode_duration);
+    let full_end = frames_for_seconds(episode_duration);
+    if let Some(matched) = find_best_match_variable_in_range(
+        template_fp,
+        candidate_fp,
+        template_duration_sec,
+        optimistic.0,
+        optimistic.1,
+    ) {
+        return Some(matched);
+    }
+    let before = (0, optimistic.0.saturating_sub(1));
+    if before.0 <= before.1 {
+        if let Some(matched) = find_best_match_variable_in_range(
+            template_fp,
+            candidate_fp,
+            template_duration_sec,
+            before.0,
+            before.1,
+        ) {
+            return Some(matched);
+        }
+    }
+    let after = (optimistic.1.saturating_add(1), full_end);
+    if after.0 <= after.1 {
+        return find_best_match_variable_in_range(
+            template_fp,
+            candidate_fp,
+            template_duration_sec,
+            after.0,
+            after.1,
+        );
+    }
+    None
+}
+
+pub fn run_manual_op_ed_rematch(
+    db: &AppDatabase,
+    anime_id: i64,
+    cancel: &AtomicBool,
+    on_step: impl Fn(u32, u32, &str),
+) -> Result<(), String> {
+    let episodes = db.with_conn(|conn| load_episodes(conn, anime_id))?;
+    let templates = db.with_conn(|conn| load_manual_templates(conn, anime_id))?;
+    if templates.is_empty() {
+        return Err("no manual templates to rematch".to_string());
+    }
+
+    db.with_conn(|conn| ensure_pending_segments_for_anime(conn, anime_id))?;
+
+    let total_steps = (episodes.len() as u32).saturating_mul(2).max(1);
+    let mut step = 1u32;
+
+    for ep in &episodes {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Manual OP/ED rematch cancelled".to_string());
+        }
+        let duration = if ep.duration_seconds > 0.0 {
+            ep.duration_seconds
+        } else {
+            let path = normalized_video_path(&ep.path)?;
+            probe_duration(&path)?
+        };
+        let extract_len = full_episode_extract_len(duration);
+        let (candidate_key, candidate_fp) =
+            ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
+
+        for kind in [SegmentKind::Op, SegmentKind::Ed] {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Manual OP/ED rematch cancelled".to_string());
+            }
+            on_step(
+                step,
+                total_steps,
+                &format!("{} {} rematch", kind.display_name(), ep.id),
+            );
+            step = step.saturating_add(1);
+
+            let kind_templates: Vec<&ManualTemplateRow> = templates
+                .iter()
+                .filter(|t| t.kind == kind)
+                .collect();
+            if kind_templates.is_empty() {
+                db.with_conn(|conn| {
+                    upsert_segment_status_conn(
+                        conn,
+                        ep.id,
+                        kind,
+                        OpEdSegmentStatus::NotFound,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "manual",
+                        None,
+                        None,
+                    )
+                })?;
+                continue;
+            }
+
+            let mut best: Option<(i64, TemplateMatch)> = None;
+            for template in kind_templates {
+                let Some(template_fp) = load_fingerprint(&template.fingerprint_cache_key)? else {
+                    continue;
+                };
+                if let Some(matched) = match_template_variable_duration(
+                    &template_fp,
+                    &candidate_fp,
+                    kind,
+                    template.duration_sec,
+                    duration,
+                ) {
+                    if best
+                        .as_ref()
+                        .is_none_or(|(_, prev)| matched.confidence > prev.confidence)
+                    {
+                        best = Some((template.id, matched));
+                    }
+                }
+            }
+
+            if let Some((template_id, matched)) = best {
+                db.with_conn(|conn| {
+                    upsert_segment_status_conn(
+                        conn,
+                        ep.id,
+                        kind,
+                        OpEdSegmentStatus::Matched,
+                        Some(matched.start_sec),
+                        Some(matched.end_sec),
+                        Some(f64::from(matched.confidence)),
+                        Some(template_id),
+                        "manual",
+                        Some(&candidate_key),
+                        None,
+                    )
+                })?;
+            } else {
+                db.with_conn(|conn| {
+                    upsert_segment_status_conn(
+                        conn,
+                        ep.id,
+                        kind,
+                        OpEdSegmentStatus::NotFound,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "manual",
+                        None,
+                        None,
+                    )
+                })?;
+            }
+        }
+    }
+
+    on_step(total_steps, total_steps, "Done");
+    Ok(())
+}
+
+pub fn auto_rematch_job_options() -> OpEdDetectJobOptions {
+    OpEdDetectJobOptions {
+        continue_templates: true,
+        init_anime_state: false,
+        mark_analyzed: false,
+        rematch_matched: true,
+        demote_matched_for_blocks: false,
+    }
+}
+
+#[tauri::command]
+pub fn list_manual_op_ed_templates_cmd(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<Vec<ManualOpEdTemplate>, String> {
+    db.with_conn(|conn| list_manual_op_ed_templates(conn, anime_id))
+}
+
+#[tauri::command]
+pub fn count_manual_op_ed_templates_cmd(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<i64, String> {
+    db.with_conn(|conn| count_manual_templates(conn, anime_id))
+}
+
+#[tauri::command]
+pub fn save_manual_op_ed_template_cmd(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+    kind: String,
+    episode_id: i64,
+    start_sec: f64,
+    duration_sec: f64,
+) -> Result<i64, String> {
+    db.with_conn(|conn| {
+        save_manual_op_ed_template(conn, anime_id, &kind, episode_id, start_sec, duration_sec)
+    })
+}
+
+#[tauri::command]
+pub fn update_manual_op_ed_template_cmd(
+    db: State<'_, AppDatabase>,
+    template_id: i64,
+    start_sec: f64,
+    duration_sec: f64,
+) -> Result<(), String> {
+    db.with_conn(|conn| update_manual_op_ed_template(conn, template_id, start_sec, duration_sec))
+}
+
+#[tauri::command]
+pub fn delete_manual_op_ed_template_cmd(
+    db: State<'_, AppDatabase>,
+    template_id: i64,
+) -> Result<(), String> {
+    db.with_conn(|conn| delete_manual_op_ed_template(conn, template_id))
+}
+
+#[tauri::command]
+pub fn probe_video_fps_cmd(path: String) -> Result<f64, String> {
+    let path_buf = normalized_video_path(&path)?;
+    probe_video_fps(&path_buf)
 }
 
 #[tauri::command]

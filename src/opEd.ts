@@ -6,6 +6,10 @@ export function opEdJobIdentity(animeId: number): string {
   return `op_ed_detect:${animeId}`;
 }
 
+export function manualOpEdRematchJobIdentity(animeId: number): string {
+  return `manual_op_ed_rematch:${animeId}`;
+}
+
 export function opEdChromaJobIdentity(episodeId: number): string {
   return `op_ed_chroma:${episodeId}`;
 }
@@ -36,10 +40,13 @@ export function findActiveOpEdJob(
   if (!snapshot) return null;
   const legacy = opEdJobIdentity(animeId);
   const batchPrefix = `${legacy}:`;
+  const manualRematch = manualOpEdRematchJobIdentity(animeId);
   return (
     snapshot.active.find(
       (job) =>
-        (job.identity === legacy || job.identity.startsWith(batchPrefix)) &&
+        (job.identity === legacy ||
+          job.identity.startsWith(batchPrefix) ||
+          job.identity === manualRematch) &&
         (job.status === "queued" || job.status === "running"),
     ) ?? null
   );

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS op_ed_templates (
   confidence REAL NOT NULL DEFAULT 0,
   fingerprint_cache_key TEXT NOT NULL,
   source_episode_ids TEXT,
+  source TEXT NOT NULL DEFAULT 'auto' CHECK(source IN ('auto', 'manual')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(anime_id) REFERENCES anime(id) ON DELETE CASCADE
 );
@@ -117,6 +118,14 @@ CREATE INDEX IF NOT EXISTS idx_episode_op_ed_status ON episode_op_ed_segments(ep
 "#,
     )
     .map_err(|e| e.to_string())?;
+
+    if !table_has_column(conn, "op_ed_templates", "source")? {
+        conn.execute(
+            "ALTER TABLE op_ed_templates ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }

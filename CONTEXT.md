@@ -334,6 +334,20 @@ view components. Per-screen UI lives in `src/components/`:
   segments on `mpv://time-pos`. **Don't skip first episode opening/ending**
   (`settings.dont_skip_first_episode_op_ed`) exempts display episode 1 from that
   skip logic.
+- **Manual skip areas** (episode page header icon): users define per-title OP/ED
+  templates by selecting a source episode and dragging range handles over an mpv
+  preview (`mpv_set_preview_rect` / four `video-margin-ratio-*` options). Templates
+  live in `op_ed_templates` with `source = 'manual'` (5–180s variable duration,
+  Chromaprint fingerprint per template). While any manual template exists, skip
+  matching uses **manual templates only** (best score per kind across all manual
+  templates; `search_pass = 'manual'`); auto templates remain in SQLite but are
+  inactive. Closing the editor after changes clears segment rows and enqueues
+  `manual_op_ed_rematch:{anime_id}` (medium priority, chroma prerequisites).
+  Deleting all manual templates and closing rematches against auto templates only.
+  **Run analysis** with manual templates enqueues chroma jobs only (no detect) and
+  shows a toast that automatic detection will not change skip regions. Opening the
+  manual editor stops mpv playback; `PlayerView` sets `playbackSuspended` until
+  the modal closes.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads
@@ -586,6 +600,8 @@ got. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `src/api.ts`, `src/types.ts`, `src/utils.ts` — frontend command
   bindings, shared DTOs, and formatting helpers.
 - `src/components/PlayerView.tsx` — mpv-backed player view and controls.
+- `src/components/ManualSkipAreasModal.tsx`, `src/components/TemplateRangeScrubber.tsx`
+  — manual OP/ED template editor UI.
 - `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.

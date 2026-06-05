@@ -86,6 +86,14 @@ export function FolderOpenIcon() {
   );
 }
 
+export function ManualSkipIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M4 5v14h3V5H4zm5 7 8-5v10l-8-5zm9-2.5h-1.5v9H18v-9zM14 8h4v1.5h-4V8z" />
+    </svg>
+  );
+}
+
 /** Skip detected OP/ED; diagonal slash when `enabled` is false. */
 export function SkipOpEdIcon({ enabled }: { enabled: boolean }) {
   return (

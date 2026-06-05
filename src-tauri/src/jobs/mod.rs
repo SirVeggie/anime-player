@@ -380,6 +380,54 @@ pub fn spawn_op_ed_worker(
 }
 
 #[cfg(windows)]
+pub fn spawn_manual_op_ed_rematch_worker(
+    app: AppHandle,
+    job_id: String,
+    anime_id: i64,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let job_id_for_step = job_id.clone();
+        let app_for_step = app.clone();
+        let app_for_blocking = app.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            manager::run_manual_op_ed_rematch_worker(
+                &app_for_blocking,
+                anime_id,
+                &cancel,
+                |step, total, label| {
+                    notify_job_step(&app_for_step, &job_id_for_step, step, total, label);
+                },
+            )
+        })
+        .await;
+
+        let outcome = match outcome {
+            Ok(o) => o,
+            Err(e) => WorkerOutcome::Failed(e.to_string()),
+        };
+        complete_worker_task(app, job_id, outcome);
+    });
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn prepare_manual_op_ed_rematch_cmd(
+    app: AppHandle,
+    anime_id: i64,
+    anime_title: Option<String>,
+) -> Result<op_ed::PrepareManualOpEdRematchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<AppDatabase>();
+        let jobs = app.state::<JobsState>();
+        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+        guard.prepare_manual_op_ed_rematch(&db, anime_id, anime_title)
+    })
+    .await
+    .map_err(|e| format!("prepare rematch thread failed: {e}"))?
+}
+
+#[cfg(windows)]
 #[tauri::command]
 pub async fn jobs_enqueue_op_ed_detect(
     app: AppHandle,

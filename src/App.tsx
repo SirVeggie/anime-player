@@ -46,6 +46,7 @@ import {
   setAnilistClientId,
   setAnilistMediaProgress,
   setAnilistMediaScore,
+  prepareManualOpEdRematch,
   stopMpv,
   unlinkAnimeAnilist,
   updateRegexRule,
@@ -160,6 +161,7 @@ function App() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+  const [manualSkipModalOpen, setManualSkipModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const [anilistProgressUpdate, setAnilistProgressUpdate] = useState<AnilistProgressUpdate | null>(null);
@@ -778,6 +780,28 @@ function App() {
     }
   }, [episodes.length, selectedAnime, showToast]);
 
+  const handleManualSkipModalOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        void stopMpv().catch(() => undefined);
+      }
+      setManualSkipModalOpen(open);
+    },
+    [],
+  );
+
+  const handleManualSkipDirtyClose = useCallback(async () => {
+    if (!selectedAnime || !library) return;
+    try {
+      await prepareManualOpEdRematch(
+        selectedAnime.id,
+        animeDisplayTitle(selectedAnime, library.prefer_anilist_display_title),
+      );
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [library, selectedAnime, showToast]);
+
   const handleDeleteSelectedAnimeFiles = useCallback(async () => {
     if (!selectedAnime) return;
     if (episodes.length === 0) {
@@ -1376,6 +1400,7 @@ function App() {
           onSkipOpEdEnabledChange={(enabled) => void handleSkipOpEd(enabled)}
           playlist={episodes}
           visible={Boolean(showPlayer)}
+          playbackSuspended={manualSkipModalOpen}
           playbackProgressFlushRef={playbackProgressFlushRef}
           onSelectEpisode={setSelectedEpisode}
           onBack={() => closePlayer()}
@@ -1470,6 +1495,10 @@ function App() {
               onOpEdAnalysisUpdated={() => {
                 if (selectedAnime) void refreshAnimeEpisodes(selectedAnime.id);
               }}
+              manualSkipModalOpen={manualSkipModalOpen}
+              onManualSkipModalOpenChange={handleManualSkipModalOpenChange}
+              onManualSkipDirtyClose={() => void handleManualSkipDirtyClose()}
+              onShowToast={showToast}
             />
           ) : null}
 

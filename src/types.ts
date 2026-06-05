@@ -109,6 +109,21 @@ export type AnimeOpEdAnalysisSummary = {
   templatesCount: number;
 };
 
+export type ManualOpEdTemplate = {
+  id: number;
+  kind: string;
+  kindIndex: number;
+  startSec: number;
+  durationSec: number;
+  sourceEpisodeId: number;
+  sourceEpisodeLabel: string;
+};
+
+export type PrepareManualOpEdRematchResult = {
+  jobId: string | null;
+  usedManualTemplates: boolean;
+};
+
 export type MpvTrack = {
   id: number;
   kind: "audio" | "sub";
@@ -315,6 +330,7 @@ export type JobsSnapshot = {
 export type EnqueueJobResult = {
   jobId: string | null;
   skipped: boolean;
+  chromaOnly?: boolean;
 };
 
 export type EnqueueScrubSpriteJob = {

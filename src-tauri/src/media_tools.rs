@@ -129,6 +129,42 @@ pub fn normalized_video_path_key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
 }
 
+/// Average frame rate from the first video stream (`r_frame_rate`), or 24 when unknown.
+pub fn probe_video_fps(path: &Path) -> Result<f64, String> {
+    let ffprobe = ffprobe_path()?;
+    let output = hidden_command(&ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("failed to run ffprobe: {e}"))?;
+    if !output.status.success() {
+        return Ok(24.0);
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let trimmed = text.trim();
+    if let Some((num, den)) = trimmed.split_once('/') {
+        let n: f64 = num.trim().parse().unwrap_or(0.0);
+        let d: f64 = den.trim().parse().unwrap_or(1.0);
+        if n > 0.0 && d > 0.0 {
+            return Ok(n / d);
+        }
+    } else if let Ok(fps) = trimmed.parse::<f64>() {
+        if fps > 0.0 {
+            return Ok(fps);
+        }
+    }
+    Ok(24.0)
+}
+
 pub fn probe_duration(path: &Path) -> Result<f64, String> {
     let ffprobe = ffprobe_path()?;
     let output = hidden_command(&ffprobe)
