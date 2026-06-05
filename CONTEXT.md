@@ -277,8 +277,10 @@ view components. Per-screen UI lives in `src/components/`:
   ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`) as prerequisites. Detect is
   For titles with **more than 12** episodes, detect runs in two jobs: a **preview**
   pass on the first 12 episodes (fast timestamps for early watching), then a **full**
-  pass on every episode including those twelve (full seed pool, rematches without
-  clearing existing timestamps until a new match is found). **12 or fewer** episodes
+  pass on every episode with the same block-detection logic as a single job on the
+  full list (`rematch_matched` off; preview `matched` rows are demoted to `pending`
+  first so discovery seeds from episode 1). Failed matches keep prior timestamps via
+  SQL `COALESCE` on `start_sec`/`end_sec`. **12 or fewer** episodes
   use a single full pass. After `op_ed_analyzed_at` is set, newly imported episodes
   enqueue one full all-episode pass only. `op-ed://analysis-updated` fires after each
   detect job finishes. Auto-enqueue is skipped when analysis is already current

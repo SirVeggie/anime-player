@@ -229,8 +229,11 @@ pub struct OpEdDetectJobOptions {
     pub init_anime_state: bool,
     /// Set `op_ed_analyzed_at` when this job finishes.
     pub mark_analyzed: bool,
-    /// Re-run matching on episodes already `matched` (full pass); failed rematch keeps old times.
+    /// Re-run matching on episodes already `matched` instead of skipping them in the match loop.
     pub rematch_matched: bool,
+    /// Clear `matched` to `pending` before detect (keeps times via SQL) so block detection sees the
+    /// full episode list. Used after a preview batch left early episodes matched.
+    pub demote_matched_for_blocks: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -274,7 +277,8 @@ pub fn plan_op_ed_detect_jobs(
                 init_anime_state: !full_pass_only,
                 continue_templates: false,
                 mark_analyzed: true,
-                rematch_matched: full_pass_only,
+                rematch_matched: false,
+                demote_matched_for_blocks: false,
             },
             batch_name: "Detect OP/ED".to_string(),
         }];
@@ -292,6 +296,7 @@ pub fn plan_op_ed_detect_jobs(
                 continue_templates: false,
                 mark_analyzed: false,
                 rematch_matched: false,
+                demote_matched_for_blocks: false,
             },
             batch_name: "Detect OP/ED (1/2)".to_string(),
         },
@@ -301,7 +306,8 @@ pub fn plan_op_ed_detect_jobs(
                 init_anime_state: false,
                 continue_templates: false,
                 mark_analyzed: true,
-                rematch_matched: true,
+                rematch_matched: false,
+                demote_matched_for_blocks: true,
             },
             batch_name: "Detect OP/ED (2/2)".to_string(),
         },
@@ -1404,6 +1410,59 @@ fn insert_template(
     Ok(conn.last_insert_rowid())
 }
 
+/// Episodes used for repeated-segment discovery in the current block.
+fn discovery_seed_episodes(
+    ctx: &DetectContext<'_>,
+    episodes: &[EpisodeRow],
+    kind: SegmentKind,
+    block_index: i32,
+) -> Result<Vec<EpisodeRow>, String> {
+    if ctx.rematch_matched && block_index == 0 {
+        return Ok(episodes.to_vec());
+    }
+    Ok(episodes
+        .iter()
+        .filter(|ep| {
+            ctx.segment_is_matched(ep.id, kind)
+                .map(|matched| !matched)
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect())
+}
+
+fn demote_matched_segments_for_rematch(
+    db: &AppDatabase,
+    episode_ids: &[i64],
+) -> Result<(), String> {
+    if episode_ids.is_empty() {
+        return Ok(());
+    }
+    db.with_conn(|conn| {
+        for episode_id in episode_ids {
+            for kind in [SegmentKind::Op, SegmentKind::Ed] {
+                let matched = segment_has_status(conn, *episode_id, kind, "matched")?;
+                if matched {
+                    upsert_segment_status_conn(
+                        conn,
+                        *episode_id,
+                        kind,
+                        OpEdSegmentStatus::Pending,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "rematch",
+                        None,
+                        None,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
 fn segment_has_status(
     conn: &Connection,
     episode_id: i64,
@@ -1444,7 +1503,19 @@ fn record_episode_match_result(
             None,
         )?;
     } else if ctx.rematch_matched && ctx.segment_is_matched(ep.id, kind)? {
-        // Full pass: keep previous OP/ED times until a new match is found.
+        // Rare after demote_rematch; keep times, clear matched so later blocks can discover.
+        ctx.upsert_segment_status(
+            ep.id,
+            kind,
+            OpEdSegmentStatus::Pending,
+            None,
+            None,
+            None,
+            Some(template_id),
+            search_pass,
+            None,
+            None,
+        )?;
     } else {
         ctx.upsert_segment_status(
             ep.id,
@@ -1506,15 +1577,8 @@ fn run_kind_detection(
             return Err("OP/ED detection cancelled".to_string());
         }
 
-        let seed_pool: Vec<EpisodeRow> = episodes
-            .iter()
-            .filter(|ep| {
-                ctx.segment_is_matched(ep.id, kind)
-                    .map(|matched| !matched)
-                    .unwrap_or(true)
-            })
-            .cloned()
-            .collect();
+        let seed_pool: Vec<EpisodeRow> =
+            discovery_seed_episodes(ctx, episodes, kind, block_index)?;
 
         let can_match_with_saved_template = try_reuse_templates
             && block_index == 0
@@ -1833,6 +1897,10 @@ pub fn run_op_ed_detect_job(
             .map_err(|e| e.to_string())?;
             ensure_pending_segments_for_anime(conn, anime_id)
         })?;
+    }
+
+    if options.demote_matched_for_blocks {
+        demote_matched_segments_for_rematch(db, episode_ids)?;
     }
 
     let ctx = DetectContext {
@@ -2189,7 +2257,8 @@ mod tests {
         assert_eq!(plans[0].episode_ids.len(), OP_ED_DETECT_BATCH_SIZE);
         assert_eq!(plans[1].episode_ids.len(), 20);
         assert!(!plans[0].options.mark_analyzed);
-        assert!(plans[1].options.rematch_matched);
+        assert!(!plans[1].options.rematch_matched);
+        assert!(plans[1].options.demote_matched_for_blocks);
         assert!(plans[1].options.mark_analyzed);
 
         let short = plan_op_ed_detect_jobs(&(1..=8).collect::<Vec<_>>(), false);
@@ -2199,7 +2268,8 @@ mod tests {
         let rerun = plan_op_ed_detect_jobs(&ids, true);
         assert_eq!(rerun.len(), 1);
         assert_eq!(rerun[0].episode_ids.len(), 20);
-        assert!(rerun[0].options.rematch_matched);
+        assert!(!rerun[0].options.rematch_matched);
+        assert!(!rerun[0].options.demote_matched_for_blocks);
         assert!(!rerun[0].options.init_anime_state);
     }
 }
