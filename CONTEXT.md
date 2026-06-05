@@ -294,8 +294,8 @@ view components. Per-screen UI lives in `src/components/`:
   discovery windows (one ffmpeg decode per OP/ED search band, then isolated fpcalc per 15s window on that PCM). Detect
   loads cached windows for discovery; 90s templates use isolated segment fpcalc. Match candidates use the cached
   full-episode fingerprint. Phase-1 discovery must not slice from full Chromaprint (segment-boundary fpcalc differs);
-  phase-2 refinement may slice 2.5s windows from the cached full fingerprint for speed and alignment tuning. After coarse discovery, a **refinement pass**
-  anchors the coarse template on seed episodes and re-clusters 2.5s windows at ±8s (1s steps); the refined start is
+  phase-2 refinement re-slices the 90s template from the cached reference fingerprint while sliding in unison. After coarse discovery, a **refinement pass**
+  anchors the coarse template on phase-1 seed episodes (dropping failures), then slides ±8s at 0.5s steps and picks the shift with the highest average per-episode score; the refined start is
   kept only when its template matches at least as many batch episodes as the coarse template (and coarse already
   matches ≥2). Optimistic search windows run before a full-episode pass for
   failed episodes. Titles with multiple OP/ED sets in one folder (e.g. two seasons

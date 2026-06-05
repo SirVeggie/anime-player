@@ -42,11 +42,9 @@ const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
 const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
 const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
 const SEED_MATCH_THRESHOLD: f32 = 0.82;
-/// Refinement pass: shorter window for sharper alignment once anchors are close.
-const SEED_REFINE_WINDOW_SEC: f64 = 2.5;
-/// After coarse discovery, slide refine windows ± this many seconds around per-episode anchors.
+/// After coarse discovery, slide the 90s template ± this many seconds in unison.
 const SEED_REFINE_OFFSET_SEC: i32 = 8;
-const SEED_REFINE_OFFSET_STEP_SEC: f64 = 1.0;
+const SEED_REFINE_OFFSET_STEP_SEC: f64 = 0.5;
 /// Minimum sliding score when anchoring the 90s template on a seed episode for refinement.
 const SEED_REFINE_ANCHOR_THRESHOLD: f32 = 0.82;
 const MAX_SEED_EPISODES: usize = 10;
@@ -1232,9 +1230,16 @@ fn count_episode_template_matches(
     Ok(hits)
 }
 
-/// Second discovery pass: anchor the coarse 90s template on each seed episode, then
-/// re-cluster `SEED_REFINE_WINDOW_SEC` windows sliced from the cached full fingerprint
-/// within ±`SEED_REFINE_OFFSET_SEC` at 1s steps (fast; not valid for phase-1 discovery).
+struct AnchoredSeedEpisode {
+    episode_id: i64,
+    anchor_frame: usize,
+    full: Fingerprint,
+}
+
+/// Second discovery pass: anchor the coarse 90s template on each phase-1 seed episode and
+/// drop failures, then slide the template in unison ±`SEED_REFINE_OFFSET_SEC` at
+/// `SEED_REFINE_OFFSET_STEP_SEC` steps by re-slicing the reference fingerprint (drop left /
+/// add right). Pick the shift with the highest average sliding score across survivors.
 fn refine_discovered_seed(
     initial_seed: &SeedCandidate,
     source_ids: &[i64],
@@ -1249,7 +1254,22 @@ fn refine_discovered_seed(
         kind.display_name()
     ));
 
-    let mut refined_seeds: Vec<SeedCandidate> = Vec::new();
+    let Some(ref_ep) = episodes.iter().find(|e| e.id == initial_seed.episode_id) else {
+        return Ok((initial_seed.clone(), source_ids.to_vec()));
+    };
+    let ref_duration = if ref_ep.duration_seconds > 0.0 {
+        ref_ep.duration_seconds
+    } else {
+        let path = normalized_video_path(&ref_ep.path)?;
+        probe_duration(&path)?
+    };
+    let ref_extract_len = full_episode_extract_len(ref_duration);
+    let (_, ref_full) = ensure_episode_fingerprint(&ref_ep.path, 0.0, ref_extract_len)?;
+
+    let template_frames = template_fp.frame_count();
+    let coarse_start_sec = initial_seed.start_sec;
+
+    let mut anchored: Vec<AnchoredSeedEpisode> = Vec::new();
     for ep_id in source_ids {
         if cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
@@ -1271,43 +1291,84 @@ fn refine_discovered_seed(
         else {
             continue;
         };
-        let anchor_sec = seconds_for_frames(anchor_frame);
-        let refine_window_frames = frames_for_seconds(SEED_REFINE_WINDOW_SEC);
-        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
-        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 {
-            let window_start_sec = anchor_sec + offset_sec;
-            if window_start_sec < 0.0 {
-                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-                continue;
-            }
-            let window_start_frame = frames_for_seconds(window_start_sec);
-            if window_start_frame + refine_window_frames > full.frame_count() {
-                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-                continue;
-            }
-            if let Some(fp) =
-                slice_fingerprint(&full, window_start_frame, refine_window_frames)
-            {
-                refined_seeds.push(SeedCandidate {
-                    start_sec: window_start_sec,
-                    episode_id: ep.id,
-                    fingerprint: fp,
-                });
-            }
-            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-        }
+        anchored.push(AnchoredSeedEpisode {
+            episode_id: ep.id,
+            anchor_frame,
+            full,
+        });
+    }
+
+    let refined_ids: Vec<i64> = anchored.iter().map(|a| a.episode_id).collect();
+    if anchored.len() < 2 {
+        return Ok((initial_seed.clone(), refined_ids));
     }
 
     report(&format!(
-        "{} discovery: comparing refined fingerprints",
-        kind.display_name()
+        "{} discovery: sliding template over {} episodes",
+        kind.display_name(),
+        anchored.len()
     ));
 
-    if let Some((refined, ids)) = cluster_seed_candidates(&refined_seeds) {
-        Ok((refined, ids))
-    } else {
-        Ok((initial_seed.clone(), source_ids.to_vec()))
+    let mut best_delta_sec = 0.0f64;
+    let mut best_avg_score = f32::NEG_INFINITY;
+
+    let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
+    while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 + f64::EPSILON {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("OP/ED detection cancelled".to_string());
+        }
+        let shifted_start_sec = coarse_start_sec + offset_sec;
+        if shifted_start_sec < 0.0 {
+            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+            continue;
+        }
+        let shifted_start_frame = frames_for_seconds(shifted_start_sec);
+        let Some(shifted_template) =
+            slice_fingerprint(&ref_full, shifted_start_frame, template_frames)
+        else {
+            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+            continue;
+        };
+
+        let mut score_sum = 0.0f32;
+        let mut valid = true;
+        for ep in &anchored {
+            let match_sec = seconds_for_frames(ep.anchor_frame) + offset_sec;
+            if match_sec < 0.0 {
+                valid = false;
+                break;
+            }
+            let match_frame = frames_for_seconds(match_sec);
+            if match_frame + template_frames > ep.full.frame_count() {
+                valid = false;
+                break;
+            }
+            score_sum += sliding_match_score(&shifted_template, &ep.full, match_frame);
+        }
+        if valid {
+            let avg = score_sum / anchored.len() as f32;
+            if avg > best_avg_score
+                || (avg == best_avg_score && offset_sec.abs() < best_delta_sec.abs())
+            {
+                best_avg_score = avg;
+                best_delta_sec = offset_sec;
+            }
+        }
+        offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
     }
+
+    if !best_avg_score.is_finite() {
+        return Ok((initial_seed.clone(), refined_ids));
+    }
+
+    Ok((
+        SeedCandidate {
+            start_sec: coarse_start_sec + best_delta_sec,
+            episode_id: initial_seed.episode_id,
+            fingerprint: initial_seed.fingerprint.clone(),
+        },
+        refined_ids,
+    ))
 }
 
 fn build_template_fingerprint(
@@ -2555,6 +2616,88 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&1) && ids.contains(&2));
         assert!(seed.episode_id == 1 || seed.episode_id == 2);
+    }
+
+    #[test]
+    fn refine_slide_offset_step_count_covers_plus_minus_eight() {
+        let mut count = 0usize;
+        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
+        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 + f64::EPSILON {
+            count += 1;
+            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+        }
+        assert_eq!(count, 33);
+    }
+
+    #[test]
+    fn unison_slide_finds_strong_average_match() {
+        let near = value_with_bit_diffs(2);
+        let far = value_with_bit_diffs(16);
+        let template_frames = 40usize;
+        let coarse_start_frame = 10usize;
+        let ref_vals: Vec<i32> = (0..200)
+            .map(|i| if (coarse_start_frame..coarse_start_frame + template_frames).contains(&i) {
+                near
+            } else {
+                far
+            })
+            .collect();
+        let ref_full = fingerprint_from_values(&ref_vals);
+        let coarse_template =
+            slice_fingerprint(&ref_full, coarse_start_frame, template_frames).expect("template");
+
+        let mut ep_a = vec![far; 8];
+        ep_a.extend(vec![near; 80]);
+        let full_a = fingerprint_from_values(&ep_a);
+        let anchor_a =
+            find_anchor_offset(&coarse_template, &full_a, 0, 20).expect("anchor a");
+
+        let mut ep_b = vec![far; 13];
+        ep_b.extend(vec![near; 80]);
+        let full_b = fingerprint_from_values(&ep_b);
+        let anchor_b =
+            find_anchor_offset(&coarse_template, &full_b, 0, 25).expect("anchor b");
+
+        let coarse_start_sec = seconds_for_frames(coarse_start_frame);
+        let mut best_avg = f32::NEG_INFINITY;
+        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
+        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 + f64::EPSILON {
+            let shifted_start_sec = coarse_start_sec + offset_sec;
+            if shifted_start_sec < 0.0 {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            let shifted_start_frame = frames_for_seconds(shifted_start_sec);
+            let Some(shifted_template) =
+                slice_fingerprint(&ref_full, shifted_start_frame, template_frames)
+            else {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            };
+            let match_a_sec = seconds_for_frames(anchor_a) + offset_sec;
+            let match_b_sec = seconds_for_frames(anchor_b) + offset_sec;
+            if match_a_sec < 0.0 || match_b_sec < 0.0 {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            let match_a = frames_for_seconds(match_a_sec);
+            let match_b = frames_for_seconds(match_b_sec);
+            if match_a + template_frames > full_a.frame_count()
+                || match_b + template_frames > full_b.frame_count()
+            {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            let score_a = sliding_match_score(&shifted_template, &full_a, match_a);
+            let score_b = sliding_match_score(&shifted_template, &full_b, match_b);
+            let avg = (score_a + score_b) / 2.0;
+            if avg > best_avg {
+                best_avg = avg;
+            }
+            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+        }
+        assert!(best_avg.is_finite());
+        assert!(best_avg > 0.9);
     }
 
     #[test]
