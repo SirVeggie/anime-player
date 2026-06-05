@@ -159,6 +159,8 @@ pub struct LibraryState {
     unmatched_count: i64,
     prefer_anilist_display_title: bool,
     skip_op_ed: bool,
+    auto_op_ed_detect: bool,
+    dont_skip_first_episode_op_ed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -358,6 +360,8 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         unmatched_count: count_unmatched(conn)?,
         prefer_anilist_display_title: read_prefer_anilist_display_title(conn)?,
         skip_op_ed: op_ed::read_skip_op_ed(conn)?,
+        auto_op_ed_detect: op_ed::read_auto_op_ed_detect(conn)?,
+        dont_skip_first_episode_op_ed: op_ed::read_dont_skip_first_episode_op_ed(conn)?,
     })
 }
 
@@ -365,6 +369,25 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
 pub fn set_skip_op_ed(db: State<'_, AppDatabase>, enabled: bool) -> Result<LibraryState, String> {
     db.with_conn(|conn| {
         op_ed::write_skip_op_ed(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
+}
+
+#[tauri::command]
+pub fn set_auto_op_ed_detect(db: State<'_, AppDatabase>, enabled: bool) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        op_ed::write_auto_op_ed_detect(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
+}
+
+#[tauri::command]
+pub fn set_dont_skip_first_episode_op_ed(
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        op_ed::write_dont_skip_first_episode_op_ed(conn, enabled)?;
         build_library_state(conn, &db)
     })
 }

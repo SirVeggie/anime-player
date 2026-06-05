@@ -77,6 +77,17 @@ export function formatEpisodeNumber(value: number | null): string {
   return Number.isInteger(value) ? `Episode ${value}` : `Episode ${value.toFixed(1)}`;
 }
 
+/** True when the episode is the first in the series (display episode number 1). */
+export function isFirstEpisode(
+  episode: Pick<Episode, "episode_number">,
+  anime: Pick<AnimeSummary, "tracker_offset">,
+): boolean {
+  return (
+    isEpisodeNumberKnown(episode.episode_number) &&
+    episode.episode_number - anime.tracker_offset === 1
+  );
+}
+
 /** Top overlay in the player when the episode number is known; otherwise the file name. */
 export function playerNowPlayingLabel(
   episode: Pick<Episode, "episode_number" | "file_name">,

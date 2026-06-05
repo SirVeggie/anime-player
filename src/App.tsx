@@ -36,6 +36,8 @@ import {
   removeRootFolder,
   rescanLibrary,
   searchAnilistAnime,
+  setAutoOpEdDetect,
+  setDontSkipFirstEpisodeOpEd,
   setPreferAnilistDisplayTitle,
   setSkipOpEd,
   setAnimeCustomThumbnailPath,
@@ -901,6 +903,16 @@ function App() {
     setLibrary(state);
   }, []);
 
+  const handleAutoOpEdDetect = useCallback(async (enabled: boolean) => {
+    const state = await setAutoOpEdDetect(enabled);
+    setLibrary(state);
+  }, []);
+
+  const handleDontSkipFirstEpisodeOpEd = useCallback(async (enabled: boolean) => {
+    const state = await setDontSkipFirstEpisodeOpEd(enabled);
+    setLibrary(state);
+  }, []);
+
   const handleSearchAnilist = useCallback((query: string): Promise<AnilistSearchResult[]> => {
     return searchAnilistAnime(query);
   }, []);
@@ -1360,6 +1372,7 @@ function App() {
           }
           preferAnilistDisplayTitle={library.prefer_anilist_display_title}
           skipOpEdEnabled={library.skip_op_ed}
+          dontSkipFirstEpisodeOpEd={library.dont_skip_first_episode_op_ed}
           onSkipOpEdEnabledChange={(enabled) => void handleSkipOpEd(enabled)}
           playlist={episodes}
           visible={Boolean(showPlayer)}
@@ -1453,6 +1466,7 @@ function App() {
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
               anilistConnected={isAnilistConnected(anilistAuth)}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+              autoOpEdDetect={library.auto_op_ed_detect}
               onOpEdAnalysisUpdated={() => {
                 if (selectedAnime) void refreshAnimeEpisodes(selectedAnime.id);
               }}
@@ -1494,7 +1508,9 @@ function App() {
               onLoginAnilist={() => void handleLoginAnilist()}
               onLogoutAnilist={() => void handleLogoutAnilist()}
               onPreferAnilistDisplayTitle={(enabled) => void handlePreferAnilistDisplayTitle(enabled)}
+              onAutoOpEdDetect={(enabled) => void handleAutoOpEdDetect(enabled)}
               onSkipOpEd={(enabled) => void handleSkipOpEd(enabled)}
+              onDontSkipFirstEpisodeOpEd={(enabled) => void handleDontSkipFirstEpisodeOpEd(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
             />
           ) : null}

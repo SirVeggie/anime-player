@@ -46,7 +46,9 @@ export function SettingsScreen(props: {
   onLoginAnilist: () => void;
   onLogoutAnilist: () => void;
   onPreferAnilistDisplayTitle: (enabled: boolean) => void;
+  onAutoOpEdDetect: (enabled: boolean) => void;
   onSkipOpEd: (enabled: boolean) => void;
+  onDontSkipFirstEpisodeOpEd: (enabled: boolean) => void;
   onCleanLocalData: () => void;
 }) {
   const {
@@ -76,7 +78,9 @@ export function SettingsScreen(props: {
     onLoginAnilist,
     onLogoutAnilist,
     onPreferAnilistDisplayTitle,
+    onAutoOpEdDetect,
     onSkipOpEd,
+    onDontSkipFirstEpisodeOpEd,
     onCleanLocalData,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
@@ -142,6 +146,24 @@ export function SettingsScreen(props: {
 
       <section className="panel">
         <div className="panel-heading">
+          <h2>OP/ED</h2>
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.auto_op_ed_detect}
+            disabled={busy}
+            onChange={onAutoOpEdDetect}
+            label="Auto-detect anime openings/endings"
+          />
+          <p className="muted">
+            When enabled, opening and ending detection runs automatically when you open a title&apos;s episode list or
+            after a small library rescan. Turn this off to run analysis manually from each title&apos;s settings.
+          </p>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
           <h2>Playback</h2>
         </div>
         <div className="settings-item settings-item--stacked">
@@ -154,6 +176,17 @@ export function SettingsScreen(props: {
           <p className="muted">
             During playback, jump past opening and ending segments that were detected for each episode. Use the
             player control to toggle this without opening Settings.
+          </p>
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.dont_skip_first_episode_op_ed}
+            disabled={busy}
+            onChange={onDontSkipFirstEpisodeOpEd}
+            label="Don't skip first episode opening/ending"
+          />
+          <p className="muted">
+            Keep the opening and ending on episode 1 even when automatic OP/ED skipping is enabled.
           </p>
         </div>
       </section>

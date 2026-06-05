@@ -134,6 +134,8 @@ export type LibraryState = {
   /** When true, linked titles use AniList name in library UI; unlinked titles always use the detected name. */
   prefer_anilist_display_title: boolean;
   skip_op_ed: boolean;
+  auto_op_ed_detect: boolean;
+  dont_skip_first_episode_op_ed: boolean;
 };
 
 export type ScanSummary = {

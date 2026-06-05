@@ -32,6 +32,7 @@ import { SkipOpEdIcon } from "./Icons";
 import {
   errorMessage,
   formatTime,
+  isFirstEpisode,
   isTextInputTarget,
   mediaPathsEqual,
   playerNowPlayingLabel,
@@ -326,6 +327,7 @@ export function PlayerView(props: {
   anime: Pick<AnimeSummary, "title" | "anilist_id" | "anilist_title" | "tracker_offset"> | null;
   preferAnilistDisplayTitle: boolean;
   skipOpEdEnabled: boolean;
+  dontSkipFirstEpisodeOpEd: boolean;
   onSkipOpEdEnabledChange: (enabled: boolean) => void;
   playlist: Episode[];
   visible: boolean;
@@ -344,6 +346,7 @@ export function PlayerView(props: {
     anime,
     preferAnilistDisplayTitle,
     skipOpEdEnabled,
+    dontSkipFirstEpisodeOpEd,
     onSkipOpEdEnabledChange,
     playlist,
     visible,
@@ -370,6 +373,8 @@ export function PlayerView(props: {
   const skippedOpEdRef = useRef(new Set<string>());
   const skipOpEdEnabledRef = useRef(skipOpEdEnabled);
   skipOpEdEnabledRef.current = skipOpEdEnabled;
+  const dontSkipFirstEpisodeOpEdRef = useRef(dontSkipFirstEpisodeOpEd);
+  dontSkipFirstEpisodeOpEdRef.current = dontSkipFirstEpisodeOpEd;
   const scrubEndIdRef = useRef(0);
   const pausedRef = useRef(true);
   const [scrubSprite, setScrubSprite] = useState<ScrubSpriteReady | null>(null);
@@ -534,6 +539,13 @@ export function PlayerView(props: {
   useEffect(() => {
     maybeSkipOpEdAtPositionRef.current = (seconds: number) => {
       if (!skipOpEdEnabledRef.current) return false;
+      if (
+        dontSkipFirstEpisodeOpEdRef.current &&
+        anime &&
+        isFirstEpisode(episode, anime)
+      ) {
+        return false;
+      }
       for (const seg of episode.op_ed_segments) {
         if (seg.status !== "matched" || seg.startSec == null || seg.endSec == null) continue;
         const key = `${episode.id}:${seg.kind}`;
@@ -549,7 +561,7 @@ export function PlayerView(props: {
       }
       return false;
     };
-  }, [episode]);
+  }, [anime, episode]);
 
   useEffect(() => {
     onPausedStateChange?.(paused);

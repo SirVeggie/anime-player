@@ -661,6 +661,18 @@
   gap: 8px;
 }
 
+.anime-settings-section-heading {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.anime-settings-op-ed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .anime-settings-form label {
   display: flex;
   flex-direction: column;

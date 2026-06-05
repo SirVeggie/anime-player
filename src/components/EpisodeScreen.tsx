@@ -7,6 +7,7 @@ import {
   jobsCancel,
   jobsEnqueueEpisodePageOpEd,
   jobsEnqueueEpisodePageScrubSprites,
+  jobsEnqueueOpEdDetect,
   jobsSetOpEdDetectPriorityForAnime,
   jobsSetScrubSpritePriorityForPaths,
   resetAnimeOpEdAnalysis,
@@ -131,6 +132,7 @@ export function EpisodeScreen(props: {
   onOpenAnilist: (url: string) => void;
   anilistConnected: boolean;
   preferAnilistDisplayTitle: boolean;
+  autoOpEdDetect: boolean;
   onOpEdAnalysisUpdated: () => void;
 }) {
   const {
@@ -139,6 +141,7 @@ export function EpisodeScreen(props: {
     episodesLoading = false,
     categories,
     preferAnilistDisplayTitle,
+    autoOpEdDetect,
     onBack,
     onPlay,
     onMoveAnime,
@@ -185,6 +188,7 @@ export function EpisodeScreen(props: {
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
   const [opEdResetBusy, setOpEdResetBusy] = useState(false);
+  const [opEdRunBusy, setOpEdRunBusy] = useState(false);
   const [opEdError, setOpEdError] = useState<string | null>(null);
   const activeOpEdJob = useMemo(
     () => findActiveOpEdJob(jobsSnapshot, anime.id),
@@ -331,6 +335,22 @@ export function EpisodeScreen(props: {
     }
   }, [activeOpEdJob]);
 
+  const handleRunOpEdAnalysis = useCallback(async () => {
+    setOpEdRunBusy(true);
+    setAnimeSettingsError(null);
+    try {
+      await jobsEnqueueOpEdDetect({
+        animeId: anime.id,
+        priority: "medium",
+        animeTitle: animeDisplayTitle(anime, preferAnilistDisplayTitle),
+      });
+    } catch (e) {
+      setAnimeSettingsError(errorMessage(e));
+    } finally {
+      setOpEdRunBusy(false);
+    }
+  }, [anime, preferAnilistDisplayTitle]);
+
   const handleResetOpEdAnalysis = useCallback(async () => {
     if (!window.confirm("Clear all OP/ED analysis data for this title?")) return;
     setOpEdResetBusy(true);
@@ -406,6 +426,8 @@ export function EpisodeScreen(props: {
   }, [anime.anilist_title, anime.id, anime.title, episodes]);
 
   useEffect(() => {
+    if (!autoOpEdDetect) return;
+
     void jobsEnqueueEpisodePageOpEd({
       animeId: anime.id,
       priority: "medium",
@@ -419,7 +441,7 @@ export function EpisodeScreen(props: {
         /* background queue; ignore */
       });
     };
-  }, [anime.id, preferAnilistDisplayTitle]);
+  }, [anime.id, autoOpEdDetect, preferAnilistDisplayTitle]);
 
   const closeLinkSearch = useCallback(() => {
     linkSearchRequestRef.current += 1;
@@ -1018,18 +1040,30 @@ export function EpisodeScreen(props: {
                   {anime.anilist_id ? " Saving the same value as AniList leaves progress unchanged." : ""}
                 </p>
               </div>
-              {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}
               <div className="anime-settings-field">
-                <p className="muted">Clear detected OP/ED templates and per-episode timestamps for this title.</p>
-                <button
-                  type="button"
-                  className="button-danger"
-                  disabled={animeSettingsSaving || opEdResetBusy}
-                  onClick={() => void handleResetOpEdAnalysis()}
-                >
-                  {opEdResetBusy ? "Resetting…" : "Reset OP/ED analysis"}
-                </button>
+                <span className="anime-settings-section-heading">OP/ED analysis</span>
+                <p className="muted">
+                  Detect shared openings and endings across episodes, or clear existing analysis for this title.
+                </p>
+                <div className="anime-settings-op-ed-actions">
+                  <button
+                    type="button"
+                    disabled={animeSettingsSaving || opEdRunBusy || opEdResetBusy || episodes.length < 2}
+                    onClick={() => void handleRunOpEdAnalysis()}
+                  >
+                    {opEdRunBusy ? "Starting…" : "Run analysis"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-danger"
+                    disabled={animeSettingsSaving || opEdRunBusy || opEdResetBusy}
+                    onClick={() => void handleResetOpEdAnalysis()}
+                  >
+                    {opEdResetBusy ? "Resetting…" : "Reset"}
+                  </button>
+                </div>
               </div>
+              {animeSettingsError ? <p className="error">{animeSettingsError}</p> : null}
               <div className="modal-actions">
                 <button type="button" onClick={closeAnimeSettings} disabled={animeSettingsSaving}>
                   Cancel

@@ -19,6 +19,8 @@ use crate::media_tools::{
 
 pub const ANALYSIS_VERSION: i32 = 2;
 pub const SKIP_OP_ED_SETTING_KEY: &str = "skip_op_ed";
+pub const AUTO_OP_ED_DETECT_SETTING_KEY: &str = "auto_op_ed_detect";
+pub const DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY: &str = "dont_skip_first_episode_op_ed";
 /// Parent folder under portable `data/` for all OP/ED artifacts.
 pub const OP_ED_DATA_DIR: &str = "op-ed";
 const FINGERPRINTS_SUBDIR: &str = "fingerprints";
@@ -2267,6 +2269,53 @@ pub fn write_skip_op_ed(conn: &Connection, enabled: bool) -> Result<(), String> 
         "INSERT INTO settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![SKIP_OP_ED_SETTING_KEY, if enabled { "1" } else { "0" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn read_auto_op_ed_detect(conn: &Connection) -> Result<bool, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![AUTO_OP_ED_DETECT_SETTING_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(!matches!(value.as_deref(), Some("0" | "false" | "no")))
+}
+
+pub fn write_auto_op_ed_detect(conn: &Connection, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![AUTO_OP_ED_DETECT_SETTING_KEY, if enabled { "1" } else { "0" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn read_dont_skip_first_episode_op_ed(conn: &Connection) -> Result<bool, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(matches!(value.as_deref(), Some("1" | "true" | "yes")))
+}
+
+pub fn write_dont_skip_first_episode_op_ed(conn: &Connection, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![
+            DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY,
+            if enabled { "1" } else { "0" }
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

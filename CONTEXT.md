@@ -263,7 +263,8 @@ view components. Per-screen UI lives in `src/components/`:
   cache synchronously; finished jobs emit `scrub-sprite-ready`. Generation uses
   ffmpeg with `-hwaccel auto` and `-skip_frame nokey`. The UI slices the sheet
   via CSS `background-position`.
-- **OP/ED detection** is queued automatically like scrub sprites: opening a title’s
+- **OP/ED detection** is queued automatically like scrub sprites when
+  `settings.auto_op_ed_detect` is enabled (default on): opening a title’s
   episode page calls `jobs_enqueue_episode_page_op_ed` (medium priority; downgrades
   queued detect batches to **low** on leave via
   `jobs_set_op_ed_detect_priority_for_anime`). A rescan that imports at most
@@ -317,11 +318,15 @@ view components. Per-screen UI lives in `src/components/`:
   via `list_episodes` plus `get_anime_op_ed_summary` only (not a full `get_library_state`).
   The episode page navigates immediately and shows a loading state while
   `list_episodes` runs; episode row thumbnails load with bounded concurrency.
-  Title settings
-  **Reset OP/ED analysis** clears templates and segment rows in SQLite only;
-  Chromaprint cache files are kept for faster re-detection. Global **Skip detected OP/ED**
+  Title settings include **OP/ED analysis** with **Run analysis** (manual
+  `jobs_enqueue_op_ed_detect`, not gated by `auto_op_ed_detect`) and **Reset**
+  (clears templates and segment rows in SQLite only; Chromaprint cache files are
+  kept for faster re-detection). Settings **Auto-detect anime openings/endings**
+  toggles `settings.auto_op_ed_detect`. Global **Skip detected OP/ED**
   (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
-  segments on `mpv://time-pos`.
+  segments on `mpv://time-pos`. **Don't skip first episode opening/ending**
+  (`settings.dont_skip_first_episode_op_ed`) exempts display episode 1 from that
+  skip logic.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads

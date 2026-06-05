@@ -50,6 +50,14 @@ export function setSkipOpEd(enabled: boolean): Promise<LibraryState> {
   return invoke("set_skip_op_ed", { enabled });
 }
 
+export function setAutoOpEdDetect(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_auto_op_ed_detect", { enabled });
+}
+
+export function setDontSkipFirstEpisodeOpEd(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_dont_skip_first_episode_op_ed", { enabled });
+}
+
 export function addRootFolder(path: string): Promise<RootFolder> {
   return invoke("add_root_folder", { path });
 }
