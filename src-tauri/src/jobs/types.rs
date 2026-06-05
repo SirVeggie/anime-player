@@ -92,6 +92,11 @@ pub struct JobView {
     /// Prerequisites still queued or running (uncapped; `waiting_for` may list fewer).
     #[serde(default)]
     pub prerequisite_pending: u32,
+    /// Queued-job progress: two steps per prerequisite (start + complete).
+    #[serde(default)]
+    pub prerequisite_progress_current: u32,
+    #[serde(default)]
+    pub prerequisite_progress_total: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

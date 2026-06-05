@@ -250,10 +250,38 @@ impl JobManager {
         }
         view.waiting_for = waiting_for;
         view.prerequisite_total = record.prerequisite_job_ids.len() as u32;
+        let (prereq_current, prereq_total) = self.prerequisite_progress_steps(record);
+        view.prerequisite_progress_current = prereq_current;
+        view.prerequisite_progress_total = prereq_total;
         if !view.waiting_for.is_empty() && view.status == JobStatus::Queued {
             view.step_label = "Waiting for prerequisites".to_string();
         }
         view
+    }
+
+    /// Two steps per prerequisite: one when it starts, one when it completes.
+    fn prerequisite_progress_steps(&self, record: &JobRecord) -> (u32, u32) {
+        let total = record.prerequisite_job_ids.len() as u32 * 2;
+        if total == 0 {
+            return (0, 0);
+        }
+        let mut current = 0u32;
+        for prereq_id in &record.prerequisite_job_ids {
+            if let Some(prereq) = self.records.get(prereq_id) {
+                if prereq.view.status == JobStatus::Running {
+                    current += 1;
+                }
+                continue;
+            }
+            if self
+                .history
+                .iter()
+                .any(|h| h.id == *prereq_id && h.status == JobStatus::Done)
+            {
+                current += 2;
+            }
+        }
+        (current, total)
     }
 
     fn pending_prerequisites(&self, record: &JobRecord) -> Vec<JobPrerequisiteView> {
@@ -692,6 +720,8 @@ impl JobManager {
             waiting_for: Vec::new(),
             prerequisite_total: 0,
             prerequisite_pending: 0,
+            prerequisite_progress_current: 0,
+            prerequisite_progress_total: 0,
         };
         let record = JobRecord {
             view,
@@ -850,6 +880,8 @@ impl JobManager {
             waiting_for: Vec::new(),
             prerequisite_total: 0,
             prerequisite_pending: 0,
+            prerequisite_progress_current: 0,
+            prerequisite_progress_total: 0,
         };
         let record = JobRecord {
             view,
@@ -987,6 +1019,8 @@ impl JobManager {
                 waiting_for: Vec::new(),
                 prerequisite_total: 0,
                 prerequisite_pending: 0,
+                prerequisite_progress_current: 0,
+                prerequisite_progress_total: 0,
             };
             let options = plan.options;
             let record = JobRecord {

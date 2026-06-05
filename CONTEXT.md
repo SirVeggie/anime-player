@@ -79,9 +79,11 @@ view components. Per-screen UI lives in `src/components/`:
   **low** jobs wait; a medium job that is blocked (prerequisites, caps, disk-busy
   deferral on HDD) does not hold low jobs back. Jobs may list **prerequisite job ids**;
   a queued job stays blocked until every prerequisite finishes successfully (failed
-  or canceled prerequisites fail the dependent). Each job has a short numeric
-  `#id` in the UI. Jobs dedupe by `identity`, support cancel/cancel-all,
-  progress steps, and emit `jobs://updated` (coalesced to at most ~4 per second) /
+  or canceled prerequisites fail the dependent). While queued on prerequisites, the
+  progress bar advances two steps per prerequisite (one when it starts, one when it
+  completes). Each job has a short numeric `#id` in the UI. Jobs dedupe by `identity`,
+  support cancel/cancel-all, progress steps, and emit `jobs://updated` (coalesced to
+  at most ~4 per second) /
   `jobs://finished`. The root layout only subscribes to the active job count for the
   sidebar badge; the episode and jobs screens subscribe to the full snapshot (cached from
   the last `jobs://updated` when opening Jobs — no extra IPC). The Jobs page collapses

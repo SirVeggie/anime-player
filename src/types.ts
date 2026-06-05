@@ -279,8 +279,11 @@ export type JobRecord = {
   startedAt: number | null;
   finishedAt: number | null;
   prerequisiteTotal: number;
-  /** Still queued or running; use for "+N more" and progress (not capped like `waitingFor`). */
+  /** Still queued or running; use for "+N more" (not capped like `waitingFor`). */
   prerequisitePending: number;
+  /** Queued-job progress: two steps per prerequisite (start + complete). */
+  prerequisiteProgressCurrent: number;
+  prerequisiteProgressTotal: number;
   waitingFor: JobPrerequisiteView[];
 };
 
