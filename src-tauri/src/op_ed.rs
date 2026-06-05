@@ -39,7 +39,7 @@ const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
 const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
 const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
 const SEED_MATCH_THRESHOLD: f32 = 0.82;
-const MAX_SEED_EPISODES: usize = 12;
+const MAX_SEED_EPISODES: usize = 10;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
 /// Consecutive per-kind match misses that indicate a new OP/ED block (e.g. season change).
 const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
@@ -217,7 +217,7 @@ pub fn op_ed_detect_job_identity_prefix(anime_id: i64) -> String {
 }
 
 /// Episodes per detect job when fingerprinting a full season (progressive results).
-pub const OP_ED_DETECT_BATCH_SIZE: usize = 12;
+pub const OP_ED_DETECT_BATCH_SIZE: usize = 10;
 
 #[derive(Debug, Clone, Copy)]
 pub struct OpEdDetectJobOptions {
