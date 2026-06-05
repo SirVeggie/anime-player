@@ -944,81 +944,6 @@ fn ensure_discovery_region_fingerprints(
     Ok(())
 }
 
-/// Phase-2 refine band: one ffmpeg decode, isolated fpcalc per 2.5s window (cache-backed).
-fn load_refine_band_fingerprints(
-    path: &str,
-    anchor_sec: f64,
-    duration: f64,
-) -> Result<Vec<(f64, Fingerprint)>, String> {
-    let path_buf = normalized_video_path(path)?;
-    let mut window_starts = Vec::new();
-    let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
-    while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 {
-        let window_start = anchor_sec + offset_sec;
-        if window_start >= 0.0 && window_start + SEED_REFINE_WINDOW_SEC <= duration {
-            window_starts.push(window_start);
-        }
-        offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-    }
-    if window_starts.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let band_start = window_starts
-        .iter()
-        .copied()
-        .fold(f64::INFINITY, f64::min)
-        .max(0.0);
-    let band_end = window_starts
-        .iter()
-        .map(|ws| ws + SEED_REFINE_WINDOW_SEC)
-        .fold(0.0f64, f64::max)
-        .min(duration);
-    let band_len = band_end - band_start;
-    if band_len < SEED_REFINE_WINDOW_SEC {
-        return Ok(Vec::new());
-    }
-
-    let needs_decode = window_starts.iter().any(|&window_start| {
-        segment_fingerprint_cache_key(&path_buf, window_start, SEED_REFINE_WINDOW_SEC)
-            .ok()
-            .and_then(|key| load_fingerprint(&key).ok().flatten())
-            .is_none()
-    });
-
-    let mut samples: Option<Vec<i16>> = None;
-    if needs_decode {
-        samples = Some(extract_pcm_range(
-            &path_buf,
-            band_start,
-            band_len,
-            SAMPLE_RATE,
-        )?);
-    }
-
-    let window_samples = sample_count_for_seconds(SEED_REFINE_WINDOW_SEC);
-    let mut out = Vec::with_capacity(window_starts.len());
-    for window_start in window_starts {
-        let key =
-            segment_fingerprint_cache_key(&path_buf, window_start, SEED_REFINE_WINDOW_SEC)?;
-        if let Some(fp) = load_fingerprint(&key)? {
-            out.push((window_start, fp));
-            continue;
-        }
-        let pcm = samples.as_ref().ok_or("refine band PCM missing")?;
-        let offset_in_band = window_start - band_start;
-        let offset_samples = sample_count_for_seconds(offset_in_band);
-        if offset_samples + window_samples > pcm.len() {
-            continue;
-        }
-        let window_pcm = &pcm[offset_samples..offset_samples + window_samples];
-        let fp = pcm_to_chromaprint(window_pcm, &key)?;
-        save_fingerprint(&key, &fp)?;
-        out.push((window_start, fp));
-    }
-    Ok(out)
-}
-
 fn slice_fingerprint(
     src: &Fingerprint,
     start_frame: usize,
@@ -1306,7 +1231,8 @@ fn count_episode_template_matches(
 }
 
 /// Second discovery pass: anchor the coarse 90s template on each seed episode, then
-/// re-cluster `SEED_REFINE_WINDOW_SEC` windows within ±`SEED_REFINE_OFFSET_SEC` at 1s steps.
+/// re-cluster `SEED_REFINE_WINDOW_SEC` windows sliced from the cached full fingerprint
+/// within ±`SEED_REFINE_OFFSET_SEC` at 1s steps (fast; not valid for phase-1 discovery).
 fn refine_discovered_seed(
     initial_seed: &SeedCandidate,
     source_ids: &[i64],
@@ -1344,12 +1270,29 @@ fn refine_discovered_seed(
             continue;
         };
         let anchor_sec = seconds_for_frames(anchor_frame);
-        for (window_start_sec, fp) in load_refine_band_fingerprints(&ep.path, anchor_sec, duration)? {
-            refined_seeds.push(SeedCandidate {
-                start_sec: window_start_sec,
-                episode_id: ep.id,
-                fingerprint: fp,
-            });
+        let refine_window_frames = frames_for_seconds(SEED_REFINE_WINDOW_SEC);
+        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
+        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 {
+            let window_start_sec = anchor_sec + offset_sec;
+            if window_start_sec < 0.0 {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            let window_start_frame = frames_for_seconds(window_start_sec);
+            if window_start_frame + refine_window_frames > full.frame_count() {
+                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+                continue;
+            }
+            if let Some(fp) =
+                slice_fingerprint(&full, window_start_frame, refine_window_frames)
+            {
+                refined_seeds.push(SeedCandidate {
+                    start_sec: window_start_sec,
+                    episode_id: ep.id,
+                    fingerprint: fp,
+                });
+            }
+            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
         }
     }
 
