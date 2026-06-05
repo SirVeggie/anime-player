@@ -4,6 +4,7 @@ Running list of things to do / explore for the Anime Player app.
 
 ## General UI
 
+- [ ] Custom tooltips (replace native `title` tooltips on settings checkboxes and elsewhere)
 - [ ] Add button on home page to add a new category (popup)
 - [ ] Reorder categories on home page by dragging
 - [ ] Combine detection regexes into one, we probably only need the second one?
@@ -31,7 +32,7 @@ Episode selection page features
 - [x] Auto-detect OP/ED by finding common audio signatures across episodes (manual **Detect OP/ED** per title)
     - [x] Skip detected regions automatically (global **Skip OP/ED** setting + player toggle)
     - [ ] **Full-episode OP/ED discovery fallback** — discovery only scans the first/last 180s (same as optimistic matching); matching can search the full file, but if seed discovery fails there is no full-timeline retry. Add a fallback pass (e.g. slide 15s windows across the whole episode) for titles that change OP/ED often or put OP in unusual places (e.g. end of episode). Not implemented yet.
-    - [ ] Option in settings to not skip on the first episode, so you get to watch them once
+    - [x] Option in settings to not skip on the first episode, so you get to watch them once
 - [ ] View that lists all titles at once
 
 ## Video Player

@@ -2,12 +2,17 @@ export function CustomCheckbox(props: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  /** Native browser tooltip until custom tooltips exist. */
+  tooltip?: string;
   disabled?: boolean;
   className?: string;
 }) {
-  const { checked, onChange, label, disabled = false, className } = props;
+  const { checked, onChange, label, tooltip, disabled = false, className } = props;
   return (
-    <label className={["custom-checkbox", className].filter(Boolean).join(" ")}>
+    <label
+      className={["custom-checkbox", className].filter(Boolean).join(" ")}
+      title={tooltip}
+    >
       <input
         type="checkbox"
         checked={checked}

@@ -2283,7 +2283,7 @@ pub fn read_auto_op_ed_detect(conn: &Connection) -> Result<bool, String> {
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    Ok(!matches!(value.as_deref(), Some("0" | "false" | "no")))
+    Ok(matches!(value.as_deref(), Some("1" | "true" | "yes")))
 }
 
 pub fn write_auto_op_ed_detect(conn: &Connection, enabled: bool) -> Result<(), String> {

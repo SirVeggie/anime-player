@@ -1042,9 +1042,6 @@ export function EpisodeScreen(props: {
               </div>
               <div className="anime-settings-field">
                 <span className="anime-settings-section-heading">OP/ED analysis</span>
-                <p className="muted">
-                  Detect shared openings and endings across episodes, or clear existing analysis for this title.
-                </p>
                 <div className="anime-settings-op-ed-actions">
                   <button
                     type="button"

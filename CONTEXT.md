@@ -264,7 +264,7 @@ view components. Per-screen UI lives in `src/components/`:
   ffmpeg with `-hwaccel auto` and `-skip_frame nokey`. The UI slices the sheet
   via CSS `background-position`.
 - **OP/ED detection** is queued automatically like scrub sprites when
-  `settings.auto_op_ed_detect` is enabled (default on): opening a title’s
+  `settings.auto_op_ed_detect` is enabled (default off): opening a title’s
   episode page calls `jobs_enqueue_episode_page_op_ed` (medium priority; downgrades
   queued detect batches to **low** on leave via
   `jobs_set_op_ed_detect_priority_for_anime`). A rescan that imports at most

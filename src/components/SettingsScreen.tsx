@@ -136,11 +136,8 @@ export function SettingsScreen(props: {
             disabled={busy}
             onChange={onPreferAnilistDisplayTitle}
             label="Use AniList title in the library when linked"
+            tooltip="Linked titles show the AniList name in grids, search, and episode headers. Unlinked titles always use the detected name from your files."
           />
-          <p className="muted">
-            Linked titles show the AniList name in grids, search, and episode headers. Unlinked titles always use the
-            detected name from your files.
-          </p>
         </div>
       </section>
 
@@ -188,11 +185,8 @@ export function SettingsScreen(props: {
             disabled={busy}
             onChange={onAutoOpEdDetect}
             label="Auto-detect anime openings/endings"
+            tooltip="When enabled, opening and ending detection runs automatically when you open a title's episode list or after a small library rescan. Turn this off to run analysis manually from each title's settings."
           />
-          <p className="muted">
-            When enabled, opening and ending detection runs automatically when you open a title&apos;s episode list or
-            after a small library rescan. Turn this off to run analysis manually from each title&apos;s settings.
-          </p>
         </div>
         <div className="settings-item settings-item--stacked">
           <CustomCheckbox
@@ -200,11 +194,8 @@ export function SettingsScreen(props: {
             disabled={busy}
             onChange={onSkipOpEd}
             label="Skip detected OP/ED automatically"
+            tooltip="During playback, jump past opening and ending segments that were detected for each episode. Use the player control to toggle this without opening Settings."
           />
-          <p className="muted">
-            During playback, jump past opening and ending segments that were detected for each episode. Use the
-            player control to toggle this without opening Settings.
-          </p>
         </div>
         <div className="settings-item settings-item--stacked">
           <CustomCheckbox
@@ -212,10 +203,8 @@ export function SettingsScreen(props: {
             disabled={busy}
             onChange={onDontSkipFirstEpisodeOpEd}
             label="Don't skip first episode opening/ending"
+            tooltip="Keep the opening and ending on episode 1 even when automatic OP/ED skipping is enabled."
           />
-          <p className="muted">
-            Keep the opening and ending on episode 1 even when automatic OP/ED skipping is enabled.
-          </p>
         </div>
       </section>
 
