@@ -513,6 +513,15 @@ fn full_episode_fingerprint_cache_key(ep: &OpEdEpisode) -> Result<String, String
     ))
 }
 
+/// What must already be on disk before a chroma job can be skipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpEdChromaCacheRequirement {
+    /// Full-episode fingerprint only (manual template rematch).
+    FullEpisode,
+    /// Full episode plus OP/ED discovery windows (auto-detect chroma).
+    FullEpisodeAndDiscovery,
+}
+
 /// Whether the full-episode fingerprint used during OP/ED matching is already on disk.
 pub fn full_episode_fingerprint_cached(ep: &OpEdEpisode) -> Result<bool, String> {
     let key = full_episode_fingerprint_cache_key(ep)?;
@@ -527,9 +536,19 @@ pub fn episode_chroma_cache_complete(ep: &OpEdEpisode) -> Result<bool, String> {
     discovery_fingerprints_cached(ep)
 }
 
-/// Used before queueing chroma jobs.
+pub fn op_ed_chroma_cache_satisfied(
+    ep: &OpEdEpisode,
+    requirement: OpEdChromaCacheRequirement,
+) -> Result<bool, String> {
+    match requirement {
+        OpEdChromaCacheRequirement::FullEpisode => full_episode_fingerprint_cached(ep),
+        OpEdChromaCacheRequirement::FullEpisodeAndDiscovery => episode_chroma_cache_complete(ep),
+    }
+}
+
+/// Used before queueing auto-detect chroma jobs.
 pub fn full_episode_fingerprint_cached_for_enqueue(ep: &OpEdEpisode) -> Result<bool, String> {
-    episode_chroma_cache_complete(ep)
+    op_ed_chroma_cache_satisfied(ep, OpEdChromaCacheRequirement::FullEpisodeAndDiscovery)
 }
 
 /// Pre-compute full-episode + phase-1 discovery fingerprints for one episode.

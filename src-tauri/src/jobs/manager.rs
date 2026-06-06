@@ -759,6 +759,7 @@ impl JobManager {
             request.priority,
             request.anime_title.as_deref(),
             false,
+            op_ed::OpEdChromaCacheRequirement::FullEpisodeAndDiscovery,
         )?;
         self.finish_op_ed_enqueue_batch();
         Ok(result)
@@ -779,6 +780,7 @@ impl JobManager {
                 request.priority,
                 request.anime_title.as_deref(),
                 false,
+                op_ed::OpEdChromaCacheRequirement::FullEpisodeAndDiscovery,
             )?;
             if let Some(id) = result.job_id {
                 last_job_id = Some(id);
@@ -816,8 +818,9 @@ impl JobManager {
         priority: JobPriority,
         anime_title: Option<&str>,
         flush_scheduling: bool,
+        cache_requirement: op_ed::OpEdChromaCacheRequirement,
     ) -> Result<EnqueueJobResult, String> {
-        if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
+        if op_ed::op_ed_chroma_cache_satisfied(ep, cache_requirement)? {
             return Ok(EnqueueJobResult::skipped());
         }
 
@@ -943,6 +946,7 @@ impl JobManager {
                 chroma_priority,
                 request.anime_title.as_deref(),
                 false,
+                op_ed::OpEdChromaCacheRequirement::FullEpisodeAndDiscovery,
             )?;
             if let Some(job_id) = chroma.job_id {
                 chroma_job_by_episode.insert(ep.id, job_id);
@@ -1055,6 +1059,7 @@ impl JobManager {
                 JobPriority::Medium,
                 anime_title,
                 false,
+                op_ed::OpEdChromaCacheRequirement::FullEpisodeAndDiscovery,
             )?;
             if let Some(job_id) = chroma.job_id {
                 chroma_job_by_episode.insert(ep.id, job_id);
@@ -1144,7 +1149,10 @@ impl JobManager {
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, anime_id))?;
         let mut prerequisite_job_ids: Vec<String> = Vec::new();
         for ep in &episodes {
-            if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
+            if op_ed::op_ed_chroma_cache_satisfied(
+                ep,
+                op_ed::OpEdChromaCacheRequirement::FullEpisode,
+            )? {
                 continue;
             }
             let chroma = self.enqueue_op_ed_chroma_episode(
@@ -1153,6 +1161,7 @@ impl JobManager {
                 chroma_priority,
                 anime_title,
                 false,
+                op_ed::OpEdChromaCacheRequirement::FullEpisode,
             )?;
             if let Some(job_id) = chroma.job_id {
                 prerequisite_job_ids.push(job_id);

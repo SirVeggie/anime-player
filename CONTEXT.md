@@ -347,8 +347,9 @@ view components. Per-screen UI lives in `src/components/`:
   inactive. Leaving the screen after changes clears segment rows and enqueues
   `manual_op_ed_rematch:{anime_id}` (medium priority, chroma prerequisites).
   Deleting all manual templates and leaving rematches against auto templates only.
-  **Run analysis** with manual templates enqueues chroma prerequisites (when needed)
-  and a `manual_op_ed_rematch` job instead of auto-detect (clears existing segment
+  **Run analysis** with manual templates enqueues chroma only for episodes missing a
+  full-episode fingerprint (not discovery windows), then a `manual_op_ed_rematch` job
+  instead of auto-detect (clears existing segment
   rows first so every episode is rematched). Missing custom template `.fp` files are
   regenerated from the stored source episode and range before matching. Chromaprint cache files
   live under `data/op-ed/fp-full` (full episodes), `fp-part` (discovery
