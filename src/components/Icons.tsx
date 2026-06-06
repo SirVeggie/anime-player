@@ -86,10 +86,20 @@ export function FolderOpenIcon() {
   );
 }
 
+/** Skip segment: tail + stem, gap, then arrowhead. */
+function SkipArrowGlyph() {
+  return (
+    <>
+      <path d="M4 10h5V5h3v14h-3v-5H4v-4z" />
+      <path d="M14 8 21 12 14 16z" />
+    </>
+  );
+}
+
 export function ManualSkipIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M4 5v14h3V5H4zm5 7 8-5v10l-8-5zm9-2.5h-1.5v9H18v-9zM14 8h4v1.5h-4V8z" />
+      <SkipArrowGlyph />
     </svg>
   );
 }
@@ -98,7 +108,7 @@ export function ManualSkipIcon() {
 export function SkipOpEdIcon({ enabled }: { enabled: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M5 5v14h3V5H5zm5 7 8-5v10l-8-5z" />
+      <SkipArrowGlyph />
       {!enabled ?
         <path
           d="M4 4l16 16"

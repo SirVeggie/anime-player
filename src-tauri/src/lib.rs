@@ -317,7 +317,6 @@ fn mpv_set_preview_rect(
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
         apply_preview_rect_to_mpv(m, rect)?;
-        m.set_pause(true)?;
     }
     Ok(())
 }

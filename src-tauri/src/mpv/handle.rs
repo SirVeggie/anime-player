@@ -172,16 +172,17 @@ impl MpvHandle {
 
     pub fn video_geometry(&self) -> Result<Option<MpvVideoGeometry>, String> {
         let width = self
-            .get_property_i64("video-out-params/dw")
-            .or_else(|_| self.get_property_i64("width"))?;
+            .optional_property_i64("video-out-params/dw")
+            .or_else(|| self.optional_property_i64("width"));
         let height = self
-            .get_property_i64("video-out-params/dh")
-            .or_else(|_| self.get_property_i64("height"))?;
+            .optional_property_i64("video-out-params/dh")
+            .or_else(|| self.optional_property_i64("height"));
 
-        if width > 0 && height > 0 {
-            Ok(Some(MpvVideoGeometry { width, height }))
-        } else {
-            Ok(None)
+        match (width, height) {
+            (Some(width), Some(height)) if width > 0 && height > 0 => {
+                Ok(Some(MpvVideoGeometry { width, height }))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -269,10 +270,10 @@ impl MpvHandle {
         }
     }
 
-    fn get_property_i64(&self, name: &str) -> Result<i64, String> {
-        let mut node = self.get_property_node(name)?;
-        let value = unsafe { node_i64(&node) }
-            .ok_or_else(|| format!("mpv property {name} was not an integer"));
+    /// Returns `None` when the property is missing or unavailable (e.g. before the first frame).
+    fn optional_property_i64(&self, name: &str) -> Option<i64> {
+        let mut node = self.get_property_node(name).ok()?;
+        let value = unsafe { node_i64(&node) };
         unsafe {
             mpv_free_node_contents(&mut node);
         }

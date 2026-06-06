@@ -67,6 +67,7 @@ import {
 } from "./components/Icons";
 import { JobsScreen } from "./components/JobsScreen";
 import { useJobsActiveCount } from "./jobs/jobClient";
+import { ManualSkipScreen } from "./components/ManualSkipScreen";
 import { MissingScreen } from "./components/MissingScreen";
 import { PlayerView } from "./components/PlayerView";
 import { SearchScreen } from "./components/SearchScreen";
@@ -108,6 +109,7 @@ type View =
   | "bulkEdit"
   | "missing"
   | "episodes"
+  | "manualSkip"
   | "jobs"
   | "settings"
   | "player";
@@ -161,7 +163,7 @@ function App() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
-  const [manualSkipModalOpen, setManualSkipModalOpen] = useState(false);
+  const [manualSkipAnimeId, setManualSkipAnimeId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const [anilistProgressUpdate, setAnilistProgressUpdate] = useState<AnilistProgressUpdate | null>(null);
@@ -342,6 +344,8 @@ function App() {
         return `episodes:${selectedAnime?.id ?? "none"}:${episodeReturnView}`;
       case "player":
         return `player:${selectedEpisode?.id ?? "none"}`;
+      case "manualSkip":
+        return `manualSkip:${manualSkipAnimeId ?? "none"}`;
       case "missing":
         return "missing";
       case "bulkEdit":
@@ -351,7 +355,7 @@ function App() {
       default:
         return view;
     }
-  }, [episodeReturnView, selectedAnime?.id, selectedCategoryId, selectedEpisode?.id, view]);
+  }, [episodeReturnView, manualSkipAnimeId, selectedAnime?.id, selectedCategoryId, selectedEpisode?.id, view]);
 
   const saveCurrentScrollPosition = useCallback(() => {
     const content = contentRef.current;
@@ -376,7 +380,7 @@ function App() {
       return;
     }
 
-    if (view === "player") {
+    if (view === "player" || view === "manualSkip") {
       currentPageKeyRef.current = pageKey;
       return;
     }
@@ -780,15 +784,17 @@ function App() {
     }
   }, [episodes.length, selectedAnime, showToast]);
 
-  const handleManualSkipModalOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        void stopMpv().catch(() => undefined);
-      }
-      setManualSkipModalOpen(open);
-    },
-    [],
-  );
+  const openManualSkip = useCallback(() => {
+    if (!selectedAnime) return;
+    setManualSkipAnimeId(selectedAnime.id);
+    void stopMpv().catch(() => undefined);
+    navigateToView("manualSkip", "restore");
+  }, [navigateToView, selectedAnime]);
+
+  const closeManualSkip = useCallback(() => {
+    setManualSkipAnimeId(null);
+    navigateToView("episodes", "restore");
+  }, [navigateToView]);
 
   const handleManualSkipDirtyClose = useCallback(async () => {
     if (!selectedAnime || !library) return;
@@ -1190,6 +1196,7 @@ function App() {
         return;
       }
       if (isTextInputTarget(e.target)) return;
+      if (view === "manualSkip") return;
       if (view === "player") return;
       if (view === "categories") return;
       e.preventDefault();
@@ -1222,6 +1229,17 @@ function App() {
   }, [episodeReturnView, navigateToView, searchQuery, selectedAnime, view]);
 
   const showPlayer = view === "player" && Boolean(selectedEpisode);
+  const manualSkipAnime = useMemo(() => {
+    if (!library || manualSkipAnimeId == null) return null;
+    return library.anime.find((anime) => anime.id === manualSkipAnimeId) ?? null;
+  }, [library, manualSkipAnimeId]);
+  const showManualSkip = view === "manualSkip" && manualSkipAnime != null;
+
+  useEffect(() => {
+    if (view !== "manualSkip" || manualSkipAnime != null) return;
+    setManualSkipAnimeId(null);
+    navigateToView("episodes", "restore");
+  }, [manualSkipAnime, navigateToView, view]);
 
   const osTitleAnimeLabel = useMemo(() => {
     if (!selectedEpisode || !library) return null;
@@ -1294,8 +1312,8 @@ function App() {
   return (
     <main
       className={`app${showPlayer ? " app--player-open" : ""}${
-        playerLoadedInBackground ? " app--player-background" : ""
-      }`}
+        showManualSkip ? " app--manual-skip-open" : ""
+      }${playerLoadedInBackground ? " app--player-background" : ""}`}
     >
       {!windowFullscreen ? (
         <WindowTitleBar
@@ -1400,7 +1418,7 @@ function App() {
           onSkipOpEdEnabledChange={(enabled) => void handleSkipOpEd(enabled)}
           playlist={episodes}
           visible={Boolean(showPlayer)}
-          playbackSuspended={manualSkipModalOpen}
+          playbackSuspended={showManualSkip}
           playbackProgressFlushRef={playbackProgressFlushRef}
           onSelectEpisode={setSelectedEpisode}
           onBack={() => closePlayer()}
@@ -1495,9 +1513,7 @@ function App() {
               onOpEdAnalysisUpdated={() => {
                 if (selectedAnime) void refreshAnimeEpisodes(selectedAnime.id);
               }}
-              manualSkipModalOpen={manualSkipModalOpen}
-              onManualSkipModalOpenChange={handleManualSkipModalOpenChange}
-              onManualSkipDirtyClose={() => void handleManualSkipDirtyClose()}
+              onOpenManualSkip={openManualSkip}
               onShowToast={showToast}
             />
           ) : null}
@@ -1545,6 +1561,16 @@ function App() {
           ) : null}
         </div>
       </section>
+
+      {showManualSkip && manualSkipAnime ? (
+        <ManualSkipScreen
+          anime={manualSkipAnime}
+          episodes={episodes}
+          onBack={closeManualSkip}
+          onDirtyClose={() => void handleManualSkipDirtyClose()}
+          onError={(message) => showToast("error", message)}
+        />
+      ) : null}
 
       <div className="screen-transition-overlay" data-state={screenTransition} aria-hidden />
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />

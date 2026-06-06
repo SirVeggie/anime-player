@@ -40,7 +40,6 @@ import {
 } from "../utils";
 import { CustomDropdown } from "./CustomDropdown";
 import { FolderOpenIcon, ManualSkipIcon, SettingsIcon } from "./Icons";
-import { ManualSkipAreasModal } from "./ManualSkipAreasModal";
 import { ViewHeader } from "./ViewHeader";
 
 type AnilistProgressUpdate = {
@@ -136,9 +135,7 @@ export function EpisodeScreen(props: {
   preferAnilistDisplayTitle: boolean;
   autoOpEdDetect: boolean;
   onOpEdAnalysisUpdated: () => void;
-  manualSkipModalOpen: boolean;
-  onManualSkipModalOpenChange: (open: boolean) => void;
-  onManualSkipDirtyClose: () => void;
+  onOpenManualSkip: () => void;
   onShowToast: (kind: "success" | "error", message: string) => void;
 }) {
   const {
@@ -164,9 +161,7 @@ export function EpisodeScreen(props: {
     onOpenAnilist,
     anilistConnected,
     onOpEdAnalysisUpdated,
-    manualSkipModalOpen,
-    onManualSkipModalOpenChange,
-    onManualSkipDirtyClose,
+    onOpenManualSkip,
     onShowToast,
   } = props;
   const jobsSnapshot = useJobsSnapshot();
@@ -227,7 +222,7 @@ export function EpisodeScreen(props: {
   );
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
   const getRovingItemProps = useRovingListNavigation(episodes.length, {
-    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen && !manualSkipModalOpen,
+    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen,
   });
 
   useEffect(() => {
@@ -740,7 +735,7 @@ export function EpisodeScreen(props: {
             <button
               type="button"
               className="header-icon-button"
-              onClick={() => onManualSkipModalOpenChange(true)}
+              onClick={onOpenManualSkip}
               disabled={episodes.length === 0}
               aria-label="Manual skip areas"
               title="Manual skip areas"
@@ -1225,14 +1220,6 @@ export function EpisodeScreen(props: {
         : null}
       </section>
 
-      <ManualSkipAreasModal
-        open={manualSkipModalOpen}
-        anime={anime}
-        episodes={episodes}
-        onClose={() => onManualSkipModalOpenChange(false)}
-        onDirtyClose={onManualSkipDirtyClose}
-        onError={(message) => onShowToast("error", message)}
-      />
     </>
   );
 }

@@ -21,6 +21,16 @@
   display: none;
 }
 
+.app--manual-skip-open {
+  grid-template-columns: 1fr;
+  background: transparent;
+}
+
+.app--manual-skip-open .sidebar,
+.app--manual-skip-open .content {
+  display: none;
+}
+
 .app--loading {
   display: flex;
 }

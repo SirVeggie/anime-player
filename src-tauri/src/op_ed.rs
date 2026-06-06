@@ -2593,7 +2593,7 @@ fn episode_display_label(
     episode_id: i64,
     tracker_offset: i64,
 ) -> Result<String, String> {
-    let episode_number: Option<i64> = conn
+    let episode_number: Option<f64> = conn
         .query_row(
             "SELECT episode_number FROM episodes WHERE id = ?1",
             params![episode_id],
@@ -2602,7 +2602,7 @@ fn episode_display_label(
         .optional()
         .map_err(|e| e.to_string())?;
     Ok(match episode_number {
-        Some(n) => format!("Episode {}", n - tracker_offset),
+        Some(n) => format!("Episode {}", (n.floor() as i64) - tracker_offset),
         None => "Episode ?".to_string(),
     })
 }

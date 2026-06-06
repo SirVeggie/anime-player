@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import { formatTime } from "../utils";
 
 const MIN_DURATION_SEC = 5;
@@ -82,9 +82,23 @@ export function TemplateRangeScrubber(props: {
   frameStepSec: number;
   onStartChange: (startSec: number) => void;
   onEndChange: (endSec: number) => void;
+  onRangeChange?: (startSec: number, endSec: number) => void;
   onSeek: (seconds: number) => void;
+  centerActions?: ReactNode;
+  trailingActions?: ReactNode;
 }) {
-  const { duration, startSec, endSec, frameStepSec, onStartChange, onEndChange, onSeek } = props;
+  const {
+    duration,
+    startSec,
+    endSec,
+    frameStepSec,
+    onStartChange,
+    onEndChange,
+    onRangeChange,
+    onSeek,
+    centerActions,
+    trailingActions,
+  } = props;
   const trackRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     mode: DragMode;
@@ -120,12 +134,16 @@ export function TemplateRangeScrubber(props: {
         let nextStart = drag.rangeStart + deltaSec;
         nextStart = Math.max(0, Math.min(duration - len, nextStart));
         const nextEnd = nextStart + len;
-        onStartChange(nextStart);
-        onEndChange(nextEnd);
+        if (onRangeChange) {
+          onRangeChange(nextStart, nextEnd);
+        } else {
+          onStartChange(nextStart);
+          onEndChange(nextEnd);
+        }
         onSeek(nextStart);
       }
     },
-    [duration, onEndChange, onSeek, onStartChange],
+    [duration, onEndChange, onRangeChange, onSeek, onStartChange],
   );
 
   useEffect(() => {
@@ -150,6 +168,7 @@ export function TemplateRangeScrubber(props: {
   const beginDrag = (mode: DragMode, e: React.PointerEvent) => {
     if (e.button !== 0 || duration <= 0) return;
     e.preventDefault();
+    e.stopPropagation();
     dragRef.current = {
       mode,
       pointerStartX: e.clientX,
@@ -212,7 +231,11 @@ export function TemplateRangeScrubber(props: {
       </div>
       <div className="template-range-scrubber__steppers">
         <FrameStepButtons label="Start" frameStepSec={frameStepSec} onStep={stepStart} />
+        {centerActions ? <div className="template-range-scrubber__center-actions">{centerActions}</div> : null}
         <FrameStepButtons label="End" frameStepSec={frameStepSec} onStep={stepEnd} />
+        {trailingActions ? (
+          <div className="template-range-scrubber__trailing-actions">{trailingActions}</div>
+        ) : null}
       </div>
     </div>
   );
