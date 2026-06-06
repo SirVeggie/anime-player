@@ -23,6 +23,9 @@ tool — it explains:
 Also skim `TODO.md` so you know what follow-ups are already tracked
 before proposing new ones.
 
+For exploratory HTML UI mockups (not production code), use the gitignored
+`temp/` folder and follow `.cursor/rules/design-documents.mdc`.
+
 If you change anything that contradicts or extends what's in `CONTEXT.md`
 (architecture shifts, new conventions, new top-level files), update
 `CONTEXT.md` in the same change so it stays accurate.

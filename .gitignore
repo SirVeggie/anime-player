@@ -23,6 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Agent scratch space (HTML mockups, drafts, etc.)
+temp/
+
 # Local reference material (not part of the project)
 reference/
 

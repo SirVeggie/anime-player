@@ -1,0 +1,56 @@
+---
+description: HTML UI mockups and design drafts in temp/
+globs: temp/**
+alwaysApply: false
+---
+
+# Design documents in temp/
+
+Use `temp/` for throwaway HTML mockups that explore UI before (or
+alongside) React implementation. Everything under `temp/` is gitignored —
+never stage or commit these files.
+
+## When to create one
+
+- Proposing a new screen, layout, or visual treatment.
+- Comparing two or more UI options side by side.
+- Sharing a self-contained preview the user can open in a browser.
+
+## File conventions
+
+- **Location:** `temp/<descriptive-name>.html` (kebab-case, e.g.
+  `jobs-screen-layout.html`).
+- **Self-contained:** Single HTML file with inline `<style>` (and minimal
+  inline `<script>` only when interaction helps the mockup). Do not import
+  from `src/` — duplicate what you need so the file opens standalone.
+- **Title:** Set `<title>` and a visible `<h1>` or header comment at the top
+  stating purpose, date, and what is in/out of scope.
+
+## Match the app look
+
+Mirror the dark theme from `src/styles/tokens.css`:
+
+- Background `#0a0c12`, text `#f6f6f6`, muted `rgba(255,255,255,0.55)`
+- Accent / progress `#58a6ff`, focus `#8ab7ff`
+- Surfaces: flat blue-tinted fills, no 1px borders; use `--radius-sm/md/lg`
+  (4 / 6 / 8px)
+- Sidebar width 56px, title bar ~34px when mocking shell chrome
+
+Player chrome may follow the Soia reference style (bottom gradient bar,
+custom seek, icon transport buttons) — see `CONTEXT.md` and
+`src/styles/player.css`.
+
+## Content guidelines
+
+- Use realistic placeholder copy and sample data, not lorem ipsum walls.
+- Annotate non-obvious choices with HTML comments (`<!-- why: … -->`).
+- Prefer static markup; fake interactivity with CSS or a few lines of JS
+  only when it clarifies the design.
+- If multiple variants, use separate files or clearly labeled sections in
+  one file — do not mix unrelated experiments without labels.
+
+## After the mockup
+
+- Implement approved ideas in `src/components/` and `src/styles/`.
+- Delete or overwrite obsolete mockups in `temp/`; they are not archived in
+  git.

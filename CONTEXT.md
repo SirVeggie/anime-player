@@ -639,9 +639,11 @@ got. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `scripts/update.bat` and `scripts/_update.ps1` — portable end-user
   updater (`update.bat` only; `_update.ps1` is internal). Shipped in the
   release zip; downloads `anime-player.exe` from GitHub `releases/latest`.
+- `temp/` — gitignored scratch space for agent HTML UI mockups (see
+  `.cursor/rules/design-documents.mdc`).
 - `.cursor/rules/` — agent rules. `read-context.mdc` points new agents
   here; `commit-checkpoints.mdc` defines the per-change commit
-  workflow.
+  workflow; `design-documents.mdc` covers `temp/` HTML mockups.
 
 ## Conventions
 
