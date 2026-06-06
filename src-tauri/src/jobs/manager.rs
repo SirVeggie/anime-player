@@ -905,7 +905,12 @@ impl JobManager {
 
         let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, request.anime_id))?;
         if has_manual {
-            return self.enqueue_op_ed_chroma_only_for_anime(db, &request);
+            return self.enqueue_manual_op_ed_rematch(
+                db,
+                request.anime_id,
+                request.anime_title.as_deref(),
+                chroma_priority,
+            );
         }
 
         let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
@@ -1021,29 +1026,6 @@ impl JobManager {
         Ok(EnqueueJobResult::queued(first_detect_id))
     }
 
-    fn enqueue_op_ed_chroma_only_for_anime(
-        &mut self,
-        db: &AppDatabase,
-        request: &EnqueueOpEdDetectJob,
-    ) -> Result<EnqueueJobResult, String> {
-        let episodes =
-            db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
-        for ep in &episodes {
-            if op_ed::full_episode_fingerprint_cached_for_enqueue(ep)? {
-                continue;
-            }
-            let _ = self.enqueue_op_ed_chroma_episode(
-                db,
-                ep,
-                request.priority,
-                request.anime_title.as_deref(),
-                false,
-            )?;
-        }
-        self.finish_op_ed_enqueue_batch();
-        Ok(EnqueueJobResult::chroma_only())
-    }
-
     pub fn enqueue_op_ed_auto_rematch(
         &mut self,
         db: &AppDatabase,
@@ -1143,6 +1125,7 @@ impl JobManager {
         db: &AppDatabase,
         anime_id: i64,
         anime_title: Option<&str>,
+        chroma_priority: JobPriority,
     ) -> Result<EnqueueJobResult, String> {
         let identity = op_ed::manual_op_ed_rematch_job_identity(anime_id);
         if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
@@ -1167,7 +1150,7 @@ impl JobManager {
             let chroma = self.enqueue_op_ed_chroma_episode(
                 db,
                 ep,
-                JobPriority::Medium,
+                chroma_priority,
                 anime_title,
                 false,
             )?;
@@ -1229,7 +1212,8 @@ impl JobManager {
         let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, anime_id))?;
         let title = anime_title.as_deref();
         if has_manual {
-            let result = self.enqueue_manual_op_ed_rematch(db, anime_id, title)?;
+            let result =
+                self.enqueue_manual_op_ed_rematch(db, anime_id, title, JobPriority::Medium)?;
             Ok(op_ed::PrepareManualOpEdRematchResult {
                 job_id: result.job_id,
                 used_manual_templates: true,

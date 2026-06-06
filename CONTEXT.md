@@ -278,7 +278,8 @@ view components. Per-screen UI lives in `src/components/`:
   in SQLite (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`).
   Progress survives app restarts; re-running resumes from saved rows. Detect reuses
   cached fingerprints when present; otherwise it enqueues `op_ed_chroma` jobs
-  (resource type `chroma`; ffmpeg + `fpcalc.exe` under `data/op-ed/fingerprints/`)
+  (resource type `chroma`; ffmpeg + `fpcalc.exe`; fingerprints under
+  `data/op-ed/fingerprints/fp-full`, `fp-part`, and `fp-custom`)
   as prerequisites. **Chroma** priority mirrors scrub: medium while browsing a
   title’s episode list (`jobs_set_op_ed_chroma_priority_for_anime`), low on leave,
   high for the episode open in the player (`jobs_enqueue_op_ed_chroma_for_episode`).
@@ -327,8 +328,8 @@ view components. Per-screen UI lives in `src/components/`:
   `list_episodes` runs; episode row thumbnails load with bounded concurrency.
   Title settings include **OP/ED analysis** with **Run analysis** (manual
   `jobs_enqueue_op_ed_detect`, not gated by `auto_op_ed_detect`) and **Reset**
-  (clears templates and segment rows in SQLite only; Chromaprint cache files are
-  kept for faster re-detection). Settings **Auto-detect anime openings/endings**
+  (clears auto-detected templates and segment rows; manual/custom templates and
+  Chromaprint cache files are kept for faster rematch). Settings **Auto-detect anime openings/endings**
   toggles `settings.auto_op_ed_detect`. Global **Skip detected OP/ED**
   (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
   segments on `mpv://time-pos`. **Don't skip first episode opening/ending**
@@ -346,8 +347,10 @@ view components. Per-screen UI lives in `src/components/`:
   inactive. Leaving the screen after changes clears segment rows and enqueues
   `manual_op_ed_rematch:{anime_id}` (medium priority, chroma prerequisites).
   Deleting all manual templates and leaving rematches against auto templates only.
-  **Run analysis** with manual templates enqueues chroma jobs only (no detect) and
-  shows a toast that automatic detection will not change skip regions. Opening the
+  **Run analysis** with manual templates enqueues chroma prerequisites (when needed)
+  and a `manual_op_ed_rematch` job instead of auto-detect. Chromaprint cache files
+  live under `data/op-ed/fingerprints/fp-full` (full episodes), `fp-part` (discovery
+  windows and auto templates), and `fp-custom` (manual template extracts). Opening the
   screen stops mpv playback; `PlayerView` sets `playbackSuspended` until the view
   closes. **Escape** steps back (editor → list, picker → list, list → episodes).
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe

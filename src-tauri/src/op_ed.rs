@@ -24,6 +24,9 @@ pub const DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY: &str = "dont_skip_first_epi
 /// Parent folder under portable `data/` for all OP/ED artifacts.
 pub const OP_ED_DATA_DIR: &str = "op-ed";
 const FINGERPRINTS_SUBDIR: &str = "fingerprints";
+const FP_FULL_SUBDIR: &str = "fp-full";
+const FP_PART_SUBDIR: &str = "fp-part";
+const FP_CUSTOM_SUBDIR: &str = "fp-custom";
 const JOB_NAME: &str = "op_ed_detect";
 const MANUAL_REMATCH_JOB_NAME: &str = "manual_op_ed_rematch";
 pub const MANUAL_TEMPLATE_MIN_SEC: f64 = 5.0;
@@ -219,14 +222,60 @@ fn op_ed_data_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FingerprintCategory {
+    /// Full-episode fingerprints used for OP/ED matching (`start_sec = 0`).
+    Full,
+    /// Partial windows: discovery bands, 90s auto templates, and other segments.
+    Part,
+    /// Fingerprints extracted from manual/custom skip templates.
+    Custom,
+}
+
+impl FingerprintCategory {
+    fn dir_name(self) -> &'static str {
+        match self {
+            Self::Full => FP_FULL_SUBDIR,
+            Self::Part => FP_PART_SUBDIR,
+            Self::Custom => FP_CUSTOM_SUBDIR,
+        }
+    }
+
+    fn all() -> [Self; 3] {
+        [Self::Full, Self::Part, Self::Custom]
+    }
+}
+
 fn fingerprint_cache_dir() -> Result<PathBuf, String> {
     let dir = op_ed_data_dir()?.join(FINGERPRINTS_SUBDIR);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
     Ok(dir)
 }
 
-fn fingerprint_path(cache_key: &str) -> Result<PathBuf, String> {
-    Ok(fingerprint_cache_dir()?.join(format!("{cache_key}.fp")))
+fn fingerprint_category_dir(category: FingerprintCategory) -> Result<PathBuf, String> {
+    let dir = fingerprint_cache_dir()?.join(category.dir_name());
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
+    Ok(dir)
+}
+
+fn fingerprint_path_in(category: FingerprintCategory, cache_key: &str) -> Result<PathBuf, String> {
+    Ok(fingerprint_category_dir(category)?.join(format!("{cache_key}.fp")))
+}
+
+fn classify_fingerprint_category(
+    path: &Path,
+    start_sec: f64,
+    duration_sec: f64,
+) -> FingerprintCategory {
+    if start_sec.abs() < f64::EPSILON {
+        if let Ok(dur) = probe_duration(path) {
+            let full_len = full_episode_extract_len(dur);
+            if (duration_sec - full_len).abs() < 0.5 {
+                return FingerprintCategory::Full;
+            }
+        }
+    }
+    FingerprintCategory::Part
 }
 
 fn directory_size(path: &Path) -> Result<u64, String> {
@@ -985,7 +1034,7 @@ fn ensure_discovery_region_fingerprints(
         }
         let window_pcm = &samples[offset_samples..offset_samples + window_samples];
         let fp = pcm_to_chromaprint(window_pcm, &key)?;
-        save_fingerprint(&key, &fp)?;
+        save_fingerprint(&key, &fp, FingerprintCategory::Part)?;
     }
     Ok(())
 }
@@ -1004,22 +1053,11 @@ fn slice_fingerprint(
     })
 }
 
-fn save_fingerprint(cache_key: &str, fp: &Fingerprint) -> Result<(), String> {
-    let path = fingerprint_path(cache_key)?;
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&(fp.values.len() as u32).to_le_bytes());
-    for value in &fp.values {
-        payload.extend_from_slice(&value.to_le_bytes());
-    }
-    fs::write(&path, payload).map_err(|e| format!("failed to write {}: {e}", path.display()))
-}
-
-fn load_fingerprint(cache_key: &str) -> Result<Option<Fingerprint>, String> {
-    let path = fingerprint_path(cache_key)?;
+fn read_fingerprint_file(path: &Path) -> Result<Option<Fingerprint>, String> {
     if !path.is_file() {
         return Ok(None);
     }
-    let payload = fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let payload = fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     if payload.len() < 4 {
         return Ok(None);
     }
@@ -1033,6 +1071,30 @@ fn load_fingerprint(cache_key: &str) -> Result<Option<Fingerprint>, String> {
         values.push(i32::from_le_bytes(chunk.try_into().unwrap()));
     }
     Ok(Some(Fingerprint { values }))
+}
+
+fn save_fingerprint(
+    cache_key: &str,
+    fp: &Fingerprint,
+    category: FingerprintCategory,
+) -> Result<(), String> {
+    let path = fingerprint_path_in(category, cache_key)?;
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&(fp.values.len() as u32).to_le_bytes());
+    for value in &fp.values {
+        payload.extend_from_slice(&value.to_le_bytes());
+    }
+    fs::write(&path, payload).map_err(|e| format!("failed to write {}: {e}", path.display()))
+}
+
+fn load_fingerprint(cache_key: &str) -> Result<Option<Fingerprint>, String> {
+    for category in FingerprintCategory::all() {
+        let path = fingerprint_path_in(category, cache_key)?;
+        if let Some(fp) = read_fingerprint_file(&path)? {
+            return Ok(Some(fp));
+        }
+    }
+    Ok(None)
 }
 
 fn extract_fingerprint_from_file(
@@ -1055,8 +1117,24 @@ fn ensure_episode_fingerprint(
     if let Some(fp) = load_fingerprint(&key)? {
         return Ok((key, fp));
     }
+    let category = classify_fingerprint_category(&path_buf, start_sec, duration_sec);
     let fp = extract_fingerprint_from_file(&path_buf, start_sec, duration_sec, &key)?;
-    save_fingerprint(&key, &fp)?;
+    save_fingerprint(&key, &fp, category)?;
+    Ok((key, fp))
+}
+
+fn ensure_custom_template_fingerprint(
+    path: &str,
+    start_sec: f64,
+    duration_sec: f64,
+) -> Result<(String, Fingerprint), String> {
+    let path_buf = normalized_video_path(path)?;
+    let key = segment_fingerprint_cache_key(&path_buf, start_sec, duration_sec)?;
+    if let Some(fp) = load_fingerprint(&key)? {
+        return Ok((key, fp));
+    }
+    let fp = extract_fingerprint_from_file(&path_buf, start_sec, duration_sec, &key)?;
+    save_fingerprint(&key, &fp, FingerprintCategory::Custom)?;
     Ok((key, fp))
 }
 
@@ -2339,8 +2417,8 @@ pub fn run_op_ed_detect_job(
     Ok(())
 }
 
-/// Clears OP/ED templates and per-episode segment rows for a title. Chromaprint cache
-/// files under `data/op-ed/fingerprints/` are kept so re-detection can reuse them.
+/// Clears auto-detected OP/ED templates and per-episode segment rows for a title.
+/// Manual/custom templates and Chromaprint cache files are kept so rematch can reuse them.
 pub fn reset_anime_op_ed_analysis(conn: &Connection, anime_id: i64) -> Result<(), String> {
     conn.execute(
         "DELETE FROM episode_op_ed_segments
@@ -2349,7 +2427,7 @@ pub fn reset_anime_op_ed_analysis(conn: &Connection, anime_id: i64) -> Result<()
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
-        "DELETE FROM op_ed_templates WHERE anime_id = ?1",
+        "DELETE FROM op_ed_templates WHERE anime_id = ?1 AND source != 'manual'",
         params![anime_id],
     )
     .map_err(|e| e.to_string())?;
@@ -2527,27 +2605,29 @@ pub fn remove_op_ed_cache_for_anime(anime_id: i64, conn: &Connection) -> Result<
 pub fn delete_unreferenced_op_ed_fingerprints(
     referenced_keys: &HashSet<String>,
 ) -> Result<(usize, u64), String> {
-    let cache_dir = fingerprint_cache_dir()?;
-    if !cache_dir.is_dir() {
-        return Ok((0, 0));
-    }
     let mut removed = 0usize;
     let mut bytes = 0u64;
-    for entry in fs::read_dir(&cache_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("fp") {
+    for category in FingerprintCategory::all() {
+        let cache_dir = fingerprint_category_dir(category)?;
+        if !cache_dir.is_dir() {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if referenced_keys.contains(stem) {
-            continue;
+        for entry in fs::read_dir(&cache_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("fp") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if referenced_keys.contains(stem) {
+                continue;
+            }
+            bytes += fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+            removed += 1;
         }
-        bytes += fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        fs::remove_file(&path).map_err(|e| e.to_string())?;
-        removed += 1;
     }
     Ok((removed, bytes))
 }
@@ -2735,7 +2815,7 @@ fn save_manual_template_fingerprint(
     duration_sec: f64,
 ) -> Result<(Fingerprint, String), String> {
     let duration_sec = clamp_manual_template_duration(duration_sec);
-    let (key, fp) = ensure_episode_fingerprint(episode_path, start_sec, duration_sec)?;
+    let (key, fp) = ensure_custom_template_fingerprint(episode_path, start_sec, duration_sec)?;
     Ok((fp, key))
 }
 

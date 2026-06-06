@@ -348,7 +348,7 @@ export function EpisodeScreen(props: {
       if (manualCount > 0) {
         onShowToast(
           "success",
-          "This show uses manual skip areas. Analysis will only prepare audio fingerprints — it won't change your skip regions.",
+          "Manual skip areas are active. Analysis will fingerprint episodes if needed and rematch skip regions using your templates.",
         );
       }
       await jobsEnqueueOpEdDetect({
@@ -364,7 +364,12 @@ export function EpisodeScreen(props: {
   }, [anime, onShowToast, preferAnilistDisplayTitle]);
 
   const handleResetOpEdAnalysis = useCallback(async () => {
-    if (!window.confirm("Clear all OP/ED analysis data for this title?")) return;
+    const manualCount = await countManualOpEdTemplates(anime.id);
+    const confirmMessage =
+      manualCount > 0
+        ? "Clear OP/ED match results for this title? Your manual skip templates will be kept."
+        : "Clear all OP/ED analysis data for this title?";
+    if (!window.confirm(confirmMessage)) return;
     setOpEdResetBusy(true);
     try {
       await resetAnimeOpEdAnalysis(anime.id);
