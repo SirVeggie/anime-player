@@ -1,0 +1,46 @@
+---
+description: Ask before adding migration or legacy-compatibility code
+alwaysApply: true
+---
+
+# Ask before migrations and legacy compatibility
+
+Do **not** automatically add migration paths, backward-compatibility
+shims, or legacy fallbacks when changing persisted data or install
+layout. These decisions affect existing users and should be explicit.
+
+## When to stop and ask
+
+Before writing migration or legacy code, ask the user whether they want
+it. Examples:
+
+- **Database / schema changes** — renaming columns, changing types,
+  adding required fields, or reshaping tables. Existing installs may
+  break or need a migration. Do not assume a migration script, version
+  bump logic, or data rewrite is wanted.
+- **Local data paths** — moving config, cache, or library folders. Do
+  not add checks for old paths, copy-from-legacy helpers, or dual-path
+  resolution unless the user asks.
+- **Serialized formats** — JSON/TOML/config key renames, enum changes,
+  or file layout changes on disk. Do not add upgrade-from-v1 logic by
+  default.
+- **API or IPC contract changes** — breaking command names, payload
+  shapes, or event fields. Do not silently keep deprecated aliases or
+  compatibility layers.
+
+## What to do instead
+
+1. Implement the **new** behavior only (the target schema, path, or
+   format).
+2. Briefly note that existing installs may need a migration or manual
+   step.
+3. Ask whether to add migration/legacy support, and what scope is
+   acceptable (one-time upgrade, permanent dual-path, breaking change
+   only, etc.).
+
+## Exceptions
+
+- Proceed without asking only when the user **explicitly** requests
+  migration or backward compatibility in the same task.
+- Trivial, non-persistent changes (refactors with no on-disk impact)
+  do not require this check.
