@@ -495,7 +495,8 @@ impl JobManager {
             if !seen.insert(item.anime_id) {
                 continue;
             }
-            let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, item.anime_id))?;
+            let needs =
+                db.with_conn(|conn| op_ed::anime_needs_op_ed_enqueue(conn, item.anime_id))?;
             if !needs {
                 continue;
             }
@@ -520,7 +521,8 @@ impl JobManager {
         if !auto_detect {
             return Ok(());
         }
-        let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
+        let needs =
+            db.with_conn(|conn| op_ed::anime_needs_op_ed_enqueue(conn, request.anime_id))?;
         if !needs {
             return Ok(());
         }

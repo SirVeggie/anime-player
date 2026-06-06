@@ -181,6 +181,7 @@ export type LocalDataCleanupSummary = {
   thumbnails_removed: number;
   scrub_sprites_removed: number;
   op_ed_fingerprints_removed: number;
+  op_ed_temp_pcm_removed: number;
   bytes_removed: number;
 };
 

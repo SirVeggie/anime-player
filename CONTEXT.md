@@ -269,6 +269,9 @@ view components. Per-screen UI lives in `src/components/`:
   `settings.auto_op_ed_detect` is enabled (default off): opening a title’s
   episode page calls `jobs_enqueue_episode_page_op_ed` (the request’s `priority`
   field controls **chroma** scheduling only — medium on the episode page).
+  Titles with manual skip templates use `anime_needs_manual_op_ed_rematch` instead
+  of the auto-detect staleness check: rematch runs only when episodes lack segment
+  rows (new imports) or custom templates changed without a follow-up rematch.
   Detect jobs (`op_ed_detect:{anime_id}`, resource type `none`) always enqueue at
   **high** priority so they start as soon as chroma prerequisites finish (including
   small-rescan auto-enqueue). A rescan that imports at most **20** new episodes
@@ -440,7 +443,9 @@ view components. Per-screen UI lives in `src/components/`:
   `get_local_data_stats` (database, AniList covers, and scrub-sprite cache sizes);
   the explicit `clean_local_data` action prunes stale episodes/unmatched rows,
   removes anime with no episodes, vacuums SQLite, and deletes unreferenced saved
-  covers and scrub sprites (matched by episode path keys in sprite metadata). The episode page's `delete_anime_files`
+  covers and scrub sprites (matched by episode path keys in sprite metadata),
+  unused OP/ED fingerprint caches, and leftover OP/ED fpcalc staging files
+  (`*.s16le` under `data/op-ed/`, older than one day). The episode page's `delete_anime_files`
   command deletes/trashes the currently visible episode files for an anime,
   removes any now-empty parent folders up to (but not including) the matching
   configured root folder (including sibling empty folders such as an unused

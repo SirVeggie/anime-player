@@ -5,7 +5,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -421,6 +421,84 @@ pub fn count_non_missing_episodes(conn: &Connection, anime_id: i64) -> Result<us
     Ok(count as usize)
 }
 
+fn count_episodes_missing_op_ed_segments(conn: &Connection, anime_id: i64) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM episodes e
+         WHERE e.anime_id = ?1 AND e.missing = 0
+         AND (
+           NOT EXISTS (
+             SELECT 1 FROM episode_op_ed_segments s
+             WHERE s.episode_id = e.id AND s.kind = 'op'
+           )
+           OR NOT EXISTS (
+             SELECT 1 FROM episode_op_ed_segments s
+             WHERE s.episode_id = e.id AND s.kind = 'ed'
+           )
+         )",
+        params![anime_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Whether manual template rematch should run (episode page / small rescan).
+/// True when episodes lack segment rows (new imports) or custom templates changed
+/// without a follow-up rematch.
+pub fn anime_needs_manual_op_ed_rematch(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    if !has_manual_templates(conn, anime_id)? {
+        return Ok(false);
+    }
+    if count_episodes_missing_op_ed_segments(conn, anime_id)? > 0 {
+        return Ok(true);
+    }
+    let templates_newer: bool = conn
+        .query_row(
+            "SELECT EXISTS (
+               SELECT 1 FROM op_ed_templates t
+               WHERE t.anime_id = ?1 AND t.source = 'manual'
+               AND t.created_at > COALESCE(
+                 (SELECT MAX(s.updated_at) FROM episode_op_ed_segments s
+                  INNER JOIN episodes e ON e.id = s.episode_id
+                  WHERE e.anime_id = ?1),
+                 '1970-01-01'
+               )
+             )",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if templates_newer {
+        return Ok(true);
+    }
+    let stale_template_refs: bool = conn
+        .query_row(
+            "SELECT EXISTS (
+               SELECT 1 FROM episode_op_ed_segments s
+               INNER JOIN episodes e ON e.id = s.episode_id
+               WHERE e.anime_id = ?1
+                 AND s.search_pass = 'manual'
+                 AND s.template_id IS NOT NULL
+                 AND s.template_id NOT IN (
+                   SELECT id FROM op_ed_templates
+                   WHERE anime_id = ?1 AND source = 'manual'
+                 )
+             )",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(stale_template_refs)
+}
+
+/// Episode-page / rescan gate: auto-detect staleness, or manual-template rematch staleness.
+pub fn anime_needs_op_ed_enqueue(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    if has_manual_templates(conn, anime_id)? {
+        anime_needs_manual_op_ed_rematch(conn, anime_id)
+    } else {
+        anime_needs_op_ed_detect(conn, anime_id)
+    }
+}
+
 /// Whether this title should be queued for OP/ED detection (episode page / small rescan).
 pub fn anime_needs_op_ed_detect(conn: &Connection, anime_id: i64) -> Result<bool, String> {
     if count_non_missing_episodes(conn, anime_id)? < 2 {
@@ -443,25 +521,7 @@ pub fn anime_needs_op_ed_detect(conn: &Connection, anime_id: i64) -> Result<bool
     if !analyzed {
         return Ok(true);
     }
-    let gaps: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM episodes e
-             WHERE e.anime_id = ?1 AND e.missing = 0
-             AND (
-               NOT EXISTS (
-                 SELECT 1 FROM episode_op_ed_segments s
-                 WHERE s.episode_id = e.id AND s.kind = 'op'
-               )
-               OR NOT EXISTS (
-                 SELECT 1 FROM episode_op_ed_segments s
-                 WHERE s.episode_id = e.id AND s.kind = 'ed'
-               )
-             )",
-            params![anime_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(gaps > 0)
+    Ok(count_episodes_missing_op_ed_segments(conn, anime_id)? > 0)
 }
 
 pub fn list_anime_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<OpEdEpisode>, String> {
@@ -608,6 +668,14 @@ fn samples_to_temp_raw_file(samples: &[i16], cache_key: &str) -> Result<PathBuf,
     Ok(path)
 }
 
+struct TempPcmFile(PathBuf);
+
+impl Drop for TempPcmFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 fn pcm_to_chromaprint(samples: &[i16], cache_key: &str) -> Result<Fingerprint, String> {
     if samples.is_empty() {
         return Ok(Fingerprint { values: Vec::new() });
@@ -615,6 +683,7 @@ fn pcm_to_chromaprint(samples: &[i16], cache_key: &str) -> Result<Fingerprint, S
 
     let fpcalc = fpcalc_path()?;
     let raw_path = samples_to_temp_raw_file(samples, cache_key)?;
+    let _temp_pcm = TempPcmFile(raw_path.clone());
     let sample_rate = SAMPLE_RATE.to_string();
     let output = hidden_command(&fpcalc)
         .args([
@@ -632,9 +701,7 @@ fn pcm_to_chromaprint(samples: &[i16], cache_key: &str) -> Result<Fingerprint, S
         ])
         .arg(&raw_path)
         .output()
-        .map_err(|e| format!("failed to run fpcalc: {e}"));
-    let _ = fs::remove_file(&raw_path);
-    let output = output?;
+        .map_err(|e| format!("failed to run fpcalc: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2614,6 +2681,44 @@ pub fn load_episode_op_ed_segments(
 pub fn remove_op_ed_cache_for_anime(anime_id: i64, conn: &Connection) -> Result<u64, String> {
     reset_anime_op_ed_analysis(conn, anime_id)?;
     Ok(0)
+}
+
+const OP_ED_TEMP_PCM_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Removes leftover fpcalc PCM staging files (`*.s16le`) under `data/op-ed/`.
+pub fn delete_stale_op_ed_temp_pcm_files() -> Result<(usize, u64), String> {
+    let root = op_ed_data_dir()?;
+    if !root.is_dir() {
+        return Ok((0, 0));
+    }
+    let cutoff = SystemTime::now()
+        .checked_sub(OP_ED_TEMP_PCM_MAX_AGE)
+        .unwrap_or(UNIX_EPOCH);
+    let mut removed = 0usize;
+    let mut bytes = 0u64;
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            let metadata = entry.metadata().map_err(|e| e.to_string())?;
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("s16le") {
+                continue;
+            }
+            let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            if modified >= cutoff {
+                continue;
+            }
+            bytes += metadata.len();
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+            removed += 1;
+        }
+    }
+    Ok((removed, bytes))
 }
 
 pub fn delete_unreferenced_op_ed_fingerprints(

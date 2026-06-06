@@ -195,6 +195,7 @@ pub struct LocalDataCleanupSummary {
     thumbnails_removed: i64,
     scrub_sprites_removed: i64,
     op_ed_fingerprints_removed: i64,
+    op_ed_temp_pcm_removed: i64,
     bytes_removed: u64,
 }
 
@@ -1245,6 +1246,7 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
             thumbnails_removed: 0,
             scrub_sprites_removed: 0,
             op_ed_fingerprints_removed: 0,
+            op_ed_temp_pcm_removed: 0,
             bytes_removed: 0,
         };
 
@@ -1282,10 +1284,13 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
     let (op_ed_removed, op_ed_bytes_removed) =
         op_ed::delete_unreferenced_op_ed_fingerprints(&referenced_op_ed)?;
     summary.op_ed_fingerprints_removed = op_ed_removed as i64;
+    let (temp_pcm_removed, temp_pcm_bytes_removed) = op_ed::delete_stale_op_ed_temp_pcm_files()?;
+    summary.op_ed_temp_pcm_removed = temp_pcm_removed as i64;
     summary.bytes_removed = database_bytes_before.saturating_sub(database_bytes_after)
         + thumbnail_bytes_removed
         + scrub_bytes_removed
-        + op_ed_bytes_removed;
+        + op_ed_bytes_removed
+        + temp_pcm_bytes_removed;
     Ok(summary)
 }
 

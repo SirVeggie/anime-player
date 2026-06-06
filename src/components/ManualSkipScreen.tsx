@@ -11,8 +11,12 @@ import {
   setMpvVolume,
   updateManualOpEdTemplate,
 } from "../api";
-import { clampVolume, loadVolume, saveVolume } from "../volume";
+import {
+  readStoredManualSkipHideMatched,
+  storeManualSkipHideMatched,
+} from "../manualSkipPicker";
 import { isOpEdSegmentMissing } from "../opEd";
+import { clampVolume, loadVolume, saveVolume } from "../volume";
 import type { AnimeSummary, Episode, ManualOpEdTemplate } from "../types";
 import {
   errorMessage,
@@ -20,6 +24,7 @@ import {
   formatTime,
   isEpisodeNumberKnown,
 } from "../utils";
+import { CustomCheckbox } from "./CustomCheckbox";
 import { ArrowLeftIcon } from "./Icons";
 import {
   clampTemplateRange,
@@ -128,6 +133,7 @@ export function ManualSkipScreen(props: {
   const [volume, setVolume] = useState(loadVolume);
   const [muted, setMuted] = useState(false);
   const [volumePopupOpen, setVolumePopupOpen] = useState(false);
+  const [hideMatched, setHideMatched] = useState(readStoredManualSkipHideMatched);
   const volumeHideTimerRef = useRef<number | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const mpvReadyRef = useRef(false);
@@ -144,6 +150,14 @@ export function ManualSkipScreen(props: {
     () => episodes.filter((episode) => isOpEdSegmentMissing(episode.op_ed_segments, "ed")),
     [episodes],
   );
+
+  const pickerEpisodes = useMemo(() => {
+    if (view.kind !== "picker") return [];
+    if (!hideMatched) return episodes;
+    return episodes.filter((episode) =>
+      isOpEdSegmentMissing(episode.op_ed_segments, view.templateKind),
+    );
+  }, [episodes, hideMatched, view]);
 
   const reloadTemplates = useCallback(async () => {
     setLoading(true);
@@ -608,32 +622,47 @@ export function ManualSkipScreen(props: {
             subtitle={`${view.templateKind.toUpperCase()} template`}
             onBack={() => setView({ kind: "list" })}
           />
-          <ul className="manual-skip-episode-list manual-skip-screen__body">
-            {episodes.map((episode) => (
-              <li key={episode.id}>
-                <button
-                  type="button"
-                  className="manual-skip-episode-list__row"
-                  onClick={() => {
-                    const range = initialEditorRange(view.templateKind, episode);
-                    setView({
-                      kind: "editor",
-                      templateKind: view.templateKind,
-                      episode,
-                      startSec: range.startSec,
-                      endSec: range.endSec,
-                      returnView: "picker",
-                    });
-                  }}
-                >
-                  <span>{episodeRowLabel(episode, anime.tracker_offset)}</span>
-                  {isOpEdSegmentMissing(episode.op_ed_segments, view.templateKind) ?
-                    <span className="manual-skip-episode-list__missing">Missing</span>
-                  : null}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="manual-skip-screen__body manual-skip-screen__body--picker">
+            <div className="manual-skip-picker-options">
+              <CustomCheckbox
+                checked={hideMatched}
+                onChange={(checked) => {
+                  setHideMatched(checked);
+                  storeManualSkipHideMatched(checked);
+                }}
+                label="Hide matched"
+              />
+            </div>
+            {pickerEpisodes.length === 0 ?
+              <p className="muted manual-skip-picker-empty">All episodes already have a match.</p>
+            : <ul className="manual-skip-episode-list">
+                {pickerEpisodes.map((episode) => (
+                  <li key={episode.id}>
+                    <button
+                      type="button"
+                      className="manual-skip-episode-list__row"
+                      onClick={() => {
+                        const range = initialEditorRange(view.templateKind, episode);
+                        setView({
+                          kind: "editor",
+                          templateKind: view.templateKind,
+                          episode,
+                          startSec: range.startSec,
+                          endSec: range.endSec,
+                          returnView: "picker",
+                        });
+                      }}
+                    >
+                      <span>{episodeRowLabel(episode, anime.tracker_offset)}</span>
+                      {isOpEdSegmentMissing(episode.op_ed_segments, view.templateKind) ?
+                        <span className="manual-skip-episode-list__missing">Missing</span>
+                      : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            }
+          </div>
         </>
       : <>
           <header className="manual-skip-screen__header manual-skip-screen__header--editor">

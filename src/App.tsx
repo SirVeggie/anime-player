@@ -649,7 +649,11 @@ function App() {
       const thumbnails = `${summary.thumbnails_removed} unused thumbnail${summary.thumbnails_removed === 1 ? "" : "s"}`;
       const scrubSprites = `${summary.scrub_sprites_removed} unused scrub sprite${summary.scrub_sprites_removed === 1 ? "" : "s"}`;
       const opEdFp = `${summary.op_ed_fingerprints_removed} unused OP/ED fingerprint${summary.op_ed_fingerprints_removed === 1 ? "" : "s"}`;
-      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, ${scrubSprites}, and ${opEdFp}.`;
+      const opEdTemp =
+        summary.op_ed_temp_pcm_removed > 0
+          ? `, ${summary.op_ed_temp_pcm_removed} stale OP/ED temp PCM file${summary.op_ed_temp_pcm_removed === 1 ? "" : "s"}`
+          : "";
+      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, ${scrubSprites}, and ${opEdFp}${opEdTemp}.`;
     });
   }, [reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction]);
 
