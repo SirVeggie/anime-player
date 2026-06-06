@@ -23,7 +23,6 @@ pub const AUTO_OP_ED_DETECT_SETTING_KEY: &str = "auto_op_ed_detect";
 pub const DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY: &str = "dont_skip_first_episode_op_ed";
 /// Parent folder under portable `data/` for all OP/ED artifacts.
 pub const OP_ED_DATA_DIR: &str = "op-ed";
-const FINGERPRINTS_SUBDIR: &str = "fingerprints";
 const FP_FULL_SUBDIR: &str = "fp-full";
 const FP_PART_SUBDIR: &str = "fp-part";
 const FP_CUSTOM_SUBDIR: &str = "fp-custom";
@@ -189,8 +188,10 @@ pub struct PrepareManualOpEdRematchResult {
 struct ManualTemplateRow {
     id: i64,
     kind: SegmentKind,
+    start_sec: f64,
     duration_sec: f64,
     fingerprint_cache_key: String,
+    source_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -246,14 +247,8 @@ impl FingerprintCategory {
     }
 }
 
-fn fingerprint_cache_dir() -> Result<PathBuf, String> {
-    let dir = op_ed_data_dir()?.join(FINGERPRINTS_SUBDIR);
-    fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
-    Ok(dir)
-}
-
 fn fingerprint_category_dir(category: FingerprintCategory) -> Result<PathBuf, String> {
-    let dir = fingerprint_cache_dir()?.join(category.dir_name());
+    let dir = op_ed_data_dir()?.join(category.dir_name());
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create {dir:?}: {e}"))?;
     Ok(dir)
 }
@@ -578,7 +573,7 @@ struct FpcalcOutput {
 }
 
 fn samples_to_temp_raw_file(samples: &[i16], cache_key: &str) -> Result<PathBuf, String> {
-    let mut path = fingerprint_cache_dir()?;
+    let mut path = op_ed_data_dir()?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -2720,10 +2715,13 @@ pub fn clear_episode_op_ed_segments_for_anime(conn: &Connection, anime_id: i64) 
 fn load_manual_templates(conn: &Connection, anime_id: i64) -> Result<Vec<ManualTemplateRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, kind, duration_sec, fingerprint_cache_key
-             FROM op_ed_templates
-             WHERE anime_id = ?1 AND source = 'manual'
-             ORDER BY kind, id",
+            "SELECT t.id, t.kind, t.start_sec, t.duration_sec, t.fingerprint_cache_key,
+                    COALESCE(e.path, '')
+             FROM op_ed_templates t
+             LEFT JOIN episodes e
+               ON e.id = CAST(json_extract(t.source_episode_ids, '$[0]') AS INTEGER)
+             WHERE t.anime_id = ?1 AND t.source = 'manual'
+             ORDER BY t.kind, t.id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -2732,14 +2730,58 @@ fn load_manual_templates(conn: &Connection, anime_id: i64) -> Result<Vec<ManualT
             Ok(ManualTemplateRow {
                 id: row.get(0)?,
                 kind: SegmentKind::parse(&kind_str).unwrap_or(SegmentKind::Op),
-                duration_sec: row.get(2)?,
-                fingerprint_cache_key: row.get(3)?,
+                start_sec: row.get(2)?,
+                duration_sec: row.get(3)?,
+                fingerprint_cache_key: row.get(4)?,
+                source_path: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for row in rows {
         out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+/// Loads or regenerates a manual template fingerprint from its stored source episode and range.
+fn ensure_manual_template_fingerprint_sync(
+    conn: &Connection,
+    template: &mut ManualTemplateRow,
+) -> Result<Fingerprint, String> {
+    if template.source_path.is_empty() {
+        return Err(format!(
+            "manual template {} has no source episode path",
+            template.id
+        ));
+    }
+    let (key, fp) = ensure_custom_template_fingerprint(
+        &template.source_path,
+        template.start_sec,
+        template.duration_sec,
+    )?;
+    if key != template.fingerprint_cache_key {
+        conn.execute(
+            "UPDATE op_ed_templates SET fingerprint_cache_key = ?2 WHERE id = ?1",
+            params![template.id, key],
+        )
+        .map_err(|e| e.to_string())?;
+        template.fingerprint_cache_key = key;
+    }
+    Ok(fp)
+}
+
+fn load_manual_templates_with_fingerprints(
+    conn: &Connection,
+    anime_id: i64,
+) -> Result<Vec<(ManualTemplateRow, Fingerprint)>, String> {
+    let mut templates = load_manual_templates(conn, anime_id)?;
+    let mut out = Vec::with_capacity(templates.len());
+    for template in &mut templates {
+        match ensure_manual_template_fingerprint_sync(conn, template) {
+            Ok(fp) => out.push((template.clone(), fp)),
+            Err(_) => continue,
+        }
     }
     Ok(out)
 }
@@ -3004,11 +3046,13 @@ pub fn run_manual_op_ed_rematch(
     on_step: impl Fn(u32, u32, &str),
 ) -> Result<(), String> {
     let episodes = db.with_conn(|conn| load_episodes(conn, anime_id))?;
-    let templates = db.with_conn(|conn| load_manual_templates(conn, anime_id))?;
+    let templates =
+        db.with_conn(|conn| load_manual_templates_with_fingerprints(conn, anime_id))?;
     if templates.is_empty() {
         return Err("no manual templates to rematch".to_string());
     }
 
+    db.with_conn(|conn| clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
     db.with_conn(|conn| ensure_pending_segments_for_anime(conn, anime_id))?;
 
     let total_steps = (episodes.len() as u32).saturating_mul(2).max(1);
@@ -3039,9 +3083,9 @@ pub fn run_manual_op_ed_rematch(
             );
             step = step.saturating_add(1);
 
-            let kind_templates: Vec<&ManualTemplateRow> = templates
+            let kind_templates: Vec<&(ManualTemplateRow, Fingerprint)> = templates
                 .iter()
-                .filter(|t| t.kind == kind)
+                .filter(|(t, _)| t.kind == kind)
                 .collect();
             if kind_templates.is_empty() {
                 db.with_conn(|conn| {
@@ -3063,12 +3107,9 @@ pub fn run_manual_op_ed_rematch(
             }
 
             let mut best: Option<(i64, TemplateMatch)> = None;
-            for template in kind_templates {
-                let Some(template_fp) = load_fingerprint(&template.fingerprint_cache_key)? else {
-                    continue;
-                };
+            for (template, template_fp) in kind_templates {
                 if let Some(matched) = match_template_variable_duration(
-                    &template_fp,
+                    template_fp,
                     &candidate_fp,
                     kind,
                     template.duration_sec,

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteManualOpEdTemplate,
   listManualOpEdTemplates,
@@ -12,6 +12,7 @@ import {
   updateManualOpEdTemplate,
 } from "../api";
 import { clampVolume, loadVolume, saveVolume } from "../volume";
+import { isOpEdSegmentMissing } from "../opEd";
 import type { AnimeSummary, Episode, ManualOpEdTemplate } from "../types";
 import {
   errorMessage,
@@ -32,12 +33,18 @@ const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
 const TEST_LEAD_SEC = 2;
 const TEST_TAIL_SEC = 2;
 
-type TestPlayback = {
-  startSec: number;
-  endSec: number;
-  endPlaySec: number;
-  phase: "pre" | "post-skip";
-};
+type EditorPlayback =
+  | {
+      mode: "test";
+      startSec: number;
+      endSec: number;
+      endPlaySec: number;
+      phase: "pre" | "post-skip";
+    }
+  | {
+      mode: "area";
+      endSec: number;
+    };
 
 type ScreenView =
   | { kind: "list" }
@@ -65,6 +72,43 @@ function episodeRowLabel(episode: Episode, trackerOffset: number): string {
   return formatEpisodeNumber(episode.episode_number - trackerOffset);
 }
 
+function initialEditorRange(
+  kind: "op" | "ed",
+  episode: Episode,
+): { startSec: number; endSec: number } {
+  const duration = episode.duration_seconds > 0 ? episode.duration_seconds : 600;
+  const seg = episode.op_ed_segments.find((s) => s.kind === kind);
+  if (
+    seg?.status === "matched" &&
+    seg.searchPass !== "manual" &&
+    seg.startSec != null &&
+    seg.endSec != null
+  ) {
+    return clampTemplateRange(seg.startSec, seg.endSec, duration);
+  }
+  return defaultEditorRange(kind, duration);
+}
+
+function MissingSegmentColumn(props: {
+  title: string;
+  episodes: Episode[];
+  trackerOffset: number;
+}) {
+  const { title, episodes, trackerOffset } = props;
+  return (
+    <div className="manual-skip-missing-col">
+      <h3 className="manual-skip-missing-col__title">{title}</h3>
+      {episodes.length > 0 ?
+        <ul className="manual-skip-missing-col__list">
+          {episodes.map((episode) => (
+            <li key={episode.id}>{episodeRowLabel(episode, trackerOffset)}</li>
+          ))}
+        </ul>
+      : null}
+    </div>
+  );
+}
+
 export function ManualSkipScreen(props: {
   anime: AnimeSummary;
   episodes: Episode[];
@@ -80,7 +124,7 @@ export function ManualSkipScreen(props: {
   const [dirty, setDirty] = useState(false);
   const [frameStepSec, setFrameStepSec] = useState(1 / 24);
   const [previewCompositorRevealed, setPreviewCompositorRevealed] = useState(false);
-  const [testPlaying, setTestPlaying] = useState(false);
+  const [playbackMode, setPlaybackMode] = useState<"test" | "area" | null>(null);
   const [volume, setVolume] = useState(loadVolume);
   const [muted, setMuted] = useState(false);
   const [volumePopupOpen, setVolumePopupOpen] = useState(false);
@@ -88,9 +132,18 @@ export function ManualSkipScreen(props: {
   const previewRef = useRef<HTMLDivElement>(null);
   const mpvReadyRef = useRef(false);
   const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const testPlaybackRef = useRef<TestPlayback | null>(null);
+  const playbackRef = useRef<EditorPlayback | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+
+  const episodesMissingOp = useMemo(
+    () => episodes.filter((episode) => isOpEdSegmentMissing(episode.op_ed_segments, "op")),
+    [episodes],
+  );
+  const episodesMissingEd = useMemo(
+    () => episodes.filter((episode) => isOpEdSegmentMissing(episode.op_ed_segments, "ed")),
+    [episodes],
+  );
 
   const reloadTemplates = useCallback(async () => {
     setLoading(true);
@@ -223,8 +276,17 @@ export function ManualSkipScreen(props: {
   }, [teardownMpv]);
 
   useEffect(() => {
-    if (!editorEpisode) return;
-    void loadEditorEpisode(editorEpisode);
+    if (!editorEpisode || view.kind !== "editor") return;
+    const startSec = view.startSec;
+    void (async () => {
+      await loadEditorEpisode(editorEpisode);
+      try {
+        await invoke("mpv_seek", { seconds: startSec, keyframe: false });
+        await invoke("mpv_set_pause", { paused: true });
+      } catch (e) {
+        onError(errorMessage(e));
+      }
+    })();
     const el = previewRef.current;
     if (!el) return;
     let cancelled = false;
@@ -244,19 +306,29 @@ export function ManualSkipScreen(props: {
       });
       unlistenTimePos = await listen("mpv://time-pos", (e) => {
         if (cancelled) return;
-        const test = testPlaybackRef.current;
-        if (!test || typeof e.payload !== "number") return;
+        const playback = playbackRef.current;
+        if (!playback || typeof e.payload !== "number") return;
         const pos = e.payload;
-        if (test.phase === "pre" && pos >= test.startSec && pos < test.endSec) {
-          test.phase = "post-skip";
-          void invoke("mpv_seek", { seconds: test.endSec, keyframe: false }).catch((err) =>
+        if (playback.mode === "area") {
+          if (pos >= playback.endSec) {
+            playbackRef.current = null;
+            setPlaybackMode(null);
+            void invoke("mpv_set_pause", { paused: true }).catch((err) =>
+              onError(errorMessage(err)),
+            );
+          }
+          return;
+        }
+        if (playback.phase === "pre" && pos >= playback.startSec && pos < playback.endSec) {
+          playback.phase = "post-skip";
+          void invoke("mpv_seek", { seconds: playback.endSec, keyframe: false }).catch((err) =>
             onError(errorMessage(err)),
           );
           return;
         }
-        if (test.phase === "post-skip" && pos >= test.endSec && pos >= test.endPlaySec) {
-          testPlaybackRef.current = null;
-          setTestPlaying(false);
+        if (playback.phase === "post-skip" && pos >= playback.endSec && pos >= playback.endPlaySec) {
+          playbackRef.current = null;
+          setPlaybackMode(null);
           void invoke("mpv_set_pause", { paused: true }).catch((err) =>
             onError(errorMessage(err)),
           );
@@ -265,8 +337,8 @@ export function ManualSkipScreen(props: {
     })();
     return () => {
       cancelled = true;
-      testPlaybackRef.current = null;
-      setTestPlaying(false);
+      playbackRef.current = null;
+      setPlaybackMode(null);
       observer.disconnect();
       window.removeEventListener("resize", onResize);
       unlistenFileLoaded?.();
@@ -283,16 +355,50 @@ export function ManualSkipScreen(props: {
     });
   }, [dirty, onBack, onDirtyClose, teardownMpv]);
 
+  const stopEditorPlayback = useCallback(async () => {
+    playbackRef.current = null;
+    setPlaybackMode(null);
+    try {
+      await invoke("mpv_set_pause", { paused: true });
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const seekPreview = useCallback(
     (seconds: number) => {
-      testPlaybackRef.current = null;
-      setTestPlaying(false);
-      void invoke("mpv_seek", { seconds, keyframe: false })
-        .then(() => invoke("mpv_set_pause", { paused: true }))
-        .catch((e) => onError(errorMessage(e)));
+      void stopEditorPlayback().then(() =>
+        invoke("mpv_seek", { seconds, keyframe: false })
+          .then(() => invoke("mpv_set_pause", { paused: true }))
+          .catch((e) => onError(errorMessage(e))),
+      );
     },
-    [onError],
+    [onError, stopEditorPlayback],
   );
+
+  const stopPlaybackOnRangeChange = useCallback(() => {
+    void stopEditorPlayback();
+  }, [stopEditorPlayback]);
+
+  const handlePlayArea = useCallback(async () => {
+    if (view.kind !== "editor") return;
+    if (playbackMode === "area") {
+      await stopEditorPlayback();
+      return;
+    }
+    const { startSec, endSec } = view;
+    try {
+      await stopEditorPlayback();
+      await invoke("mpv_seek", { seconds: startSec, keyframe: false });
+      playbackRef.current = { mode: "area", endSec };
+      setPlaybackMode("area");
+      await invoke("mpv_set_pause", { paused: false });
+    } catch (e) {
+      playbackRef.current = null;
+      setPlaybackMode(null);
+      onError(errorMessage(e));
+    }
+  }, [onError, playbackMode, stopEditorPlayback, view]);
 
   const handleTest = useCallback(async () => {
     if (view.kind !== "editor") return;
@@ -300,35 +406,36 @@ export function ManualSkipScreen(props: {
       view.episode.duration_seconds > 0 ? view.episode.duration_seconds : view.endSec + TEST_TAIL_SEC;
     const startSec = view.startSec;
     const endSec = view.endSec;
-    setTestPlaying(true);
     try {
+      await stopEditorPlayback();
       const preStart = Math.max(0, startSec - TEST_LEAD_SEC);
       await invoke("mpv_seek", { seconds: preStart, keyframe: false });
-      testPlaybackRef.current = {
+      playbackRef.current = {
+        mode: "test",
         startSec,
         endSec,
         endPlaySec: Math.min(duration, endSec + TEST_TAIL_SEC),
         phase: "pre",
       };
+      setPlaybackMode("test");
       await invoke("mpv_set_pause", { paused: false });
     } catch (e) {
-      testPlaybackRef.current = null;
-      setTestPlaying(false);
+      playbackRef.current = null;
+      setPlaybackMode(null);
       onError(errorMessage(e));
     }
-  }, [onError, view]);
+  }, [onError, stopEditorPlayback, view]);
 
   const leaveEditor = useCallback(() => {
     if (view.kind !== "editor") return;
-    testPlaybackRef.current = null;
-    setTestPlaying(false);
+    void stopEditorPlayback();
     void teardownMpv();
     if (view.returnView === "picker") {
       setView({ kind: "picker", templateKind: view.templateKind });
       return;
     }
     setView({ kind: "list" });
-  }, [teardownMpv, view]);
+  }, [stopEditorPlayback, teardownMpv, view]);
 
   const handleBackStep = useCallback(() => {
     if (view.kind === "editor") {
@@ -429,6 +536,7 @@ export function ManualSkipScreen(props: {
             }
           />
           <div className="manual-skip-screen__body">
+            <h2 className="manual-skip-section-heading">Custom templates</h2>
             {loading ?
               <p className="muted">Loading templates…</p>
             : templates.length === 0 ?
@@ -473,6 +581,24 @@ export function ManualSkipScreen(props: {
                 ))}
               </ul>
             }
+
+            {episodesMissingOp.length > 0 || episodesMissingEd.length > 0 ?
+              <>
+                <h2 className="manual-skip-section-heading">Missing segments</h2>
+                <div className="manual-skip-missing-grid">
+                  <MissingSegmentColumn
+                    title="Openings"
+                    episodes={episodesMissingOp}
+                    trackerOffset={anime.tracker_offset}
+                  />
+                  <MissingSegmentColumn
+                    title="Endings"
+                    episodes={episodesMissingEd}
+                    trackerOffset={anime.tracker_offset}
+                  />
+                </div>
+              </>
+            : null}
           </div>
         </>
       : view.kind === "picker" ?
@@ -489,7 +615,7 @@ export function ManualSkipScreen(props: {
                   type="button"
                   className="manual-skip-episode-list__row"
                   onClick={() => {
-                    const range = defaultEditorRange(view.templateKind, episode.duration_seconds || 600);
+                    const range = initialEditorRange(view.templateKind, episode);
                     setView({
                       kind: "editor",
                       templateKind: view.templateKind,
@@ -500,7 +626,10 @@ export function ManualSkipScreen(props: {
                     });
                   }}
                 >
-                  {episodeRowLabel(episode, anime.tracker_offset)}
+                  <span>{episodeRowLabel(episode, anime.tracker_offset)}</span>
+                  {isOpEdSegmentMissing(episode.op_ed_segments, view.templateKind) ?
+                    <span className="manual-skip-episode-list__missing">Missing</span>
+                  : null}
                 </button>
               </li>
             ))}
@@ -532,22 +661,45 @@ export function ManualSkipScreen(props: {
               endSec={view.endSec}
               frameStepSec={frameStepSec}
               onStartChange={(startSec) => {
-                const next = clampTemplateRange(startSec, view.endSec, editorDuration);
-                setView({ ...view, startSec: next.startSec, endSec: next.endSec });
+                stopPlaybackOnRangeChange();
+                setView((current) => {
+                  if (current.kind !== "editor") return current;
+                  const next = clampTemplateRange(startSec, current.endSec, editorDuration);
+                  return { ...current, startSec: next.startSec, endSec: next.endSec };
+                });
               }}
               onEndChange={(endSec) => {
-                const next = clampTemplateRange(view.startSec, endSec, editorDuration);
-                setView({ ...view, startSec: next.startSec, endSec: next.endSec });
+                stopPlaybackOnRangeChange();
+                setView((current) => {
+                  if (current.kind !== "editor") return current;
+                  const next = clampTemplateRange(current.startSec, endSec, editorDuration);
+                  return { ...current, startSec: next.startSec, endSec: next.endSec };
+                });
               }}
               onRangeChange={(startSec, endSec) => {
-                const next = clampTemplateRange(startSec, endSec, editorDuration);
-                setView({ ...view, startSec: next.startSec, endSec: next.endSec });
+                stopPlaybackOnRangeChange();
+                setView((current) => {
+                  if (current.kind !== "editor") return current;
+                  const next = clampTemplateRange(startSec, endSec, editorDuration);
+                  return { ...current, startSec: next.startSec, endSec: next.endSec };
+                });
               }}
               onSeek={seekPreview}
               centerActions={
                 <>
-                  <button type="button" disabled={testPlaying} onClick={() => void handleTest()}>
-                    {testPlaying ? "Testing…" : "Test"}
+                  <button
+                    type="button"
+                    aria-pressed={playbackMode === "area"}
+                    onClick={() => void handlePlayArea()}
+                  >
+                    Play
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={playbackMode === "test"}
+                    onClick={() => void handleTest()}
+                  >
+                    Test
                   </button>
                   <button type="button" disabled={saving} onClick={() => void handleSave()}>
                     {saving ? "Saving…" : "Save"}

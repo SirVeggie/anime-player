@@ -4,8 +4,16 @@ import { formatTime } from "../utils";
 const MIN_DURATION_SEC = 5;
 const MAX_DURATION_SEC = 180;
 const REPEAT_MS = 80;
+const COARSE_FRAME_MULTIPLIER = 5;
 
 type DragMode = "left" | "right" | "move" | null;
+
+type FrameStepConfig = {
+  frameMultiplier: number;
+  ariaStepLabel: string;
+  glyph: string;
+  coarse?: boolean;
+};
 
 export function clampTemplateRange(
   startSec: number,
@@ -26,51 +34,94 @@ export function clampTemplateRange(
   return { startSec: start, endSec: end };
 }
 
-function FrameStepButtons(props: {
+const FRAME_STEP_CONFIGS: FrameStepConfig[] = [
+  { frameMultiplier: -COARSE_FRAME_MULTIPLIER, ariaStepLabel: "5 frames earlier", glyph: "«", coarse: true },
+  { frameMultiplier: -1, ariaStepLabel: "one frame earlier", glyph: "◀" },
+  { frameMultiplier: 1, ariaStepLabel: "one frame later", glyph: "▶" },
+  { frameMultiplier: COARSE_FRAME_MULTIPLIER, ariaStepLabel: "5 frames later", glyph: "»", coarse: true },
+];
+
+function FrameStepButton(props: {
   label: string;
-  onStep: (delta: number) => void;
+  config: FrameStepConfig;
   frameStepSec: number;
+  onStep: (delta: number) => void;
 }) {
+  const { label, config, frameStepSec, onStep } = props;
   const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdingRef = useRef(false);
+  const onStepRef = useRef(onStep);
+  onStepRef.current = onStep;
+  const deltaRef = useRef(config.frameMultiplier * frameStepSec);
+  deltaRef.current = config.frameMultiplier * frameStepSec;
 
   const clearRepeat = useCallback(() => {
+    holdingRef.current = false;
     if (repeatRef.current !== null) {
       window.clearInterval(repeatRef.current);
       repeatRef.current = null;
     }
   }, []);
 
-  useEffect(() => () => clearRepeat(), [clearRepeat]);
+  const stepOnce = useCallback(() => {
+    onStepRef.current(deltaRef.current);
+  }, []);
 
-  const startRepeat = (delta: number) => {
-    props.onStep(delta);
-    clearRepeat();
-    repeatRef.current = window.setInterval(() => props.onStep(delta), REPEAT_MS);
-  };
+  const startRepeat = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0 || holdingRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      holdingRef.current = true;
+      stepOnce();
+      repeatRef.current = window.setInterval(stepOnce, REPEAT_MS);
+    },
+    [stepOnce],
+  );
 
+  useEffect(() => {
+    const stop = () => clearRepeat();
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    return () => {
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      clearRepeat();
+    };
+  }, [clearRepeat]);
+
+  return (
+    <button
+      type="button"
+      className={`template-range-stepper__btn${config.coarse ? " template-range-stepper__btn--coarse" : ""}`}
+      aria-label={`${label} ${config.ariaStepLabel}`}
+      onPointerDown={startRepeat}
+      onClick={(e) => e.preventDefault()}
+    >
+      {config.glyph}
+    </button>
+  );
+}
+
+function FrameStepButtons(props: {
+  label: string;
+  onStep: (delta: number) => void;
+  frameStepSec: number;
+}) {
   return (
     <div className="template-range-stepper">
       <span className="template-range-stepper__label">{props.label}</span>
-      <button
-        type="button"
-        className="template-range-stepper__btn"
-        aria-label={`${props.label} earlier one frame`}
-        onMouseDown={() => startRepeat(-props.frameStepSec)}
-        onMouseUp={clearRepeat}
-        onMouseLeave={clearRepeat}
-      >
-        ◀
-      </button>
-      <button
-        type="button"
-        className="template-range-stepper__btn"
-        aria-label={`${props.label} later one frame`}
-        onMouseDown={() => startRepeat(props.frameStepSec)}
-        onMouseUp={clearRepeat}
-        onMouseLeave={clearRepeat}
-      >
-        ▶
-      </button>
+      <div className="template-range-stepper__buttons">
+        {FRAME_STEP_CONFIGS.map((config) => (
+          <FrameStepButton
+            key={`${props.label}-${config.frameMultiplier}`}
+            label={props.label}
+            config={config}
+            frameStepSec={props.frameStepSec}
+            onStep={props.onStep}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -106,6 +157,18 @@ export function TemplateRangeScrubber(props: {
     rangeStart: number;
     rangeEnd: number;
   } | null>(null);
+  const startSecRef = useRef(startSec);
+  const endSecRef = useRef(endSec);
+  const durationRef = useRef(duration);
+  const onStartChangeRef = useRef(onStartChange);
+  const onEndChangeRef = useRef(onEndChange);
+  const onSeekRef = useRef(onSeek);
+  startSecRef.current = startSec;
+  endSecRef.current = endSec;
+  durationRef.current = duration;
+  onStartChangeRef.current = onStartChange;
+  onEndChangeRef.current = onEndChange;
+  onSeekRef.current = onSeek;
 
   const ratioAt = (clientX: number) => {
     const track = trackRef.current;
@@ -180,17 +243,25 @@ export function TemplateRangeScrubber(props: {
     else onSeek(startSec);
   };
 
-  const stepStart = (delta: number) => {
-    const next = clampTemplateRange(startSec + delta, endSec, duration);
-    onStartChange(next.startSec);
-    onSeek(next.startSec);
-  };
+  const stepStart = useCallback((delta: number) => {
+    const next = clampTemplateRange(
+      startSecRef.current + delta,
+      endSecRef.current,
+      durationRef.current,
+    );
+    onStartChangeRef.current(next.startSec);
+    onSeekRef.current(next.startSec);
+  }, []);
 
-  const stepEnd = (delta: number) => {
-    const next = clampTemplateRange(startSec, endSec + delta, duration);
-    onEndChange(next.endSec);
-    onSeek(next.endSec);
-  };
+  const stepEnd = useCallback((delta: number) => {
+    const next = clampTemplateRange(
+      startSecRef.current,
+      endSecRef.current + delta,
+      durationRef.current,
+    );
+    onEndChangeRef.current(next.endSec);
+    onSeekRef.current(next.endSec);
+  }, []);
 
   return (
     <div className="template-range-scrubber">

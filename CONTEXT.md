@@ -279,7 +279,7 @@ view components. Per-screen UI lives in `src/components/`:
   Progress survives app restarts; re-running resumes from saved rows. Detect reuses
   cached fingerprints when present; otherwise it enqueues `op_ed_chroma` jobs
   (resource type `chroma`; ffmpeg + `fpcalc.exe`; fingerprints under
-  `data/op-ed/fingerprints/fp-full`, `fp-part`, and `fp-custom`)
+  `data/op-ed/fp-full`, `fp-part`, and `fp-custom`)
   as prerequisites. **Chroma** priority mirrors scrub: medium while browsing a
   title’s episode list (`jobs_set_op_ed_chroma_priority_for_anime`), low on leave,
   high for the episode open in the player (`jobs_enqueue_op_ed_chroma_for_episode`).
@@ -348,11 +348,17 @@ view components. Per-screen UI lives in `src/components/`:
   `manual_op_ed_rematch:{anime_id}` (medium priority, chroma prerequisites).
   Deleting all manual templates and leaving rematches against auto templates only.
   **Run analysis** with manual templates enqueues chroma prerequisites (when needed)
-  and a `manual_op_ed_rematch` job instead of auto-detect. Chromaprint cache files
-  live under `data/op-ed/fingerprints/fp-full` (full episodes), `fp-part` (discovery
+  and a `manual_op_ed_rematch` job instead of auto-detect (clears existing segment
+  rows first so every episode is rematched). Missing custom template `.fp` files are
+  regenerated from the stored source episode and range before matching. Chromaprint cache files
+  live under `data/op-ed/fp-full` (full episodes), `fp-part` (discovery
   windows and auto templates), and `fp-custom` (manual template extracts). Opening the
   screen stops mpv playback; `PlayerView` sets `playbackSuspended` until the view
-  closes. **Escape** steps back (editor → list, picker → list, list → episodes).
+  closes. The list view has **Custom templates** and, when any episode lacks a
+  `matched` segment, **Missing segments** (OP/ED columns). The source picker marks
+  episodes missing that kind at lower opacity. New templates pre-fill the scrubber
+  from auto-detected `matched` segments (`search_pass != 'manual'`) when present.
+  **Escape** steps back (editor → list, picker → list, list → episodes).
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads

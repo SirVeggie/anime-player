@@ -56,6 +56,11 @@ export function jobProgressPercent(job: JobRecord): number {
   return jobStepProgressPercent(job);
 }
 
+export function isOpEdSegmentMissing(segments: OpEdSegmentInfo[], kind: "op" | "ed"): boolean {
+  const seg = segments.find((s) => s.kind === kind);
+  return seg?.status !== "matched";
+}
+
 /** Time range for episode list OP/ED pills; null hides the pill for that kind. */
 export function opEdSegmentLabel(segments: OpEdSegmentInfo[], kind: "op" | "ed"): string | null {
   const seg = segments.find((s) => s.kind === kind);
