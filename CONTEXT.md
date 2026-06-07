@@ -368,7 +368,10 @@ view components. Per-screen UI lives in `src/components/`:
   **Escape** steps back (editor → list, picker → list, list → episodes). In the
   range editor, **ArrowLeft/ArrowRight** nudge the start handle by one frame
   (Shift: five frames); **Ctrl+ArrowLeft/ArrowRight** nudge the end handle the
-  same way. Frame step buttons repeat after a 200ms hold delay.
+  same way. **Enter** saves, **Space** runs Test, **Ctrl+Space** plays the
+  selected area; scroll wheel adjusts volume like the player. Frame step buttons
+  repeat after a 200ms hold delay. Stored volume is applied when mpv initializes
+  and after each file load so preview playback does not briefly use mpv defaults.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads

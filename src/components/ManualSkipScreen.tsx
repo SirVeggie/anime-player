@@ -17,13 +17,14 @@ import {
   storeManualSkipHideMatched,
 } from "../manualSkipPicker";
 import { isOpEdSegmentMissing } from "../opEd";
-import { clampVolume, loadVolume, saveVolume } from "../volume";
+import { clampVolume, HOTKEY_STEP, loadVolume, MAX_VOLUME, saveVolume } from "../volume";
 import type { AnimeSummary, Episode, ManualOpEdTemplate } from "../types";
 import {
   errorMessage,
   formatEpisodeNumber,
   formatTime,
   isEpisodeNumberKnown,
+  isTextInputTarget,
 } from "../utils";
 import { CustomCheckbox } from "./CustomCheckbox";
 import { ArrowLeftIcon } from "./Icons";
@@ -33,7 +34,7 @@ import {
   TemplateRangeScrubber,
 } from "./TemplateRangeScrubber";
 import { ViewHeader } from "./ViewHeader";
-import { VolumeControl } from "./VolumeControl";
+import { VolumeControl, VolumeSpeakerIcon } from "./VolumeControl";
 
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
 const TEST_LEAD_SEC = 2;
@@ -142,8 +143,14 @@ export function ManualSkipScreen(props: {
   const [volume, setVolume] = useState(loadVolume);
   const [muted, setMuted] = useState(false);
   const [volumePopupOpen, setVolumePopupOpen] = useState(false);
+  const [volumeOsdVisible, setVolumeOsdVisible] = useState(false);
   const [hideMatched, setHideMatched] = useState(readStoredManualSkipHideMatched);
   const volumeHideTimerRef = useRef<number | null>(null);
+  const volumeOsdTimerRef = useRef<number | null>(null);
+  const volumeRef = useRef(volume);
+  const mutedRef = useRef(muted);
+  volumeRef.current = volume;
+  mutedRef.current = muted;
   const previewRef = useRef<HTMLDivElement>(null);
   const mpvReadyRef = useRef(false);
   const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -229,6 +236,15 @@ export function ManualSkipScreen(props: {
 
   const mpvFileReadyRef = useRef(false);
 
+  const syncMpvVolume = useCallback(async () => {
+    if (!mpvReadyRef.current) return;
+    try {
+      await setMpvVolume(mutedRef.current ? 0 : volumeRef.current);
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+    }
+  }, []);
+
   const loadEditorEpisode = useCallback(
     async (episode: Episode): Promise<boolean> => {
       try {
@@ -238,6 +254,7 @@ export function ManualSkipScreen(props: {
             sidebarPx: HIDDEN_PLAYER_SIDEBAR_PX,
           });
           mpvReadyRef.current = true;
+          await syncMpvVolume();
         }
         const [probedDuration, fps] = await Promise.all([
           probeVideoDuration(episode.path).catch(() => 0),
@@ -245,6 +262,7 @@ export function ManualSkipScreen(props: {
         ]);
         applyEditorDuration(episode.duration_seconds, probedDuration, 0);
         await invoke("mpv_load", { path: episode.path });
+        await syncMpvVolume();
         await invoke("mpv_set_pause", { paused: true });
         setFrameStepSec(fps > 0 ? 1 / fps : 1 / 24);
         schedulePreviewRect();
@@ -254,18 +272,42 @@ export function ManualSkipScreen(props: {
         return false;
       }
     },
-    [applyEditorDuration, schedulePreviewRect],
+    [applyEditorDuration, schedulePreviewRect, syncMpvVolume],
   );
 
   const editorEpisode = view.kind === "editor" ? view.episode : null;
   const editorCompositing = view.kind === "editor" && previewCompositorRevealed;
 
-  const applyVolume = useCallback((next: number) => {
-    const clamped = clampVolume(next);
-    setVolume(clamped);
-    saveVolume(clamped);
-    setMuted(false);
+  const applyVolume = useCallback(
+    (next: number) => {
+      const clamped = clampVolume(next);
+      setVolume(clamped);
+      volumeRef.current = clamped;
+      saveVolume(clamped);
+      setMuted(false);
+      mutedRef.current = false;
+      void syncMpvVolume();
+    },
+    [syncMpvVolume],
+  );
+
+  const flashVolumeOsd = useCallback(() => {
+    setVolumeOsdVisible(true);
+    if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
+    volumeOsdTimerRef.current = window.setTimeout(() => {
+      setVolumeOsdVisible(false);
+      volumeOsdTimerRef.current = null;
+    }, 1200);
   }, []);
+
+  const adjustVolumeWithOsd = useCallback(
+    (delta: number) => {
+      const snapped = Math.round(volumeRef.current / HOTKEY_STEP) * HOTKEY_STEP;
+      applyVolume(snapped + delta);
+      flashVolumeOsd();
+    },
+    [applyVolume, flashVolumeOsd],
+  );
 
   const openVolumePopup = useCallback(() => {
     if (volumeHideTimerRef.current !== null) {
@@ -285,12 +327,13 @@ export function ManualSkipScreen(props: {
 
   useEffect(() => {
     if (view.kind !== "editor") return;
-    void setMpvVolume(muted ? 0 : volume).catch((e) => onErrorRef.current(errorMessage(e)));
-  }, [muted, view.kind, volume]);
+    void syncMpvVolume();
+  }, [muted, syncMpvVolume, view.kind]);
 
   useEffect(() => {
     return () => {
       if (volumeHideTimerRef.current !== null) window.clearTimeout(volumeHideTimerRef.current);
+      if (volumeOsdTimerRef.current !== null) window.clearTimeout(volumeOsdTimerRef.current);
     };
   }, []);
 
@@ -372,6 +415,7 @@ export function ManualSkipScreen(props: {
         if (cancelled) return;
         mpvFileReadyRef.current = true;
         schedulePreviewRect();
+        void syncMpvVolume();
         seekToStart();
       });
       unlistenPlaybackRestart = await listen("mpv://playback-restart", () => {
@@ -379,6 +423,7 @@ export function ManualSkipScreen(props: {
         mpvFileReadyRef.current = true;
         setPreviewCompositorRevealed(true);
         schedulePreviewRect();
+        void syncMpvVolume();
         seekToStart();
       });
       unlistenTimePos = await listen("mpv://time-pos", (e) => {
@@ -431,7 +476,7 @@ export function ManualSkipScreen(props: {
       unlistenDuration?.();
       void teardownMpv();
     };
-  }, [applyEditorDuration, editorEpisodeId, editorEpisodePath, loadEditorEpisode, schedulePreviewRect, teardownMpv]);
+  }, [applyEditorDuration, editorEpisodeId, editorEpisodePath, loadEditorEpisode, schedulePreviewRect, syncMpvVolume, teardownMpv]);
 
   const exitScreen = useCallback(() => {
     void teardownMpv().finally(() => {
@@ -535,17 +580,6 @@ export function ManualSkipScreen(props: {
     exitScreen();
   }, [exitScreen, leaveEditor, view.kind]);
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat || e.code !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      handleBackStep();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [handleBackStep]);
-
   const handleDelete = useCallback(
     async (template: ManualOpEdTemplate) => {
       if (!window.confirm(`Delete ${templateListLabel(template)}?`)) return;
@@ -590,6 +624,52 @@ export function ManualSkipScreen(props: {
       setSaving(false);
     }
   }, [anime.id, onError, reloadTemplates, teardownMpv, view]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (isTextInputTarget(e.target)) return;
+
+      if (e.code === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleBackStep();
+        return;
+      }
+
+      if (view.kind !== "editor") return;
+
+      if (e.code === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (saving) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void handleSave();
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.ctrlKey) {
+          void handlePlayArea();
+        } else if (!e.metaKey && !e.altKey) {
+          void handleTest();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [handleBackStep, handlePlayArea, handleSave, handleTest, saving, view.kind]);
+
+  useEffect(() => {
+    if (view.kind !== "editor") return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      adjustVolumeWithOsd(e.deltaY < 0 ? HOTKEY_STEP : -HOTKEY_STEP);
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [adjustVolumeWithOsd, view.kind]);
 
   const scrubberDuration =
     view.kind === "editor" ?
@@ -754,6 +834,25 @@ export function ManualSkipScreen(props: {
               </div>
             </div>
           </header>
+          <div
+            className={`volume-osd${volumeOsdVisible && !volumePopupOpen ? "" : " volume-osd--hidden"}`}
+            role="status"
+            aria-live="polite"
+            aria-label={muted ? "Muted" : undefined}
+          >
+            <div
+              className={`volume-osd-fill${!muted && volume > 100 ? " volume-osd-fill--high" : ""}`}
+              style={{ height: `${muted ? 0 : Math.min(100, (volume / MAX_VOLUME) * 100)}%` }}
+            />
+            {muted || volume === 0 ?
+              <div className="volume-osd-icon-wrap" aria-hidden>
+                <VolumeSpeakerIcon volume={volume} muted={muted} />
+              </div>
+            : <span className={`volume-osd-value${volume > 100 ? " volume-osd-value--high" : ""}`}>
+                {volume}
+              </span>
+            }
+          </div>
           <div ref={previewRef} className="manual-skip-preview" aria-hidden />
           <div className="manual-skip-screen__editor-panel">
             <TemplateRangeScrubber
