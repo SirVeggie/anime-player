@@ -3,7 +3,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
   getMatchingDetectionRuleName,
-  jobsCancel,
   jobsEnqueueEpisodePageOpEd,
   jobsEnqueueEpisodePageScrubSprites,
   countManualOpEdTemplates,
@@ -14,9 +13,7 @@ import {
 } from "../api";
 import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
-import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
-import { useJobsSnapshot } from "../jobs/jobClient";
-import { findActiveOpEdJob, manualRematchBatchFraction, opEdDetectBatchFraction, opEdSegmentLabel } from "../opEd";
+import { opEdSegmentLabel } from "../opEd";
 import type {
   AnimeSummary,
   AnilistMediaStatus,
@@ -41,6 +38,7 @@ import { ConfirmModal } from "./ConfirmModal";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { CustomDropdown } from "./CustomDropdown";
 import { FolderOpenIcon, ManualSkipIcon, SettingsIcon } from "./Icons";
+import { OpEdJobProgressBanner } from "./OpEdJobProgressBanner";
 import { PromptModal } from "./PromptModal";
 import { ViewHeader } from "./ViewHeader";
 
@@ -172,7 +170,6 @@ export function EpisodeScreen(props: {
     onResetEpisodeProgress,
     onMarkEpisodeWatched,
   } = props;
-  const jobsSnapshot = useJobsSnapshot();
   // Highlight whichever episode the Q hotkey would launch right now, so the
   // pill always points at the same target as the keybind.
   const quickPlayEpisodeId = useMemo(() => pickQuickPlayEpisode(episodes)?.id ?? null, [episodes]);
@@ -202,20 +199,11 @@ export function EpisodeScreen(props: {
   const [detectionRuleName, setDetectionRuleName] = useState<string | null | undefined>(undefined);
   const [opEdResetBusy, setOpEdResetBusy] = useState(false);
   const [opEdRunBusy, setOpEdRunBusy] = useState(false);
-  const [opEdError, setOpEdError] = useState<string | null>(null);
   const { menu, openMenu, closeMenu } = useContextMenu();
   const [renameEpisode, setRenameEpisode] = useState<Episode | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteEpisode, setDeleteEpisode] = useState<Episode | null>(null);
-  const activeOpEdJob = useMemo(
-    () => findActiveOpEdJob(jobsSnapshot, anime.id),
-    [anime.id, jobsSnapshot],
-  );
-  const activeOpEdBatch = activeOpEdJob
-    ? (manualRematchBatchFraction(activeOpEdJob) ??
-      opEdDetectBatchFraction(activeOpEdJob.name))
-    : null;
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);
@@ -397,15 +385,6 @@ export function EpisodeScreen(props: {
     if (p == null) return;
     setProgressOverrideDraft(String(p));
   }, [animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
-
-  const handleCancelOpEdJob = useCallback(async () => {
-    if (!activeOpEdJob) return;
-    try {
-      await jobsCancel(activeOpEdJob.id);
-    } catch (e) {
-      setOpEdError(errorMessage(e));
-    }
-  }, [activeOpEdJob]);
 
   const handleRunOpEdAnalysis = useCallback(async () => {
     setOpEdRunBusy(true);
@@ -1174,56 +1153,12 @@ export function EpisodeScreen(props: {
         </div>
       ) : null}
 
-      {episodes.length >= 2 && (activeOpEdJob || opEdError) ?
-        <section
-          className="op-ed-analysis-banner"
-          aria-live="polite"
-          aria-label="OP/ED detection progress"
-        >
-          {activeOpEdJob ?
-            <>
-              <div className="op-ed-analysis-banner__header">
-                <strong className="op-ed-analysis-banner__title">Detecting OP/ED</strong>
-                {activeOpEdBatch ?
-                  <span className="muted op-ed-analysis-banner__batch">{activeOpEdBatch}</span>
-                : null}
-              </div>
-              {activeOpEdJob.stepLabel ?
-                <p className="muted op-ed-analysis-banner__step">{activeOpEdJob.stepLabel}</p>
-              : null}
-              {activeOpEdJob.prerequisitePending > 0 ?
-                <div className="job-row-prerequisites">
-                  <span className="muted">Waiting for</span>
-                  {activeOpEdJob.waitingFor.map((prereq) => (
-                    <span key={prereq.jobId} className="job-prerequisite-pill">
-                      #{prereq.shortId}
-                    </span>
-                  ))}
-                  {activeOpEdJob.prerequisitePending > activeOpEdJob.waitingFor.length ?
-                    <span className="job-prerequisite-pill">
-                      +{activeOpEdJob.prerequisitePending - activeOpEdJob.waitingFor.length} more
-                    </span>
-                  : null}
-                </div>
-              : null}
-              {shouldShowJobProgressBar(activeOpEdJob) ?
-                <div className="job-progress-track" aria-hidden>
-                  <div
-                    className="job-progress-fill"
-                    style={{ width: `${jobProgressBarPercent(activeOpEdJob)}%` }}
-                  />
-                </div>
-              : null}
-              {activeOpEdJob.cancelable ?
-                <button type="button" onClick={() => void handleCancelOpEdJob()}>
-                  Cancel
-                </button>
-              : null}
-            </>
-          : null}
-          {opEdError ? <p className="error">{opEdError}</p> : null}
-        </section>
-      : null}
+      <OpEdJobProgressBanner
+        animeId={anime.id}
+        title="Detecting OP/ED"
+        minEpisodes={2}
+        episodeCount={episodes.length}
+      />
 
       <section className="episode-list">
         {episodesLoading ?

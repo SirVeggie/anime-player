@@ -29,6 +29,7 @@ import {
 } from "../utils";
 import { CustomCheckbox } from "./CustomCheckbox";
 import { ArrowLeftIcon } from "./Icons";
+import { OpEdJobProgressBanner } from "./OpEdJobProgressBanner";
 import {
   clampTemplateRange,
   defaultEditorRange,
@@ -731,6 +732,11 @@ export function ManualSkipScreen(props: {
             }
           />
           <div className="manual-skip-screen__body">
+            <OpEdJobProgressBanner
+              animeId={anime.id}
+              title="Matching skip areas"
+              episodeCount={episodes.length}
+            />
             <h2 className="manual-skip-section-heading">Custom templates</h2>
             {loading ?
               <p className="muted">Loading templates…</p>
@@ -804,6 +810,11 @@ export function ManualSkipScreen(props: {
             onBack={() => setView({ kind: "list" })}
           />
           <div className="manual-skip-screen__body manual-skip-screen__body--picker">
+            <OpEdJobProgressBanner
+              animeId={anime.id}
+              title="Matching skip areas"
+              episodeCount={episodes.length}
+            />
             <div className="manual-skip-picker-options">
               <CustomCheckbox
                 checked={hideMatched}
