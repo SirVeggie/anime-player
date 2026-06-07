@@ -86,6 +86,7 @@ enum JobKind {
     },
     OpEdManualRematch {
         anime_id: i64,
+        episode_id: i64,
     },
 }
 
@@ -1138,14 +1139,6 @@ impl JobManager {
         anime_title: Option<&str>,
         chroma_priority: JobPriority,
     ) -> Result<EnqueueJobResult, String> {
-        let identity = op_ed::manual_op_ed_rematch_job_identity(anime_id);
-        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
-            if self.records.contains_key(&existing_id) {
-                self.finish_op_ed_enqueue_batch();
-                return Ok(EnqueueJobResult::queued(Some(existing_id)));
-            }
-        }
-
         db.with_conn(|conn| op_ed::validate_manual_templates_for_rematch(conn, anime_id))?;
 
         let title = anime_title
@@ -1159,19 +1152,73 @@ impl JobManager {
             self.finish_op_ed_enqueue_batch();
             return Err("no episodes to rematch".to_string());
         }
-        let mut prerequisite_job_ids: Vec<String> = Vec::new();
+
+        db.with_conn(|conn| {
+            op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id)?;
+            op_ed::ensure_pending_segments_for_anime(conn, anime_id)
+        })?;
+
+        let episode_labels = db.with_conn(|conn| op_ed::episode_display_labels(conn, anime_id))?;
+
+        let mut first_job_id: Option<String> = None;
+        let mut any_queued = false;
         for ep in &episodes {
-            if op_ed::op_ed_chroma_cache_satisfied(
+            let episode_label = episode_labels
+                .get(&ep.id)
+                .map(String::as_str)
+                .unwrap_or("Episode ?");
+            if let Some(job_id) = self.enqueue_manual_op_ed_rematch_episode(
+                db,
+                anime_id,
                 ep,
-                op_ed::OpEdChromaCacheRequirement::FullEpisode,
+                &title,
+                episode_label,
+                chroma_priority,
+                anime_title,
             )? {
-                continue;
+                any_queued = true;
+                if first_job_id.is_none() {
+                    first_job_id = Some(job_id);
+                }
             }
+        }
+
+        self.finish_op_ed_enqueue_batch();
+        if any_queued {
+            Ok(EnqueueJobResult::queued(first_job_id))
+        } else {
+            Ok(EnqueueJobResult::skipped())
+        }
+    }
+
+    /// One rematch job per episode; prerequisite is that episode's chroma job only.
+    fn enqueue_manual_op_ed_rematch_episode(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        ep: &op_ed::OpEdEpisode,
+        anime_title: &str,
+        episode_label: &str,
+        chroma_priority: JobPriority,
+        anime_title_for_chroma: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let identity = op_ed::manual_op_ed_rematch_episode_job_identity(anime_id, ep.id);
+        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
+            if self.records.contains_key(&existing_id) {
+                return Ok(Some(existing_id));
+            }
+        }
+
+        let mut prerequisite_job_ids: Vec<String> = Vec::new();
+        if !op_ed::op_ed_chroma_cache_satisfied(
+            ep,
+            op_ed::OpEdChromaCacheRequirement::FullEpisode,
+        )? {
             let chroma = self.enqueue_op_ed_chroma_episode(
                 db,
                 ep,
                 chroma_priority,
-                anime_title,
+                anime_title_for_chroma,
                 false,
                 op_ed::OpEdChromaCacheRequirement::FullEpisode,
             )?;
@@ -1180,13 +1227,15 @@ impl JobManager {
             }
         }
 
+        let desc = format!("{anime_title} — {episode_label}");
+
         let (id, short_id) = alloc_job_ids();
         let cancel = Arc::new(AtomicBool::new(false));
         let view = JobView {
             id: id.clone(),
             short_id,
-            name: "Rematch manual skip areas".to_string(),
-            desc: title,
+            name: "Rematch manual skip".to_string(),
+            desc,
             identity: identity.clone(),
             job_type: "manual_op_ed_rematch".to_string(),
             resource_type: JobResourceType::None,
@@ -1195,7 +1244,7 @@ impl JobManager {
             cancelable: true,
             progress: JobProgress {
                 current_step: 0,
-                total_steps: 100,
+                total_steps: 3,
             },
             step_label: "Queued".to_string(),
             completion_message: None,
@@ -1203,7 +1252,7 @@ impl JobManager {
             started_at: None,
             finished_at: None,
             waiting_for: Vec::new(),
-            prerequisite_total: 0,
+            prerequisite_total: prerequisite_job_ids.len() as u32,
             prerequisite_pending: 0,
             prerequisite_progress_current: 0,
             prerequisite_progress_total: 0,
@@ -1211,7 +1260,10 @@ impl JobManager {
         let record = JobRecord {
             view,
             cancel,
-            kind: JobKind::OpEdManualRematch { anime_id },
+            kind: JobKind::OpEdManualRematch {
+                anime_id,
+                episode_id: ep.id,
+            },
             follow_ups: Vec::new(),
             prerequisite_job_ids,
         };
@@ -1219,8 +1271,7 @@ impl JobManager {
         self.identity_to_id.insert(identity, id.clone());
         self.try_start_or_queue(&id, false);
         self.queued_ids.push(id.clone());
-        self.finish_op_ed_enqueue_batch();
-        Ok(EnqueueJobResult::queued(Some(id)))
+        Ok(Some(id))
     }
 
     pub fn prepare_manual_op_ed_rematch(
@@ -1527,8 +1578,17 @@ impl JobManager {
             } => {
                 super::spawn_op_ed_worker(app, job_id_owned, anime_id, episode_ids, options, cancel);
             }
-            JobKind::OpEdManualRematch { anime_id } => {
-                super::spawn_manual_op_ed_rematch_worker(app, job_id_owned, anime_id, cancel);
+            JobKind::OpEdManualRematch {
+                anime_id,
+                episode_id,
+            } => {
+                super::spawn_manual_op_ed_rematch_worker(
+                    app,
+                    job_id_owned,
+                    anime_id,
+                    episode_id,
+                    cancel,
+                );
             }
         }
         self.emit_snapshot();
@@ -1688,6 +1748,7 @@ pub fn run_op_ed_job_worker(
 pub fn run_manual_op_ed_rematch_worker(
     app: &AppHandle,
     anime_id: i64,
+    episode_id: i64,
     cancel: &AtomicBool,
     on_step: impl Fn(u32, u32, &str),
 ) -> WorkerOutcome {
@@ -1695,7 +1756,7 @@ pub fn run_manual_op_ed_rematch_worker(
         return WorkerOutcome::Canceled;
     }
     let db = app.state::<AppDatabase>();
-    match op_ed::run_manual_op_ed_rematch(&db, anime_id, cancel, on_step) {
+    match op_ed::run_manual_op_ed_rematch_episode(&db, anime_id, episode_id, cancel, on_step) {
         Ok(()) => WorkerOutcome::Done("Manual skip rematch complete".to_string(), None),
         Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
         Err(e) => WorkerOutcome::Failed(e),

@@ -345,16 +345,16 @@ view components. Per-screen UI lives in `src/components/`:
   preview (`mpv_set_preview_rect` / four `video-margin-ratio-*` options). Templates
   live in `op_ed_templates` with `source = 'manual'` (5–180s variable duration,
   Chromaprint fingerprint per template). While any manual template exists, skip
-  matching uses **manual templates only** (best score per kind across all manual
-  templates; `search_pass = 'manual'`); auto templates remain in SQLite but are
-  inactive. Leaving the screen after changes clears segment rows and enqueues
-  `manual_op_ed_rematch:{anime_id}` (medium priority, chroma prerequisites).
-  Deleting all manual templates and leaving rematches against auto templates only.
-  **Run analysis** with manual templates enqueues chroma only for episodes missing a
-  full-episode fingerprint (not discovery windows), then a `manual_op_ed_rematch` job
-  instead of auto-detect (clears existing segment
-  rows first so every episode is rematched). Missing custom template `.fp` files are
-  regenerated from the stored source episode and range before matching. Chromaprint cache files
+  matching uses **manual templates only** (first match in template list order per
+  kind, tested in parallel; `search_pass = 'manual'`); auto templates remain in SQLite but are
+  inactive. Leaving the screen after changes clears segment rows and enqueues one
+  `manual_op_ed_rematch:{anime_id}:{episode_id}` job per episode (medium priority;
+  each waits only on that episode's chroma prerequisite). Deleting all manual templates and leaving rematches against auto templates only.
+  **Run analysis** with manual templates enqueues chroma for episodes missing a
+  full-episode fingerprint, then one rematch job per episode (clears existing segment
+  rows first so every episode is rematched). Results stream in per episode as each
+  job finishes — no need to wait for all chroma jobs before the first timestamps appear.
+  Missing custom template `.fp` files are regenerated from the stored source episode and range before matching. Chromaprint cache files
   live under `data/op-ed/fp-full` (full episodes), `fp-part` (discovery
   windows and auto templates), and `fp-custom` (manual template extracts). Opening the
   screen stops mpv playback; `PlayerView` sets `playbackSuspended` until the view

@@ -384,6 +384,7 @@ pub fn spawn_manual_op_ed_rematch_worker(
     app: AppHandle,
     job_id: String,
     anime_id: i64,
+    episode_id: i64,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     tauri::async_runtime::spawn(async move {
@@ -394,6 +395,7 @@ pub fn spawn_manual_op_ed_rematch_worker(
             manager::run_manual_op_ed_rematch_worker(
                 &app_for_blocking,
                 anime_id,
+                episode_id,
                 &cancel,
                 |step, total, label| {
                     notify_job_step(&app_for_step, &job_id_for_step, step, total, label);

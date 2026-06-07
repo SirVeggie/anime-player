@@ -1851,7 +1851,7 @@ pub fn load_episodes_for_detect(
         .collect())
 }
 
-fn ensure_pending_segments_for_anime(conn: &Connection, anime_id: i64) -> Result<(), String> {
+pub fn ensure_pending_segments_for_anime(conn: &Connection, anime_id: i64) -> Result<(), String> {
     let episodes = load_episodes(conn, anime_id)?;
     for ep in &episodes {
         for kind in [SegmentKind::Op, SegmentKind::Ed] {
@@ -2779,39 +2779,110 @@ pub fn op_ed_cache_directory_size() -> Result<u64, String> {
     directory_size(&dir)
 }
 
+pub fn manual_op_ed_rematch_episode_job_identity(anime_id: i64, episode_id: i64) -> String {
+    format!("{MANUAL_REMATCH_JOB_NAME}:{anime_id}:{episode_id}")
+}
+
+pub fn manual_op_ed_rematch_job_identity_prefix(anime_id: i64) -> String {
+    format!("{MANUAL_REMATCH_JOB_NAME}:{anime_id}:")
+}
+
+/// Legacy single-job identity prefix; per-episode jobs use [`manual_op_ed_rematch_episode_job_identity`].
 pub fn manual_op_ed_rematch_job_identity(anime_id: i64) -> String {
-    format!("{MANUAL_REMATCH_JOB_NAME}:{anime_id}")
+    manual_op_ed_rematch_job_identity_prefix(anime_id)
 }
 
 fn clamp_manual_template_duration(duration_sec: f64) -> f64 {
     duration_sec.clamp(MANUAL_TEMPLATE_MIN_SEC, MANUAL_TEMPLATE_MAX_SEC)
 }
 
-fn manual_rematch_step_label(
-    episode_label: &str,
-    kind: SegmentKind,
-    template_index: Option<u32>,
-) -> String {
-    match template_index {
-        Some(index) => format!(
-            "Matching {} · {} #{}",
-            episode_label,
-            kind.display_name(),
-            index
-        ),
-        None => format!("Matching {} · {}", episode_label, kind.display_name()),
-    }
+fn manual_rematch_step_label(episode_label: &str, kind: SegmentKind) -> String {
+    format!("Matching {} · {}", episode_label, kind.display_name())
 }
 
-fn manual_rematch_kind_step_count(
-    templates: &[(ManualTemplateRow, Fingerprint)],
+pub fn episode_display_labels(
+    conn: &Connection,
+    anime_id: i64,
+) -> Result<std::collections::HashMap<i64, String>, String> {
+    let tracker_offset: i64 = conn
+        .query_row(
+            "SELECT tracker_offset FROM anime WHERE id = ?1",
+            params![anime_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let episodes = load_episodes(conn, anime_id)?;
+    let mut labels = std::collections::HashMap::new();
+    for ep in &episodes {
+        labels.insert(
+            ep.id,
+            episode_display_label(conn, ep.id, tracker_offset)?,
+        );
+    }
+    Ok(labels)
+}
+
+/// Parallel template tests; returns the earliest template in list order that matched.
+fn first_template_match_parallel(
+    kind_templates: &[(ManualTemplateRow, Fingerprint)],
+    candidate_fp: &Fingerprint,
     kind: SegmentKind,
-) -> u32 {
-    let count = templates
-        .iter()
-        .filter(|(template, _)| template.kind == kind)
-        .count() as u32;
-    count.max(1)
+    episode_duration: f64,
+    cancel: &AtomicBool,
+) -> Option<(i64, TemplateMatch)> {
+    if kind_templates.is_empty() {
+        return None;
+    }
+    if kind_templates.len() == 1 {
+        let (template, template_fp) = &kind_templates[0];
+        return match_template_variable_duration(
+            template_fp,
+            candidate_fp,
+            kind,
+            template.duration_sec,
+            episode_duration,
+        )
+        .map(|matched| (template.id, matched));
+    }
+
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(kind_templates.len());
+        for (index, (template, template_fp)) in kind_templates.iter().enumerate() {
+            let template_fp = template_fp.clone();
+            let candidate_fp = candidate_fp.clone();
+            let duration_sec = template.duration_sec;
+            let template_id = template.id;
+            handles.push(scope.spawn(move || {
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+                match_template_variable_duration(
+                    &template_fp,
+                    &candidate_fp,
+                    kind,
+                    duration_sec,
+                    episode_duration,
+                )
+                .map(|matched| (index, template_id, matched))
+            }));
+        }
+
+        let mut best_index = usize::MAX;
+        let mut best: Option<(i64, TemplateMatch)> = None;
+        for handle in handles {
+            let Ok(result) = handle.join() else {
+                continue;
+            };
+            let Some((index, template_id, matched)) = result else {
+                continue;
+            };
+            if index < best_index {
+                best_index = index;
+                best = Some((template_id, matched));
+            }
+        }
+        best
+    })
 }
 
 fn episode_display_label(
@@ -3232,23 +3303,33 @@ fn match_template_variable_duration(
     None
 }
 
-pub fn run_manual_op_ed_rematch(
+pub fn run_manual_op_ed_rematch_episode(
     db: &AppDatabase,
     anime_id: i64,
+    episode_id: i64,
     cancel: &AtomicBool,
     on_step: impl Fn(u32, u32, &str),
 ) -> Result<(), String> {
-    let episodes = db.with_conn(|conn| load_episodes(conn, anime_id))?;
-    if episodes.is_empty() {
-        return Err("no episodes to rematch".to_string());
-    }
+    let ep = db.with_conn(|conn| {
+        conn.query_row(
+            "SELECT id, path, duration_seconds FROM episodes
+             WHERE id = ?1 AND anime_id = ?2 AND missing = 0",
+            params![episode_id, anime_id],
+            |row| {
+                Ok(EpisodeRow {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    duration_seconds: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| format!("episode {episode_id} not found for anime {anime_id}: {e}"))
+    })?;
+
     let templates =
         db.with_conn(|conn| load_manual_templates_with_fingerprints(conn, anime_id))?;
 
-    db.with_conn(|conn| clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
-    db.with_conn(|conn| ensure_pending_segments_for_anime(conn, anime_id))?;
-
-    let episode_labels: std::collections::HashMap<i64, String> = db.with_conn(|conn| {
+    let episode_label = db.with_conn(|conn| {
         let tracker_offset: i64 = conn
             .query_row(
                 "SELECT tracker_offset FROM anime WHERE id = ?1",
@@ -3256,141 +3337,81 @@ pub fn run_manual_op_ed_rematch(
                 |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
-        let mut labels = std::collections::HashMap::new();
-        for ep in &episodes {
-            labels.insert(
-                ep.id,
-                episode_display_label(conn, ep.id, tracker_offset)?,
-            );
-        }
-        Ok(labels)
+        episode_display_label(conn, episode_id, tracker_offset)
     })?;
 
-    let steps_per_episode = manual_rematch_kind_step_count(&templates, SegmentKind::Op)
-        + manual_rematch_kind_step_count(&templates, SegmentKind::Ed);
-    let total_steps = (episodes.len() as u32)
-        .saturating_mul(steps_per_episode)
-        .max(1);
+    const TOTAL_STEPS: u32 = 3;
     let mut step = 1u32;
 
-    for ep in &episodes {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Manual OP/ED rematch cancelled".to_string());
+    }
+
+    let op_ed_ep = OpEdEpisode {
+        id: ep.id,
+        path: ep.path.clone(),
+        duration_seconds: ep.duration_seconds,
+    };
+    let duration = episode_duration_seconds(&op_ed_ep)?;
+    let extract_len = full_episode_extract_len(duration);
+    let (candidate_key, candidate_fp) = ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
+
+    for kind in [SegmentKind::Op, SegmentKind::Ed] {
         if cancel.load(Ordering::Relaxed) {
             return Err("Manual OP/ED rematch cancelled".to_string());
         }
-        let op_ed_ep = OpEdEpisode {
-            id: ep.id,
-            path: ep.path.clone(),
-            duration_seconds: ep.duration_seconds,
-        };
-        let duration = episode_duration_seconds(&op_ed_ep)?;
-        let extract_len = full_episode_extract_len(duration);
-        let (candidate_key, candidate_fp) =
-            ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
 
-        let episode_label = episode_labels
-            .get(&ep.id)
-            .map(String::as_str)
-            .unwrap_or("Episode ?");
+        on_step(step, TOTAL_STEPS, &manual_rematch_step_label(&episode_label, kind));
+        step += 1;
 
-        for kind in [SegmentKind::Op, SegmentKind::Ed] {
-            if cancel.load(Ordering::Relaxed) {
-                return Err("Manual OP/ED rematch cancelled".to_string());
-            }
+        let kind_templates: Vec<(ManualTemplateRow, Fingerprint)> = templates
+            .iter()
+            .filter(|(t, _)| t.kind == kind)
+            .cloned()
+            .collect();
 
-            let kind_templates: Vec<&(ManualTemplateRow, Fingerprint)> = templates
-                .iter()
-                .filter(|(t, _)| t.kind == kind)
-                .collect();
-            if kind_templates.is_empty() {
-                on_step(
-                    step,
-                    total_steps,
-                    &manual_rematch_step_label(episode_label, kind, None),
-                );
-                step = step.saturating_add(1);
-                db.with_conn(|conn| {
-                    upsert_segment_status_conn(
-                        conn,
-                        ep.id,
-                        kind,
-                        OpEdSegmentStatus::NotFound,
-                        None,
-                        None,
-                        None,
-                        None,
-                        "manual",
-                        None,
-                        None,
-                    )
-                })?;
-                continue;
-            }
-
-            let mut best: Option<(i64, TemplateMatch)> = None;
-            for (template_index, (template, template_fp)) in kind_templates.iter().enumerate() {
-                on_step(
-                    step,
-                    total_steps,
-                    &manual_rematch_step_label(
-                        episode_label,
-                        kind,
-                        Some((template_index as u32) + 1),
-                    ),
-                );
-                step = step.saturating_add(1);
-                if let Some(matched) = match_template_variable_duration(
-                    template_fp,
-                    &candidate_fp,
+        if let Some((template_id, matched)) = first_template_match_parallel(
+            &kind_templates,
+            &candidate_fp,
+            kind,
+            duration,
+            cancel,
+        ) {
+            db.with_conn(|conn| {
+                upsert_segment_status_conn(
+                    conn,
+                    ep.id,
                     kind,
-                    template.duration_sec,
-                    duration,
-                ) {
-                    if best
-                        .as_ref()
-                        .is_none_or(|(_, prev)| matched.confidence > prev.confidence)
-                    {
-                        best = Some((template.id, matched));
-                    }
-                }
-            }
-
-            if let Some((template_id, matched)) = best {
-                db.with_conn(|conn| {
-                    upsert_segment_status_conn(
-                        conn,
-                        ep.id,
-                        kind,
-                        OpEdSegmentStatus::Matched,
-                        Some(matched.start_sec),
-                        Some(matched.end_sec),
-                        Some(f64::from(matched.confidence)),
-                        Some(template_id),
-                        "manual",
-                        Some(&candidate_key),
-                        None,
-                    )
-                })?;
-            } else {
-                db.with_conn(|conn| {
-                    upsert_segment_status_conn(
-                        conn,
-                        ep.id,
-                        kind,
-                        OpEdSegmentStatus::NotFound,
-                        None,
-                        None,
-                        None,
-                        None,
-                        "manual",
-                        None,
-                        None,
-                    )
-                })?;
-            }
+                    OpEdSegmentStatus::Matched,
+                    Some(matched.start_sec),
+                    Some(matched.end_sec),
+                    Some(f64::from(matched.confidence)),
+                    Some(template_id),
+                    "manual",
+                    Some(&candidate_key),
+                    None,
+                )
+            })?;
+        } else {
+            db.with_conn(|conn| {
+                upsert_segment_status_conn(
+                    conn,
+                    ep.id,
+                    kind,
+                    OpEdSegmentStatus::NotFound,
+                    None,
+                    None,
+                    None,
+                    None,
+                    "manual",
+                    None,
+                    None,
+                )
+            })?;
         }
     }
 
-    on_step(total_steps, total_steps, "Done");
+    on_step(TOTAL_STEPS, TOTAL_STEPS, "Done");
     Ok(())
 }
 
@@ -3746,34 +3767,45 @@ mod tests {
     }
 
     #[test]
-    fn manual_rematch_kind_step_count_is_at_least_one_per_kind() {
-        let templates = vec![(
-            ManualTemplateRow {
-                id: 1,
-                kind: SegmentKind::Op,
-                start_sec: 0.0,
-                duration_sec: 90.0,
-                fingerprint_cache_key: "k".to_string(),
-                source_path: "/ep.mkv".to_string(),
-            },
-            Fingerprint { values: vec![1] },
-        )];
-        assert_eq!(manual_rematch_kind_step_count(&templates, SegmentKind::Op), 1);
-        assert_eq!(manual_rematch_kind_step_count(&templates, SegmentKind::Ed), 1);
-    }
+    fn first_template_match_parallel_prefers_earlier_template() {
+        let near = value_with_bit_diffs(2);
+        const TEMPLATE_FRAMES: usize = 40;
+        let template_fp = fingerprint_from_values(&[near; TEMPLATE_FRAMES]);
+        let candidate = fingerprint_from_values(&[near; 200]);
 
-    #[test]
-    fn manual_rematch_kind_step_count_scales_with_template_count() {
-        let row = ManualTemplateRow {
-            id: 1,
-            kind: SegmentKind::Op,
-            start_sec: 0.0,
-            duration_sec: 90.0,
-            fingerprint_cache_key: "k".to_string(),
-            source_path: "/ep.mkv".to_string(),
-        };
-        let fp = Fingerprint { values: vec![1] };
-        let templates = vec![(row.clone(), fp.clone()), (row, fp)];
-        assert_eq!(manual_rematch_kind_step_count(&templates, SegmentKind::Op), 2);
+        let templates = vec![
+            (
+                ManualTemplateRow {
+                    id: 10,
+                    kind: SegmentKind::Op,
+                    start_sec: 0.0,
+                    duration_sec: 90.0,
+                    fingerprint_cache_key: "a".to_string(),
+                    source_path: "/a.mkv".to_string(),
+                },
+                template_fp.clone(),
+            ),
+            (
+                ManualTemplateRow {
+                    id: 20,
+                    kind: SegmentKind::Op,
+                    start_sec: 0.0,
+                    duration_sec: 90.0,
+                    fingerprint_cache_key: "b".to_string(),
+                    source_path: "/b.mkv".to_string(),
+                },
+                template_fp,
+            ),
+        ];
+        let cancel = AtomicBool::new(false);
+        let matched = first_template_match_parallel(
+            &templates,
+            &candidate,
+            SegmentKind::Op,
+            1400.0,
+            &cancel,
+        )
+        .expect("expected a match");
+        assert_eq!(matched.0, 10);
     }
 }
