@@ -94,15 +94,16 @@ function nestedSubmenuViewportPosition(
   nestedHeight: number,
 ): { x: number; y: number } {
   const margin = 8;
-  const overlap = 4;
+  const gap = 2;
+  const menuPadding = 4;
 
-  let x = anchorRect.right - overlap;
+  let x = anchorRect.right + gap;
   if (x + nestedWidth > window.innerWidth - margin) {
-    x = anchorRect.left - nestedWidth + overlap;
+    x = anchorRect.left - nestedWidth - gap;
   }
   x = Math.min(Math.max(margin, x), Math.max(margin, window.innerWidth - nestedWidth - margin));
 
-  let y = anchorRect.top;
+  let y = anchorRect.top - menuPadding;
   if (y + nestedHeight > window.innerHeight - margin) {
     y = window.innerHeight - margin - nestedHeight;
   }
