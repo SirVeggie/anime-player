@@ -50,6 +50,7 @@ export function SettingsScreen(props: {
   onAutoOpEdDetect: (enabled: boolean) => void;
   onSkipOpEd: (enabled: boolean) => void;
   onDontSkipFirstEpisodeOpEd: (enabled: boolean) => void;
+  onCleanUnusedScrubSprites: (enabled: boolean) => void;
   onCleanLocalData: () => void;
 }) {
   const {
@@ -83,6 +84,7 @@ export function SettingsScreen(props: {
     onAutoOpEdDetect,
     onSkipOpEd,
     onDontSkipFirstEpisodeOpEd,
+    onCleanUnusedScrubSprites,
     onCleanLocalData,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
@@ -179,6 +181,15 @@ export function SettingsScreen(props: {
           Rescans keep temporarily missing or unmatched episodes so links, categories, and progress are not lost.
           Use cleanup after your rules and folders are correct.
         </p>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.clean_unused_scrub_sprites}
+            disabled={busy}
+            onChange={onCleanUnusedScrubSprites}
+            label="Clear unused sprites after 3 months"
+            tooltip="During cleanup, delete scrub thumbnail sprites for titles whose last watch date (or date added, if never watched) is more than three months ago. Sprites are regenerated when you browse those episodes again."
+          />
+        </div>
         <div className="settings-actions">
           <button type="button" onClick={onCleanLocalData} disabled={busy}>
             Clean local data

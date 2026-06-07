@@ -186,6 +186,20 @@ pub fn delete_unreferenced_scrub_sprites(
     Ok((removed_count, removed_bytes))
 }
 
+/// Deletes scrub sprite cache entries for the given episode paths.
+pub fn delete_scrub_sprites_for_paths(paths: &[String]) -> Result<(usize, u64), String> {
+    let mut removed_count = 0_usize;
+    let mut removed_bytes = 0_u64;
+    for path in paths {
+        let bytes = remove_scrub_sprite_cache(path)?;
+        if bytes > 0 {
+            removed_count += 1;
+            removed_bytes += bytes;
+        }
+    }
+    Ok((removed_count, removed_bytes))
+}
+
 /// Removes cached scrub sprite files for a video path. Best-effort when the file is gone.
 pub fn remove_scrub_sprite_cache(path: &str) -> Result<u64, String> {
     let mut bytes = 0_u64;

@@ -160,6 +160,7 @@ export type LibraryState = {
   skip_op_ed: boolean;
   auto_op_ed_detect: boolean;
   dont_skip_first_episode_op_ed: boolean;
+  clean_unused_scrub_sprites: boolean;
 };
 
 export type ScanSummary = {

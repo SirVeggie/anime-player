@@ -66,6 +66,10 @@ export function setDontSkipFirstEpisodeOpEd(enabled: boolean): Promise<LibrarySt
   return invoke("set_dont_skip_first_episode_op_ed", { enabled });
 }
 
+export function setCleanUnusedScrubSprites(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_clean_unused_scrub_sprites", { enabled });
+}
+
 export function addRootFolder(path: string): Promise<RootFolder> {
   return invoke("add_root_folder", { path });
 }

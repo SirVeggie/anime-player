@@ -474,7 +474,10 @@ view components. Per-screen UI lives in `src/components/`:
   `get_local_data_stats` (database, AniList covers, and scrub-sprite cache sizes);
   the explicit `clean_local_data` action prunes stale episodes/unmatched rows,
   removes anime with no episodes, vacuums SQLite, and deletes unreferenced saved
-  covers and scrub sprites (matched by episode path keys in sprite metadata),
+  covers and scrub sprites (matched by episode path keys in sprite metadata).
+  When `settings.clean_unused_scrub_sprites` is enabled (default on), cleanup
+  also removes scrub sprites for titles whose last watch date — or date added
+  when never watched — is more than three months ago,
   unused OP/ED fingerprint caches, and leftover OP/ED fpcalc staging files
   (`*.s16le` under `data/op-ed/`, older than one day). The episode page's `delete_anime_files`
   command deletes/trashes the currently visible episode files for an anime,

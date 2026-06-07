@@ -20,6 +20,7 @@ const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
 
 const PREFER_ANILIST_DISPLAY_TITLE_KEY: &str = "prefer_anilist_display_title";
 const HIDE_ANILIST_FEATURES_KEY: &str = "hide_anilist_features";
+const CLEAN_UNUSED_SCRUB_SPRITES_KEY: &str = "clean_unused_scrub_sprites";
 
 /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
 /// When AniList status is `RELEASING`, trailing unreleased episodes are not counted.
@@ -163,6 +164,7 @@ pub struct LibraryState {
     skip_op_ed: bool,
     auto_op_ed_detect: bool,
     dont_skip_first_episode_op_ed: bool,
+    clean_unused_scrub_sprites: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -363,6 +365,35 @@ fn write_hide_anilist_features(conn: &Connection, enabled: bool) -> Result<(), S
     Ok(())
 }
 
+fn read_clean_unused_scrub_sprites(conn: &Connection) -> Result<bool, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![CLEAN_UNUSED_SCRUB_SPRITES_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(match value.as_deref() {
+        None => true,
+        Some("0" | "false" | "no") => false,
+        _ => true,
+    })
+}
+
+fn write_clean_unused_scrub_sprites(conn: &Connection, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![
+            CLEAN_UNUSED_SCRUB_SPRITES_KEY,
+            if enabled { "1" } else { "0" }
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_library_state(db: State<'_, AppDatabase>) -> Result<LibraryState, String> {
     db.with_conn(|conn| build_library_state(conn, &db))
@@ -388,6 +419,7 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         skip_op_ed: op_ed::read_skip_op_ed(conn)?,
         auto_op_ed_detect: op_ed::read_auto_op_ed_detect(conn)?,
         dont_skip_first_episode_op_ed: op_ed::read_dont_skip_first_episode_op_ed(conn)?,
+        clean_unused_scrub_sprites: read_clean_unused_scrub_sprites(conn)?,
     })
 }
 
@@ -436,6 +468,17 @@ pub fn set_hide_anilist_features(
 ) -> Result<LibraryState, String> {
     db.with_conn(|conn| {
         write_hide_anilist_features(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
+}
+
+#[tauri::command]
+pub fn set_clean_unused_scrub_sprites(
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        write_clean_unused_scrub_sprites(conn, enabled)?;
         build_library_state(conn, &db)
     })
 }
@@ -1515,6 +1558,15 @@ pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSu
     let (scrub_removed, scrub_bytes_removed) =
         crate::scrub_preview::delete_unreferenced_scrub_sprites(&referenced_scrub_paths)?;
     summary.scrub_sprites_removed = scrub_removed as i64;
+    let mut scrub_bytes_removed = scrub_bytes_removed;
+    let clean_stale_scrub_sprites = db.with_conn(|conn| read_clean_unused_scrub_sprites(conn))?;
+    if clean_stale_scrub_sprites {
+        let stale_paths = db.with_conn(|conn| list_stale_anime_episode_paths(conn))?;
+        let (stale_removed, stale_bytes) =
+            crate::scrub_preview::delete_scrub_sprites_for_paths(&stale_paths)?;
+        summary.scrub_sprites_removed += stale_removed as i64;
+        scrub_bytes_removed += stale_bytes;
+    }
     let referenced_op_ed = db.with_conn(|conn| op_ed::list_referenced_op_ed_fingerprint_keys(conn))?;
     let (op_ed_removed, op_ed_bytes_removed) =
         op_ed::delete_unreferenced_op_ed_fingerprints(&referenced_op_ed)?;
@@ -2445,6 +2497,21 @@ fn data_file_path(db: &AppDatabase, stored_path: &str) -> PathBuf {
     } else {
         path
     }
+}
+
+fn list_stale_anime_episode_paths(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.path
+             FROM episodes e
+             INNER JOIN anime a ON a.id = e.anime_id
+             WHERE datetime(COALESCE(a.last_watched_at, a.created_at)) < datetime('now', '-3 months')",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    collect_rows(rows)
 }
 
 fn list_referenced_scrub_paths(conn: &mut Connection) -> Result<HashSet<String>, String> {

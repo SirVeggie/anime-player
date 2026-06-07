@@ -41,6 +41,7 @@ import {
   syncAnilistEpisodeProgress,
   searchAnilistAnime,
   setAutoOpEdDetect,
+  setCleanUnusedScrubSprites,
   setDontSkipFirstEpisodeOpEd,
   setPreferAnilistDisplayTitle,
   setHideAnilistFeatures,
@@ -672,8 +673,11 @@ function App() {
   }, [navigateToView, reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction, view]);
 
   const handleCleanLocalData = useCallback(async () => {
+    const staleSpriteNote = library?.clean_unused_scrub_sprites
+      ? " It also clears scrub sprites for titles not watched (or added) in the last three months."
+      : "";
     const confirmed = window.confirm(
-      "Clean local data now? This removes database entries for episodes that are missing or no longer match your current detection rules, plus unused saved thumbnails and scrub sprites.",
+      `Clean local data now? This removes database entries for episodes that are missing or no longer match your current detection rules, plus unused saved thumbnails and scrub sprites.${staleSpriteNote}`,
     );
     if (!confirmed) return;
 
@@ -692,7 +696,7 @@ function App() {
           : "";
       return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, ${scrubSprites}, and ${opEdFp}${opEdTemp}.`;
     });
-  }, [reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction]);
+  }, [library?.clean_unused_scrub_sprites, reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction]);
 
   const handleCreateCategory = useCallback(async () => {
     const name = newCategoryName.trim();
@@ -1201,6 +1205,11 @@ function App() {
 
   const handleDontSkipFirstEpisodeOpEd = useCallback(async (enabled: boolean) => {
     const state = await setDontSkipFirstEpisodeOpEd(enabled);
+    setLibrary(state);
+  }, []);
+
+  const handleCleanUnusedScrubSprites = useCallback(async (enabled: boolean) => {
+    const state = await setCleanUnusedScrubSprites(enabled);
     setLibrary(state);
   }, []);
 
@@ -1885,6 +1894,7 @@ function App() {
               onAutoOpEdDetect={(enabled) => void handleAutoOpEdDetect(enabled)}
               onSkipOpEd={(enabled) => void handleSkipOpEd(enabled)}
               onDontSkipFirstEpisodeOpEd={(enabled) => void handleDontSkipFirstEpisodeOpEd(enabled)}
+              onCleanUnusedScrubSprites={(enabled) => void handleCleanUnusedScrubSprites(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
             />
           ) : null}
