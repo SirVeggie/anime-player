@@ -6,6 +6,7 @@ import {
   listManualOpEdTemplates,
   mpvClearPreviewRect,
   mpvSetPreviewRect,
+  probeVideoDuration,
   probeVideoFps,
   saveManualOpEdTemplate,
   setMpvVolume,
@@ -37,6 +38,13 @@ import { VolumeControl } from "./VolumeControl";
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
 const TEST_LEAD_SEC = 2;
 const TEST_TAIL_SEC = 2;
+const EDITOR_DURATION_FALLBACK_SEC = 600;
+
+function resolveEditorDuration(stored: number, probed: number, mpv: number): number {
+  const candidates = [probed, mpv, stored].filter((value) => value > 0);
+  if (candidates.length === 0) return EDITOR_DURATION_FALLBACK_SEC;
+  return Math.max(...candidates);
+}
 
 type EditorPlayback =
   | {
@@ -129,6 +137,7 @@ export function ManualSkipScreen(props: {
   const [dirty, setDirty] = useState(false);
   const [frameStepSec, setFrameStepSec] = useState(1 / 24);
   const [previewCompositorRevealed, setPreviewCompositorRevealed] = useState(false);
+  const [editorDuration, setEditorDuration] = useState(0);
   const [playbackMode, setPlaybackMode] = useState<"test" | "area" | null>(null);
   const [volume, setVolume] = useState(loadVolume);
   const [muted, setMuted] = useState(false);
@@ -212,6 +221,12 @@ export function ManualSkipScreen(props: {
     mpvReadyRef.current = false;
   }, []);
 
+  const applyEditorDuration = useCallback((stored: number, probed: number, mpv: number) => {
+    setEditorDuration((current) =>
+      Math.max(current, resolveEditorDuration(stored, probed, mpv)),
+    );
+  }, []);
+
   const loadEditorEpisode = useCallback(
     async (episode: Episode) => {
       try {
@@ -222,16 +237,20 @@ export function ManualSkipScreen(props: {
           });
           mpvReadyRef.current = true;
         }
+        const [probedDuration, fps] = await Promise.all([
+          probeVideoDuration(episode.path).catch(() => 0),
+          probeVideoFps(episode.path),
+        ]);
+        applyEditorDuration(episode.duration_seconds, probedDuration, 0);
         await invoke("mpv_load", { path: episode.path });
         await invoke("mpv_set_pause", { paused: true });
-        const fps = await probeVideoFps(episode.path);
         setFrameStepSec(fps > 0 ? 1 / fps : 1 / 24);
         schedulePreviewRect();
       } catch (e) {
         onError(errorMessage(e));
       }
     },
-    [onError, schedulePreviewRect],
+    [applyEditorDuration, onError, schedulePreviewRect],
   );
 
   const editorEpisode = view.kind === "editor" ? view.episode : null;
@@ -276,6 +295,24 @@ export function ManualSkipScreen(props: {
   }, [view.kind, editorEpisode?.id]);
 
   useEffect(() => {
+    if (view.kind !== "editor") {
+      setEditorDuration(0);
+      return;
+    }
+    setEditorDuration(view.episode.duration_seconds > 0 ? view.episode.duration_seconds : 0);
+  }, [view.kind, view.kind === "editor" ? view.episode.id : null]);
+
+  useEffect(() => {
+    if (view.kind !== "editor" || editorDuration <= 0) return;
+    setView((current) => {
+      if (current.kind !== "editor") return current;
+      const next = clampTemplateRange(current.startSec, current.endSec, editorDuration);
+      if (next.startSec === current.startSec && next.endSec === current.endSec) return current;
+      return { ...current, startSec: next.startSec, endSec: next.endSec };
+    });
+  }, [editorDuration, view.kind]);
+
+  useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("compositor-active", editorCompositing);
     return () => {
@@ -311,7 +348,12 @@ export function ManualSkipScreen(props: {
     let unlistenFileLoaded: (() => void) | undefined;
     let unlistenPlaybackRestart: (() => void) | undefined;
     let unlistenTimePos: (() => void) | undefined;
+    let unlistenDuration: (() => void) | undefined;
     void (async () => {
+      unlistenDuration = await listen("mpv://duration", (e) => {
+        if (cancelled || typeof e.payload !== "number" || e.payload <= 0) return;
+        applyEditorDuration(editorEpisode.duration_seconds, 0, e.payload);
+      });
       unlistenFileLoaded = await listen("mpv://file-loaded", () => schedulePreviewRect());
       unlistenPlaybackRestart = await listen("mpv://playback-restart", () => {
         if (cancelled) return;
@@ -358,9 +400,18 @@ export function ManualSkipScreen(props: {
       unlistenFileLoaded?.();
       unlistenPlaybackRestart?.();
       unlistenTimePos?.();
+      unlistenDuration?.();
       void teardownMpv();
     };
-  }, [editorEpisode?.id, loadEditorEpisode, onError, schedulePreviewRect, teardownMpv]);
+  }, [
+    applyEditorDuration,
+    editorEpisode?.duration_seconds,
+    editorEpisode?.id,
+    loadEditorEpisode,
+    onError,
+    schedulePreviewRect,
+    teardownMpv,
+  ]);
 
   const exitScreen = useCallback(() => {
     void teardownMpv().finally(() => {
@@ -417,7 +468,7 @@ export function ManualSkipScreen(props: {
   const handleTest = useCallback(async () => {
     if (view.kind !== "editor") return;
     const duration =
-      view.episode.duration_seconds > 0 ? view.episode.duration_seconds : view.endSec + TEST_TAIL_SEC;
+      editorDuration > 0 ? editorDuration : view.endSec + TEST_TAIL_SEC;
     const startSec = view.startSec;
     const endSec = view.endSec;
     try {
@@ -438,7 +489,7 @@ export function ManualSkipScreen(props: {
       setPlaybackMode(null);
       onError(errorMessage(e));
     }
-  }, [onError, stopEditorPlayback, view]);
+  }, [editorDuration, onError, stopEditorPlayback, view]);
 
   const leaveEditor = useCallback(() => {
     if (view.kind !== "editor") return;
@@ -519,11 +570,11 @@ export function ManualSkipScreen(props: {
     }
   }, [anime.id, onError, reloadTemplates, teardownMpv, view]);
 
-  const editorDuration =
+  const scrubberDuration =
     view.kind === "editor" ?
-      view.episode.duration_seconds > 0 ?
-        view.episode.duration_seconds
-      : 600
+      editorDuration > 0 ?
+        editorDuration
+      : EDITOR_DURATION_FALLBACK_SEC
     : 0;
 
   return (
@@ -685,7 +736,7 @@ export function ManualSkipScreen(props: {
           <div ref={previewRef} className="manual-skip-preview" aria-hidden />
           <div className="manual-skip-screen__editor-panel">
             <TemplateRangeScrubber
-              duration={editorDuration}
+              duration={scrubberDuration}
               startSec={view.startSec}
               endSec={view.endSec}
               frameStepSec={frameStepSec}
@@ -693,7 +744,7 @@ export function ManualSkipScreen(props: {
                 stopPlaybackOnRangeChange();
                 setView((current) => {
                   if (current.kind !== "editor") return current;
-                  const next = clampTemplateRange(startSec, current.endSec, editorDuration);
+                  const next = clampTemplateRange(startSec, current.endSec, scrubberDuration);
                   return { ...current, startSec: next.startSec, endSec: next.endSec };
                 });
               }}
@@ -701,7 +752,7 @@ export function ManualSkipScreen(props: {
                 stopPlaybackOnRangeChange();
                 setView((current) => {
                   if (current.kind !== "editor") return current;
-                  const next = clampTemplateRange(current.startSec, endSec, editorDuration);
+                  const next = clampTemplateRange(current.startSec, endSec, scrubberDuration);
                   return { ...current, startSec: next.startSec, endSec: next.endSec };
                 });
               }}
@@ -709,7 +760,7 @@ export function ManualSkipScreen(props: {
                 stopPlaybackOnRangeChange();
                 setView((current) => {
                   if (current.kind !== "editor") return current;
-                  const next = clampTemplateRange(startSec, endSec, editorDuration);
+                  const next = clampTemplateRange(startSec, endSec, scrubberDuration);
                   return { ...current, startSec: next.startSec, endSec: next.endSec };
                 });
               }}

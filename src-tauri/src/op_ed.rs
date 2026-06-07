@@ -2787,6 +2787,33 @@ fn clamp_manual_template_duration(duration_sec: f64) -> f64 {
     duration_sec.clamp(MANUAL_TEMPLATE_MIN_SEC, MANUAL_TEMPLATE_MAX_SEC)
 }
 
+fn manual_rematch_step_label(
+    episode_label: &str,
+    kind: SegmentKind,
+    template_index: Option<u32>,
+) -> String {
+    match template_index {
+        Some(index) => format!(
+            "Matching {} · {} #{}",
+            episode_label,
+            kind.display_name(),
+            index
+        ),
+        None => format!("Matching {} · {}", episode_label, kind.display_name()),
+    }
+}
+
+fn manual_rematch_kind_step_count(
+    templates: &[(ManualTemplateRow, Fingerprint)],
+    kind: SegmentKind,
+) -> u32 {
+    let count = templates
+        .iter()
+        .filter(|(template, _)| template.kind == kind)
+        .count() as u32;
+    count.max(1)
+}
+
 fn episode_display_label(
     conn: &Connection,
     episode_id: i64,
@@ -2836,16 +2863,22 @@ pub fn clear_episode_op_ed_segments_for_anime(conn: &Connection, anime_id: i64) 
     Ok(())
 }
 
+/// Manual template list order: OP before ED, then creation order (`id`) within each kind.
+const MANUAL_TEMPLATE_LIST_ORDER: &str =
+    "CASE kind WHEN 'op' THEN 0 WHEN 'ed' THEN 1 ELSE 2 END, id";
+
 fn load_manual_templates(conn: &Connection, anime_id: i64) -> Result<Vec<ManualTemplateRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT t.id, t.kind, t.start_sec, t.duration_sec, t.fingerprint_cache_key,
-                    COALESCE(e.path, '')
-             FROM op_ed_templates t
-             LEFT JOIN episodes e
-               ON e.id = CAST(json_extract(t.source_episode_ids, '$[0]') AS INTEGER)
-             WHERE t.anime_id = ?1 AND t.source = 'manual'
-             ORDER BY t.kind, t.id",
+            &format!(
+                "SELECT t.id, t.kind, t.start_sec, t.duration_sec, t.fingerprint_cache_key,
+                        COALESCE(e.path, '')
+                 FROM op_ed_templates t
+                 LEFT JOIN episodes e
+                   ON e.id = CAST(json_extract(t.source_episode_ids, '$[0]') AS INTEGER)
+                 WHERE t.anime_id = ?1 AND t.source = 'manual'
+                 ORDER BY {MANUAL_TEMPLATE_LIST_ORDER}"
+            ),
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -2923,12 +2956,12 @@ pub fn list_manual_op_ed_templates(
         .map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT id, kind, start_sec, duration_sec, source_episode_ids
              FROM op_ed_templates
              WHERE anime_id = ?1 AND source = 'manual'
-             ORDER BY kind, id",
-        )
+             ORDER BY {MANUAL_TEMPLATE_LIST_ORDER}"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![anime_id], |row| {
@@ -3179,7 +3212,29 @@ pub fn run_manual_op_ed_rematch(
     db.with_conn(|conn| clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
     db.with_conn(|conn| ensure_pending_segments_for_anime(conn, anime_id))?;
 
-    let total_steps = (episodes.len() as u32).saturating_mul(2).max(1);
+    let episode_labels: std::collections::HashMap<i64, String> = db.with_conn(|conn| {
+        let tracker_offset: i64 = conn
+            .query_row(
+                "SELECT tracker_offset FROM anime WHERE id = ?1",
+                params![anime_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let mut labels = std::collections::HashMap::new();
+        for ep in &episodes {
+            labels.insert(
+                ep.id,
+                episode_display_label(conn, ep.id, tracker_offset)?,
+            );
+        }
+        Ok(labels)
+    })?;
+
+    let steps_per_episode = manual_rematch_kind_step_count(&templates, SegmentKind::Op)
+        + manual_rematch_kind_step_count(&templates, SegmentKind::Ed);
+    let total_steps = (episodes.len() as u32)
+        .saturating_mul(steps_per_episode)
+        .max(1);
     let mut step = 1u32;
 
     for ep in &episodes {
@@ -3196,22 +3251,27 @@ pub fn run_manual_op_ed_rematch(
         let (candidate_key, candidate_fp) =
             ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
 
+        let episode_label = episode_labels
+            .get(&ep.id)
+            .map(String::as_str)
+            .unwrap_or("Episode ?");
+
         for kind in [SegmentKind::Op, SegmentKind::Ed] {
             if cancel.load(Ordering::Relaxed) {
                 return Err("Manual OP/ED rematch cancelled".to_string());
             }
-            on_step(
-                step,
-                total_steps,
-                &format!("{} {} rematch", kind.display_name(), ep.id),
-            );
-            step = step.saturating_add(1);
 
             let kind_templates: Vec<&(ManualTemplateRow, Fingerprint)> = templates
                 .iter()
                 .filter(|(t, _)| t.kind == kind)
                 .collect();
             if kind_templates.is_empty() {
+                on_step(
+                    step,
+                    total_steps,
+                    &manual_rematch_step_label(episode_label, kind, None),
+                );
+                step = step.saturating_add(1);
                 db.with_conn(|conn| {
                     upsert_segment_status_conn(
                         conn,
@@ -3231,7 +3291,17 @@ pub fn run_manual_op_ed_rematch(
             }
 
             let mut best: Option<(i64, TemplateMatch)> = None;
-            for (template, template_fp) in kind_templates {
+            for (template_index, (template, template_fp)) in kind_templates.iter().enumerate() {
+                on_step(
+                    step,
+                    total_steps,
+                    &manual_rematch_step_label(
+                        episode_label,
+                        kind,
+                        Some((template_index as u32) + 1),
+                    ),
+                );
+                step = step.saturating_add(1);
                 if let Some(matched) = match_template_variable_duration(
                     template_fp,
                     &candidate_fp,
@@ -3350,6 +3420,12 @@ pub fn delete_manual_op_ed_template_cmd(
 pub fn probe_video_fps_cmd(path: String) -> Result<f64, String> {
     let path_buf = normalized_video_path(&path)?;
     probe_video_fps(&path_buf)
+}
+
+#[tauri::command]
+pub fn probe_video_duration_cmd(path: String) -> Result<f64, String> {
+    let path_buf = normalized_video_path(&path)?;
+    probe_duration(&path_buf)
 }
 
 #[tauri::command]

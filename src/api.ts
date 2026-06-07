@@ -279,6 +279,10 @@ export function probeVideoFps(path: string): Promise<number> {
   return invoke("probe_video_fps_cmd", { path });
 }
 
+export function probeVideoDuration(path: string): Promise<number> {
+  return invoke("probe_video_duration_cmd", { path });
+}
+
 export function prepareManualOpEdRematch(
   animeId: number,
   animeTitle?: string | null,

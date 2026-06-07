@@ -538,6 +538,7 @@ pub fn run() {
         op_ed::update_manual_op_ed_template_cmd,
         op_ed::delete_manual_op_ed_template_cmd,
         op_ed::probe_video_fps_cmd,
+        op_ed::probe_video_duration_cmd,
         jobs::prepare_manual_op_ed_rematch_cmd,
     ]);
 
