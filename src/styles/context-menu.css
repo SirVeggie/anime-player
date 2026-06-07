@@ -1,0 +1,165 @@
+.context-menu-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.context-menu {
+  position: fixed;
+  min-width: 180px;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: rgba(20, 20, 20, 0.98);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  overflow: visible;
+  transform-origin: top left;
+  animation: context-menu-open 0.16s ease forwards;
+}
+
+.context-menu--nested {
+  position: fixed;
+  min-width: 180px;
+  max-width: min(280px, calc(100vw - 16px));
+  z-index: 91;
+  animation: context-menu-nested-open 0.12s ease forwards;
+}
+
+@keyframes context-menu-nested-open {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.context-menu-submenu {
+  position: relative;
+}
+
+.context-menu-submenu--open > .context-menu-item--submenu:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: left;
+  opacity: 0;
+  transform: translateY(-4px);
+  animation: context-menu-item-in 0.14s ease forwards;
+  animation-delay: calc(var(--item-index, 0) * 24ms + 36ms);
+}
+
+.context-menu-item > span:first-child {
+  min-width: 0;
+}
+
+.context-menu-item:hover:not(:disabled):not(.context-menu-item--disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.context-menu-item--disabled,
+.context-menu-item:disabled {
+  color: rgba(255, 255, 255, 0.28);
+  cursor: not-allowed;
+  animation-name: context-menu-item-in-disabled;
+}
+
+.context-menu-item--danger.context-menu-item--disabled,
+.context-menu-item--danger:disabled {
+  color: rgba(255, 160, 160, 0.34);
+}
+
+.context-menu-item--danger {
+  color: #ffb4b4;
+}
+
+.context-menu-item--danger:hover:not(:disabled):not(.context-menu-item--disabled) {
+  background: rgba(255, 107, 107, 0.14);
+}
+
+.context-menu-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.context-menu-item--disabled .context-menu-chevron,
+.context-menu-item:disabled .context-menu-chevron {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.context-menu-tooltip {
+  position: fixed;
+  z-index: 92;
+  max-width: min(240px, calc(100vw - 16px));
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(12, 12, 12, 0.98);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translateY(-50%);
+  white-space: normal;
+}
+
+.prompt-modal {
+  width: min(420px, 100%);
+}
+
+.prompt-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+@keyframes context-menu-open {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: scaleY(0.92);
+  }
+
+  to {
+    opacity: 1;
+    max-height: 480px;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes context-menu-item-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes context-menu-item-in-disabled {
+  to {
+    opacity: 0.42;
+    transform: translateY(0);
+  }
+}

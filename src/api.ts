@@ -130,6 +130,10 @@ export function deleteAnimeFiles(animeId: number): Promise<DeleteAnimeFilesSumma
   return invoke("delete_anime_files", { animeId });
 }
 
+export function deleteEpisodeFiles(episodeId: number): Promise<DeleteAnimeFilesSummary> {
+  return invoke("delete_episode_files", { episodeId });
+}
+
 export function validateFileRenames(renames: RenameFileRequest[]): Promise<void> {
   return invoke("validate_file_renames", { renames });
 }

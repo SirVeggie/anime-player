@@ -13,6 +13,7 @@ import {
   createCategory,
   createRegexRule,
   deleteAnimeFiles,
+  deleteEpisodeFiles,
   deleteCategory,
   deleteRegexRule,
   resetRegexRulesToDefaults,
@@ -35,6 +36,8 @@ import {
   renameFiles,
   removeRootFolder,
   rescanLibrary,
+  saveEpisodeProgress,
+  syncAnilistEpisodeProgress,
   searchAnilistAnime,
   setAutoOpEdDetect,
   setDontSkipFirstEpisodeOpEd,
@@ -52,6 +55,7 @@ import {
   updateRegexRule,
   validateFileRenames,
 } from "./api";
+import { isLatestWatchedEpisode, maxWatchedDisplayEpisode } from "./episodeProgress";
 import { AnimeGrid } from "./components/AnimeGrid";
 import { BulkEditScreen } from "./components/BulkEditScreen";
 import { CategoryScreen } from "./components/CategoryScreen";
@@ -681,6 +685,20 @@ function App() {
     });
   }, [newCategoryName, reloadLibrary, runAction]);
 
+  const handleCreateCategoryByName = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error("Category name is required.");
+      await runAction(async () => {
+        const category = await createCategory(trimmed);
+        setSelectedCategoryId(category.id);
+        await reloadLibrary();
+        return "Category created.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
   const handleDeleteCategory = useCallback(
     async (category: Category) => {
       await runAction(async () => {
@@ -719,6 +737,28 @@ function App() {
 
       await runAction(async () => {
         await reorderCategories(categoryIds);
+        await reloadLibrary();
+        return "Category order updated.";
+      });
+    },
+    [library, reloadLibrary, runAction],
+  );
+
+  const handleMoveCategoryToPosition = useCallback(
+    async (category: Category, position: number) => {
+      if (!library) return;
+      const currentIndex = library.categories.findIndex((item) => item.id === category.id);
+      const targetIndex = position - 1;
+      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= library.categories.length || targetIndex === currentIndex) {
+        return;
+      }
+
+      const reordered = [...library.categories];
+      const [moved] = reordered.splice(currentIndex, 1);
+      reordered.splice(targetIndex, 0, moved);
+
+      await runAction(async () => {
+        await reorderCategories(reordered.map((item) => item.id));
         await reloadLibrary();
         return "Category order updated.";
       });
@@ -785,6 +825,118 @@ function App() {
       });
     },
     [reloadLibrary, runAction, selectedAnime],
+  );
+
+  const handleMoveAnimeSummary = useCallback(
+    async (anime: AnimeSummary, categoryId: number) => {
+      await runAction(async () => {
+        await moveAnimeToCategory(anime.id, categoryId);
+        const state = await reloadLibrary();
+        if (selectedAnimeIdRef.current === anime.id) {
+          const updated = state.anime.find((item) => item.id === anime.id);
+          if (updated) setSelectedAnime(updated);
+        }
+        return "Title moved to a new category.";
+      });
+    },
+    [reloadLibrary, runAction],
+  );
+
+  const handleDeleteAnimeSummary = useCallback(
+    async (anime: AnimeSummary) => {
+      setBusy(true);
+      try {
+        if (selectedEpisode?.anime_id === anime.id) {
+          await stopMpv().catch(() => undefined);
+          setSelectedEpisode(null);
+        }
+
+        const summary = await deleteAnimeFiles(anime.id);
+        const state = await reloadLibraryAndSearchIndex();
+        await reloadLocalDataStats();
+
+        if (selectedAnimeIdRef.current === anime.id) {
+          setEpisodes([]);
+          setSelectedAnime(null);
+          navigateToView(episodeReturnView, "restore");
+        }
+
+        const deleted = `${summary.episodes_deleted} episode file${summary.episodes_deleted === 1 ? "" : "s"}`;
+        const bytes = summary.bytes_deleted > 0 ? ` (${formatSize(summary.bytes_deleted)})` : "";
+        if (summary.episodes_failed > 0) {
+          showToast("error", `Deleted ${deleted}${bytes}; ${summary.episodes_failed} failed.`);
+        } else {
+          showToast("success", `Deleted ${deleted}${bytes}.`);
+        }
+
+        if (state.anime.every((item) => item.id !== anime.id) && viewRef.current === "anime" && selectedCategoryId === anime.category_id) {
+          const remaining = state.anime.filter((item) => item.category_id === anime.category_id);
+          if (remaining.length === 0) {
+            navigateToView("categories", "restore");
+          }
+        }
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      episodeReturnView,
+      navigateToView,
+      reloadLibraryAndSearchIndex,
+      reloadLocalDataStats,
+      selectedCategoryId,
+      selectedEpisode?.anime_id,
+      showToast,
+    ],
+  );
+
+  const handleOpenAnimeFolderSummary = useCallback(
+    async (anime: AnimeSummary) => {
+      if (anime.episode_count === 0) {
+        showToast("error", "No episode folder is available.");
+        return;
+      }
+      try {
+        await openAnimeEpisodeFolder(anime.id);
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      }
+    },
+    [showToast],
+  );
+
+  const handleSetAnimeThumbnailSummary = useCallback(
+    async (anime: AnimeSummary) => {
+      const defaultPath = anime.first_episode_path
+        ? anime.first_episode_path.replace(/[/\\][^/\\]+$/, "")
+        : undefined;
+      const picked = await open({
+        directory: false,
+        multiple: false,
+        ...(defaultPath ? { defaultPath } : {}),
+        filters: [
+          {
+            name: "Image files",
+            extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"],
+          },
+        ],
+      });
+      if (typeof picked !== "string" || !picked) return;
+
+      await runAction(async () => {
+        await setAnimeCustomThumbnailPath(anime.id, picked);
+        await reloadLibrary();
+        if (selectedAnimeIdRef.current === anime.id) {
+          const state = await getLibraryState();
+          const updated = state.anime.find((item) => item.id === anime.id);
+          if (updated) setSelectedAnime(updated);
+        }
+        return "Custom thumbnail saved.";
+      });
+    },
+    [reloadLibrary, runAction],
   );
 
   const handleOpenEpisodeFolder = useCallback(async () => {
@@ -871,6 +1023,74 @@ function App() {
     selectedEpisode?.anime_id,
     showToast,
   ]);
+
+  const handleDeleteEpisode = useCallback(
+    async (episode: Episode) => {
+      if (!selectedAnime) return;
+      setBusy(true);
+      try {
+        if (selectedEpisode?.id === episode.id) {
+          await stopMpv().catch(() => undefined);
+          setSelectedEpisode(null);
+        }
+
+        const summary = await deleteEpisodeFiles(episode.id);
+        const state = await reloadLibraryAndSearchIndex();
+        await reloadLocalDataStats();
+
+        const updatedAnime = state.anime.find((item) => item.id === selectedAnime.id);
+        if (!updatedAnime) {
+          setSelectedAnime(null);
+          setEpisodes([]);
+          navigateToView(episodeReturnView, "restore");
+        } else {
+          setSelectedAnime(updatedAnime);
+          setEpisodes(await listEpisodes(updatedAnime.id));
+        }
+
+        if (summary.episodes_failed > 0) {
+          showToast("error", "Episode file could not be deleted.");
+        } else {
+          showToast("success", "Episode deleted.");
+        }
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      episodeReturnView,
+      navigateToView,
+      reloadLibraryAndSearchIndex,
+      reloadLocalDataStats,
+      selectedAnime,
+      selectedEpisode?.id,
+      showToast,
+    ],
+  );
+
+  const handleRenameEpisode = useCallback(
+    async (episode: Episode, newFileName: string) => {
+      const trimmed = newFileName.trim();
+      if (!trimmed) throw new Error("Filename is required.");
+
+      const separator = Math.max(episode.path.lastIndexOf("\\"), episode.path.lastIndexOf("/"));
+      const parent = separator >= 0 ? episode.path.slice(0, separator + 1) : "";
+      const newPath = `${parent}${trimmed}`;
+      if (newPath === episode.path) return;
+
+      const renames: RenameFileRequest[] = [{ old_path: episode.path, new_path: newPath }];
+      await validateFileRenames(renames);
+      await renameFiles(renames);
+      await rescanLibrary();
+      if (selectedAnime) {
+        await refreshAnimePageData(selectedAnime.id);
+        await reloadSearchIndex();
+      }
+    },
+    [refreshAnimePageData, reloadSearchIndex, selectedAnime],
+  );
 
   const handleBulkMoveAnime = useCallback(
     async (animeIds: number[], categoryId: number) => {
@@ -1090,6 +1310,46 @@ function App() {
       void reloadLibrary().catch((e) => showToast("error", errorMessage(e)));
     },
     [reloadLibrary, showToast],
+  );
+
+  const handleResetEpisodeProgress = useCallback(
+    async (episode: Episode) => {
+      if (!selectedAnime) return;
+      const wasLatestWatched = isLatestWatchedEpisode(episode, episodes, selectedAnime.tracker_offset);
+      const saved = await saveEpisodeProgress(episode.id, 0, episode.duration_seconds, false);
+      handleProgressSaved(saved);
+
+      if (wasLatestWatched && selectedAnime.anilist_id) {
+        const nextEpisodes = episodes.map((item) => (item.id === saved.id ? saved : item));
+        const nextProgress = maxWatchedDisplayEpisode(nextEpisodes, selectedAnime.tracker_offset);
+        const status = await setAnilistMediaProgress(selectedAnime.id, nextProgress);
+        setAnilistProgressUpdate({
+          animeId: selectedAnime.id,
+          progress: status.progress ?? nextProgress,
+          forceReplace: true,
+          updatedAt: Date.now(),
+        });
+      }
+    },
+    [episodes, handleProgressSaved, selectedAnime],
+  );
+
+  const handleMarkEpisodeWatched = useCallback(
+    async (episode: Episode) => {
+      if (!selectedAnime) return;
+      const saved = await saveEpisodeProgress(
+        episode.id,
+        episode.duration_seconds,
+        episode.duration_seconds,
+        true,
+      );
+      handleProgressSaved(saved);
+      if (selectedAnime.anilist_id) {
+        const result = await syncAnilistEpisodeProgress(episode.id);
+        handleAnilistProgressSynced(selectedAnime.id, result);
+      }
+    },
+    [handleAnilistProgressSynced, handleProgressSaved, selectedAnime],
   );
 
   const navigateToCategory = useCallback((categoryId: number) => {
@@ -1465,6 +1725,10 @@ function App() {
               onOpenCategory={navigateToCategory}
               onOpenAnime={(anime) => void openAnime(anime, "categories")}
               onOpenSettings={() => navigateToView("settings")}
+              onCreateCategory={(name) => handleCreateCategoryByName(name)}
+              onDeleteCategory={(category) => handleDeleteCategory(category)}
+              onMoveCategoryToPosition={(category, position) => void handleMoveCategoryToPosition(category, position)}
+              onSetDefaultCategory={(category) => void handleSetDefaultCategory(category)}
             />
           ) : null}
 
@@ -1472,10 +1736,15 @@ function App() {
             <AnimeGrid
               category={selectedCategory}
               anime={animeInCategory}
+              categories={library.categories}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               onBack={() => navigateToView("categories", "restore")}
               onOpenAnime={(anime) => void openAnime(anime, "anime")}
               onOpenSettings={() => navigateToView("settings")}
+              onDeleteAnime={(anime) => void handleDeleteAnimeSummary(anime)}
+              onMoveAnime={(anime, categoryId) => void handleMoveAnimeSummary(anime, categoryId)}
+              onOpenAnimeFolder={(anime) => void handleOpenAnimeFolderSummary(anime)}
+              onSetAnimeThumbnail={(anime) => void handleSetAnimeThumbnailSummary(anime)}
             />
           ) : null}
 
@@ -1540,6 +1809,10 @@ function App() {
               }}
               onOpenManualSkip={openManualSkip}
               onShowToast={showToast}
+              onDeleteEpisode={(episode) => void handleDeleteEpisode(episode)}
+              onRenameEpisode={(episode, newFileName) => handleRenameEpisode(episode, newFileName)}
+              onResetEpisodeProgress={(episode) => handleResetEpisodeProgress(episode)}
+              onMarkEpisodeWatched={(episode) => handleMarkEpisodeWatched(episode)}
             />
           ) : null}
 

@@ -829,6 +829,193 @@ pub fn delete_anime_files(
 }
 
 #[tauri::command]
+pub fn delete_episode_files(
+    db: State<'_, AppDatabase>,
+    episode_id: i64,
+) -> Result<DeleteAnimeFilesSummary, String> {
+    let (episode, anime_id, cover_path, custom_thumbnail_path, root_folders) = db.with_conn(|conn| {
+        let episode = conn
+            .query_row(
+                "SELECT id, path, size, anime_id
+                 FROM episodes
+                 WHERE id = ?1
+                   AND missing = 0",
+                params![episode_id],
+                |row| {
+                    Ok(DeletableEpisode {
+                        id: row.get(0)?,
+                        path: row.get(1)?,
+                        size: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Episode does not exist: {episode_id}"))?;
+        let anime_id: i64 = conn
+            .query_row(
+                "SELECT anime_id FROM episodes WHERE id = ?1",
+                params![episode_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let (cover_path, custom_thumbnail_path) = conn
+            .query_row(
+                "SELECT anilist_cover_path, custom_thumbnail_path FROM anime WHERE id = ?1",
+                params![anime_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or((None, None));
+        let root_folders = list_root_folders(conn)?
+            .into_iter()
+            .map(|root| PathBuf::from(root.path))
+            .collect::<Vec<_>>();
+        Ok((episode, anime_id, cover_path, custom_thumbnail_path, root_folders))
+    })?;
+
+    let mut deleted_episode_ids = Vec::new();
+    let mut bytes_deleted = 0_u64;
+    let mut episodes_failed = 0_i64;
+    let mut permanent_delete_used = false;
+    let mut dirs_to_cleanup = HashSet::new();
+
+    let path = PathBuf::from(&episode.path);
+    bytes_deleted += crate::scrub_preview::remove_scrub_sprite_cache(&episode.path).unwrap_or(0);
+
+    if !path.exists() {
+        deleted_episode_ids.push(episode.id);
+        if let Some(parent) = path.parent() {
+            dirs_to_cleanup.insert(parent.to_path_buf());
+        }
+    } else {
+        let size = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or_else(|_| episode.size.max(0) as u64);
+        match move_path_to_trash_or_delete(&path) {
+            Ok(permanent) => {
+                deleted_episode_ids.push(episode.id);
+                bytes_deleted += size;
+                permanent_delete_used |= permanent;
+                if let Some(parent) = path.parent() {
+                    dirs_to_cleanup.insert(parent.to_path_buf());
+                }
+            }
+            Err(_) => {
+                episodes_failed = 1;
+            }
+        }
+    }
+
+    cleanup_empty_dirs_after_deletions(dirs_to_cleanup, &root_folders);
+
+    let mut cover_deleted = false;
+    let mut cover_failed = false;
+    let mut clear_cover_path = false;
+    let episode_deleted = episodes_failed == 0 && !deleted_episode_ids.is_empty();
+
+    if episode_deleted {
+        let remaining = db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM episodes WHERE anime_id = ?1 AND missing = 0 AND id != ?2",
+                params![anime_id, episode_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())
+        })?;
+        if remaining == 0 {
+            if let Some(cover_path) = cover_path {
+                let cover_file = data_file_path(&db, &cover_path);
+                if cover_file.exists() {
+                    let size = fs::metadata(&cover_file)
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0);
+                    match move_path_to_trash_or_delete(&cover_file) {
+                        Ok(permanent) => {
+                            bytes_deleted += size;
+                            cover_deleted = true;
+                            clear_cover_path = true;
+                            permanent_delete_used |= permanent;
+                        }
+                        Err(_) => {
+                            cover_failed = true;
+                        }
+                    }
+                } else {
+                    clear_cover_path = true;
+                }
+            }
+        }
+    }
+
+    let mut remove_anime_row = false;
+
+    db.with_conn(|conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        if episodes_failed > 0 {
+            tx.commit().map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        tx.execute("DELETE FROM episodes WHERE id = ?1", params![episode_id])
+            .map_err(|e| e.to_string())?;
+
+        let remaining: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM episodes WHERE anime_id = ?1",
+                params![anime_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if remaining == 0 {
+            remove_anime_row = true;
+            op_ed::reset_anime_op_ed_analysis(&tx, anime_id)?;
+            tx.execute("DELETE FROM anime WHERE id = ?1", params![anime_id])
+                .map_err(|e| e.to_string())?;
+        } else if clear_cover_path {
+            tx.execute(
+                "UPDATE anime
+                 SET anilist_cover_path = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![anime_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        refresh_anime_latest_episode_at(conn)?;
+        Ok(())
+    })?;
+
+    if remove_anime_row {
+        if let Some(custom_thumbnail_path) = custom_thumbnail_path {
+            let path = PathBuf::from(&custom_thumbnail_path);
+            if path.exists() {
+                let size = fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+                if move_path_to_trash_or_delete(&path).is_ok() {
+                    bytes_deleted += size;
+                }
+            }
+        }
+    }
+
+    Ok(DeleteAnimeFilesSummary {
+        episodes_deleted: deleted_episode_ids.len() as i64,
+        episodes_failed,
+        bytes_deleted,
+        cover_deleted,
+        cover_failed,
+        permanent_delete_used,
+    })
+}
+
+#[tauri::command]
 pub fn validate_file_renames(
     db: State<'_, AppDatabase>,
     renames: Vec<RenameFileRequest>,
@@ -1064,18 +1251,30 @@ pub fn save_episode_progress(
              SET position_seconds = ?1,
                  duration_seconds = ?2,
                  watched = ?3,
-                 last_watched_at = CURRENT_TIMESTAMP,
+                 last_watched_at = CASE WHEN ?3 = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?4",
             params![position_seconds, duration_seconds, watched_flag, episode_id],
         )
         .map_err(|e| e.to_string())?;
+        let anime_id: i64 = conn
+            .query_row(
+                "SELECT anime_id FROM episodes WHERE id = ?1",
+                params![episode_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE anime
-             SET last_watched_at = CURRENT_TIMESTAMP,
+             SET last_watched_at = (
+                     SELECT MAX(last_watched_at)
+                     FROM episodes
+                     WHERE anime_id = ?1
+                       AND missing = 0
+                 ),
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = (SELECT anime_id FROM episodes WHERE id = ?1)",
-            params![episode_id],
+             WHERE id = ?1",
+            params![anime_id],
         )
         .map_err(|e| e.to_string())?;
         get_episode(conn, episode_id)

@@ -37,8 +37,11 @@ import {
   isEpisodeNumberKnown,
   progressPercent,
 } from "../utils";
+import { ConfirmModal } from "./ConfirmModal";
+import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { CustomDropdown } from "./CustomDropdown";
 import { FolderOpenIcon, ManualSkipIcon, SettingsIcon } from "./Icons";
+import { PromptModal } from "./PromptModal";
 import { ViewHeader } from "./ViewHeader";
 
 type AnilistProgressUpdate = {
@@ -135,6 +138,10 @@ export function EpisodeScreen(props: {
   onOpEdAnalysisUpdated: () => void;
   onOpenManualSkip: () => void;
   onShowToast: (kind: "success" | "error", message: string) => void;
+  onDeleteEpisode: (episode: Episode) => void;
+  onRenameEpisode: (episode: Episode, newFileName: string) => Promise<void>;
+  onResetEpisodeProgress: (episode: Episode) => Promise<void>;
+  onMarkEpisodeWatched: (episode: Episode) => Promise<void>;
 }) {
   const {
     anime,
@@ -160,6 +167,10 @@ export function EpisodeScreen(props: {
     onOpEdAnalysisUpdated,
     onOpenManualSkip,
     onShowToast,
+    onDeleteEpisode,
+    onRenameEpisode,
+    onResetEpisodeProgress,
+    onMarkEpisodeWatched,
   } = props;
   const jobsSnapshot = useJobsSnapshot();
   // Highlight whichever episode the Q hotkey would launch right now, so the
@@ -192,6 +203,11 @@ export function EpisodeScreen(props: {
   const [opEdResetBusy, setOpEdResetBusy] = useState(false);
   const [opEdRunBusy, setOpEdRunBusy] = useState(false);
   const [opEdError, setOpEdError] = useState<string | null>(null);
+  const { menu, openMenu, closeMenu } = useContextMenu();
+  const [renameEpisode, setRenameEpisode] = useState<Episode | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteEpisode, setDeleteEpisode] = useState<Episode | null>(null);
   const activeOpEdJob = useMemo(
     () => findActiveOpEdJob(jobsSnapshot, anime.id),
     [anime.id, jobsSnapshot],
@@ -222,8 +238,71 @@ export function EpisodeScreen(props: {
   );
   const selectedCategory = categories.find((category) => category.id === anime.category_id);
   const getRovingItemProps = useRovingListNavigation(episodes.length, {
-    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen,
+    enabled: !linkSearchOpen && !deleteConfirmOpen && !animeSettingsOpen && !renameEpisode && !deleteEpisode,
   });
+
+  const buildEpisodeMenuItems = useCallback(
+    (episode: Episode): ContextMenuItem[] => [
+      {
+        type: "submenu",
+        id: "progress",
+        label: "Progress",
+        items: [
+          {
+            id: "reset-progress",
+            label: "Reset",
+            onSelect: () => void onResetEpisodeProgress(episode),
+          },
+          {
+            id: "mark-watched",
+            label: "Watched",
+            disabled: episode.watched,
+            onSelect: () => void onMarkEpisodeWatched(episode),
+          },
+        ],
+      },
+      {
+        type: "action",
+        id: "rename-episode",
+        label: "Rename",
+        onSelect: () => {
+          setRenameError(null);
+          setRenameEpisode(episode);
+        },
+      },
+      { type: "separator", id: "delete-separator" },
+      {
+        type: "action",
+        id: "delete-episode",
+        label: "Delete",
+        danger: true,
+        onSelect: () => setDeleteEpisode(episode),
+      },
+    ],
+    [onMarkEpisodeWatched, onResetEpisodeProgress],
+  );
+
+  const submitEpisodeRename = useCallback(
+    async (newFileName: string) => {
+      if (!renameEpisode) return;
+      const trimmed = newFileName.trim();
+      if (!trimmed) {
+        setRenameError("Filename is required.");
+        return;
+      }
+      setRenameBusy(true);
+      setRenameError(null);
+      try {
+        await onRenameEpisode(renameEpisode, trimmed);
+        setRenameEpisode(null);
+      } catch (error) {
+        setRenameError(errorMessage(error));
+      } finally {
+        setRenameBusy(false);
+      }
+    },
+    [onRenameEpisode, renameEpisode],
+  );
 
   useEffect(() => {
     setLinkQuery(anime.title);
@@ -1177,6 +1256,7 @@ export function EpisodeScreen(props: {
               key={episode.id}
               className={`episode-row${episode.watched ? " episode-row--watched" : ""}${episode.id === quickPlayEpisodeId ? " episode-row--last" : ""}`}
               onClick={() => onPlay(episode)}
+              onContextMenu={(event) => openMenu(event, buildEpisodeMenuItems(episode))}
               title={episode.path}
               {...getRovingItemProps(episodeIndex)}
             >
@@ -1210,6 +1290,39 @@ export function EpisodeScreen(props: {
         })
         : null}
       </section>
+
+      <ContextMenu menu={menu} onClose={closeMenu} />
+
+      {deleteEpisode ? (
+        <ConfirmModal
+          title="Delete episode?"
+          description={`Delete "${deleteEpisode.file_name}"?`}
+          warning="The file will be moved to the trash when possible and removed from the library."
+          onConfirm={() => {
+            onDeleteEpisode(deleteEpisode);
+            setDeleteEpisode(null);
+          }}
+          onClose={() => setDeleteEpisode(null)}
+        />
+      ) : null}
+
+      {renameEpisode ? (
+        <PromptModal
+          title="Rename episode"
+          description="Rename the episode file on disk."
+          label="Filename"
+          initialValue={renameEpisode.file_name}
+          submitLabel="Rename"
+          busy={renameBusy}
+          error={renameError}
+          onSubmit={(value) => void submitEpisodeRename(value)}
+          onClose={() => {
+            if (renameBusy) return;
+            setRenameEpisode(null);
+            setRenameError(null);
+          }}
+        />
+      ) : null}
 
     </>
   );

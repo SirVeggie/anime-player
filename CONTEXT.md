@@ -27,7 +27,7 @@ view components. Per-screen UI lives in `src/components/`:
 `WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
 `EpisodeScreen.tsx`, `BulkEditScreen.tsx`, `JobsScreen.tsx`, `SettingsScreen.tsx` (plus the local
 `RuleEditor`), `PlayerView.tsx`, `ViewHeader.tsx`, `CustomDropdown.tsx`,
-`ToastStack.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
+`ToastStack.tsx`, `ContextMenu.tsx`, `PromptModal.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
 `EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
 
 - The library/settings UI is an original dark design. Only the video player
@@ -636,7 +636,7 @@ got. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `src/components/PlayerView.tsx` — mpv-backed player view and controls.
 - `src/components/ManualSkipScreen.tsx`, `src/components/TemplateRangeScrubber.tsx`
   — manual OP/ED template editor UI.
-- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ToastStack,icons}.tsx`
+- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ContextMenu,PromptModal,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src/volume.ts` — volume constants and clamping for
