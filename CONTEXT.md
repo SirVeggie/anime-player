@@ -99,8 +99,10 @@ view components. Per-screen UI lives in `src/components/`:
   `anime.latest_episode_at` descending. That field is stored on `anime` and
   recomputed after every library rescan as `MAX(episodes.updated_at)` per show
   (`db::refresh_anime_latest_episode_at`). On each app start, if at least one
-  root folder is configured, the app runs `rescan_library` once after the
-  initial `get_library_state` so the library and this timestamp stay current.
+  root folder is configured, the app schedules `rescan_library` once after the
+  initial `get_library_state` / auth / stats load and the first paint (idle
+  callback with timeout via `scheduleAfterAppReady`) so the library UI is
+  interactive before background scan work and job enqueue begin.
 - `src/api.ts` contains the Tauri command bindings and `src/types.ts` mirrors
   the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,

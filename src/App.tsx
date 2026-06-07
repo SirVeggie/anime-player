@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { diagnosticLog } from "./diagnosticLog";
+import { scheduleAfterAppReady } from "./scheduleAfterAppReady";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -195,6 +196,8 @@ function App() {
   const scrollPositionsRef = useRef(new Map<string, number>());
   /** Set by `PlayerView` when a session is active; used to flush SQLite before `destroy()` on window close. */
   const playbackProgressFlushRef = useRef<(() => Promise<void>) | null>(null);
+  /** Set during initial load; cleared when deferred startup rescan runs or user rescans manually. */
+  const pendingStartupRescanRef = useRef(false);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     const id = Date.now() + Math.random();
@@ -250,23 +253,12 @@ function App() {
         diagnosticLog("startup: loading local data stats");
         await reloadLocalDataStats();
         if (state.root_folders.length > 0) {
-          try {
-            diagnosticLog("startup: rescan_library begin");
-            const summary = await rescanLibrary();
-            diagnosticLog(
-              `startup: rescan_library ok (roots=${summary.roots_scanned}, imported=${summary.episodes_imported}, unmatched=${summary.unmatched_files})`,
-            );
-            await reloadLibraryAndSearchIndex();
-            await reloadLocalDataStats();
-          } catch (e) {
-            const msg = errorMessage(e);
-            diagnosticLog(`startup: rescan_library failed: ${msg}`, "ERROR");
-            showToast("error", msg);
-          }
+          pendingStartupRescanRef.current = true;
+          diagnosticLog("startup: rescan_library deferred until app is ready");
         } else {
           diagnosticLog("startup: skipping rescan (no root folders)");
         }
-        diagnosticLog("startup: complete");
+        diagnosticLog("startup: initial load complete");
       } catch (e) {
         const msg = errorMessage(e);
         diagnosticLog(`startup: fatal error: ${msg}`, "ERROR");
@@ -276,6 +268,33 @@ function App() {
       }
     })();
   }, [reloadAnilistAuth, reloadLibraryAndSearchIndex, reloadLocalDataStats, showToast]);
+
+  useEffect(() => {
+    if (loading || !pendingStartupRescanRef.current) return;
+
+    const cancelSchedule = scheduleAfterAppReady(() => {
+      if (!pendingStartupRescanRef.current) return;
+      pendingStartupRescanRef.current = false;
+
+      void (async () => {
+        try {
+          diagnosticLog("startup: rescan_library begin (deferred)");
+          const summary = await rescanLibrary();
+          diagnosticLog(
+            `startup: rescan_library ok (roots=${summary.roots_scanned}, imported=${summary.episodes_imported}, unmatched=${summary.unmatched_files})`,
+          );
+          await reloadLibraryAndSearchIndex();
+          await reloadLocalDataStats();
+        } catch (e) {
+          const msg = errorMessage(e);
+          diagnosticLog(`startup: rescan_library failed: ${msg}`, "ERROR");
+          showToast("error", msg);
+        }
+      })();
+    });
+
+    return cancelSchedule;
+  }, [loading, reloadLibraryAndSearchIndex, reloadLocalDataStats, showToast]);
 
   const handleAnilistCallback = useCallback(
     async (url: string) => {
@@ -630,6 +649,7 @@ function App() {
   );
 
   const handleRescan = useCallback(async () => {
+    pendingStartupRescanRef.current = false;
     await runAction(async () => {
       const summary = await rescanLibrary();
       const state = await reloadLibraryAndSearchIndex();
