@@ -223,6 +223,16 @@ fn mpv_get_time_pos(state: State<'_, AppState>) -> Result<f64, String> {
 
 #[cfg(windows)]
 #[tauri::command]
+fn mpv_get_playback_end_state(
+    state: State<'_, AppState>,
+) -> Result<mpv::MpvPlaybackEndState, String> {
+    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
+    let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
+    m.playback_end_state()
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn mpv_seek(
     state: State<'_, AppState>,
     seconds: f64,
@@ -525,6 +535,7 @@ pub fn run() {
         mpv_add_subtitle_file,
         mpv_get_video_geometry,
         mpv_get_time_pos,
+        mpv_get_playback_end_state,
         mpv_seek,
         mpv_seek_relative,
         mpv_set_layout,

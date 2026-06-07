@@ -19,7 +19,7 @@ mod event_loop;
 mod ffi;
 mod handle;
 
-pub use handle::{MpvHandle, MpvTrack, MpvVideoGeometry};
+pub use handle::{MpvHandle, MpvPlaybackEndState, MpvTrack, MpvVideoGeometry};
 
 fn windows_path_key(path: &str) -> String {
     path.replace('/', "\\").to_ascii_lowercase()

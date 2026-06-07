@@ -36,6 +36,14 @@ pub struct MpvVideoGeometry {
     pub height: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct MpvPlaybackEndState {
+    pub time_pos: f64,
+    pub duration: f64,
+    pub eof_reached: bool,
+    pub paused: bool,
+}
+
 // libmpv's API is documented as thread-safe (any thread can call mpv_*
 // functions on the same context). Sending the raw pointer between
 // threads is fine.
@@ -74,6 +82,7 @@ impl MpvHandle {
             // Keep the last frame visible after EOF; let us decide what
             // to do (instead of mpv tearing down the window).
             set_option(ctx, "keep-open", "yes")?;
+            set_option(ctx, "keep-open-pause", "yes")?;
             // We render our own HTML controls; mpv's OSC would draw on
             // top of them.
             set_option(ctx, "osc", "no")?;
@@ -229,6 +238,16 @@ impl MpvHandle {
         self.get_property_f64("time-pos")
     }
 
+    /// Snapshot of properties the UI uses to detect end-of-episode after seeks.
+    pub fn playback_end_state(&self) -> Result<MpvPlaybackEndState, String> {
+        Ok(MpvPlaybackEndState {
+            time_pos: self.time_pos().unwrap_or(0.0),
+            duration: self.get_property_f64("duration").unwrap_or(0.0),
+            eof_reached: self.get_property_flag("eof-reached").unwrap_or(false),
+            paused: self.get_property_flag("pause").unwrap_or(false),
+        })
+    }
+
     fn get_property_f64(&self, name: &str) -> Result<f64, String> {
         let ctx = self.ctx()?;
         let c_name = cstring(name)?;
@@ -245,6 +264,25 @@ impl MpvHandle {
             Err(format!("mpv_get_property({name}) failed: {rc}"))
         } else {
             Ok(value)
+        }
+    }
+
+    fn get_property_flag(&self, name: &str) -> Result<bool, String> {
+        let ctx = self.ctx()?;
+        let c_name = cstring(name)?;
+        let mut value = 0_i32;
+        let rc = unsafe {
+            mpv_get_property(
+                ctx,
+                c_name.as_ptr(),
+                mpv_format::MPV_FORMAT_FLAG,
+                (&mut value as *mut i32).cast(),
+            )
+        };
+        if rc < 0 {
+            Err(format!("mpv_get_property({name}) failed: {rc}"))
+        } else {
+            Ok(value != 0)
         }
     }
 

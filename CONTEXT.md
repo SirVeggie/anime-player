@@ -392,7 +392,12 @@ view components. Per-screen UI lives in `src/components/`:
   player, App skips the open-fade and just flips `view` to `"player"`
   so PlayerView's `visible` effect handles the unpause.   At EOF the
   frontend saves progress, loads the next episode if one exists, or stops
-  mpv and returns to the episode list. When advancing to the next episode
+  mpv and returns to the episode list. Natural EOF uses `mpv://eof-reached`.
+  Seeks (hotkeys or scrubber release) advance proactively when the target
+  lands within one second of EOF or past it — without waiting on mpv EOF
+  properties. A short poll loop retries natural EOF advance if `mpv_load`
+  is slow.
+  When advancing to the next episode
   from EOF or via **Next** while the current episode is past the near-end
   threshold (same 90% as the watched flag), the next episode’s saved
   position is cleared so playback starts from the beginning.
@@ -486,7 +491,7 @@ view components. Per-screen UI lives in `src/components/`:
     background event-loop thread. `MpvHandle::new(hwnd, app_handle)`
     sets the `wid` option to the Tauri main HWND **before**
     `mpv_initialize`, plus `vo=gpu-next`, `gpu-context=d3d11`,
-    `hwdec=auto-safe`, `keep-open=yes`, `osc=no`,
+    `hwdec=auto-safe`, `keep-open=yes`, `keep-open-pause=yes`, `osc=no`,
     `input-default-bindings=yes`, `input-vo-keyboard=yes`.
   - `mpv/event_loop.rs` — observes `time-pos`, `duration`, `pause`,
     `eof-reached` and republishes each property change as a Tauri
@@ -499,7 +504,7 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_select_audio_track(track_id)`,
   `mpv_select_subtitle_track(track_id)`,
   `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
-  `mpv_get_time_pos()`, `mpv_set_volume(volume)`, and `mpv_stop()`.
+  `mpv_get_time_pos()`, `mpv_get_playback_end_state()`, `mpv_set_volume(volume)`, and `mpv_stop()`.
 - `scrub_preview.rs` — sprite cache I/O and ffmpeg generation;
   `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
 - `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,

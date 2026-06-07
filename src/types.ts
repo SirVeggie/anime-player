@@ -137,6 +137,13 @@ export type MpvVideoGeometry = {
   height: number;
 };
 
+export type MpvPlaybackEndState = {
+  time_pos: number;
+  duration: number;
+  eof_reached: boolean;
+  paused: boolean;
+};
+
 export type LibraryState = {
   db_path: string;
   root_folders: RootFolder[];

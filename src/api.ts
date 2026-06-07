@@ -13,6 +13,7 @@ import type {
   LocalDataCleanupSummary,
   LocalDataStats,
   MpvTrack,
+  MpvPlaybackEndState,
   MpvVideoGeometry,
   AnimeOpEdAnalysisSummary,
   ManualOpEdTemplate,
@@ -363,6 +364,10 @@ export function getMpvVideoGeometry(): Promise<MpvVideoGeometry | null> {
 
 export function getMpvTimePos(): Promise<number> {
   return invoke("mpv_get_time_pos");
+}
+
+export function getMpvPlaybackEndState(): Promise<MpvPlaybackEndState> {
+  return invoke("mpv_get_playback_end_state");
 }
 
 export function stopMpv(): Promise<void> {

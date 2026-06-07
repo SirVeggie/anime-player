@@ -46,6 +46,12 @@ const PLAYER_SIDEBAR_PX = 0;
 const HIDDEN_PLAYER_SIDEBAR_PX = 100_000;
 /** Same ratio as `persistProgress` marking an episode watched without EOF. */
 const NEAR_END_PROGRESS_RATIO = 0.9;
+/** Seeking to within this many seconds of EOF (or past it) advances to the next episode. */
+const SEEK_NEAR_EOF_THRESHOLD_SECONDS = 1;
+const END_ADVANCE_POLL_MS = 400;
+const END_ADVANCE_MAX_POLLS = 30;
+/** Retry if an advance was started but mpv/file-loaded never completed. */
+const EOF_HANDLING_STALL_MS = 8000;
 /** Brief revisits to an already-watched episode do not overwrite saved progress. */
 const WATCHED_PEEK_MAX_MS = 5 * 60 * 1000;
 const appWindow = getCurrentWindow();
@@ -65,6 +71,18 @@ const SCRUB_PREVIEW_MIN_INTERVAL_MS = 50;
 const SCRUB_PREVIEW_MIN_DELTA_SECONDS = 0.25;
 /** mpv may emit pause / playback-restart after `seek` returns; hold the scrub session until then. */
 const SCRUB_SETTLE_MS = 200;
+
+function effectivePlaybackDuration(duration: number, episodeDurationSeconds: number): number {
+  if (duration > 0) return duration;
+  if (episodeDurationSeconds > 0) return episodeDurationSeconds;
+  return 0;
+}
+
+/** True when a seek target lands within the near-EOF window or past the file end. */
+function seekTargetTriggersEpisodeEnd(targetSeconds: number, durationSeconds: number): boolean {
+  if (durationSeconds <= 0) return false;
+  return targetSeconds >= durationSeconds - SEEK_NEAR_EOF_THRESHOLD_SECONDS;
+}
 
 function SeekBar(props: {
   duration: number;
@@ -401,6 +419,12 @@ export function PlayerView(props: {
   const pendingResumeSecondsRef = useRef<number | null>(null);
   const controlsHideTimerRef = useRef<number | null>(null);
   const handlingEofRef = useRef(false);
+  const handlingEofStartedAtMsRef = useRef(0);
+  const advancingFromEpisodeIdRef = useRef<number | null>(null);
+  const endAdvancePollRef = useRef<number | null>(null);
+  const endAdvancePollCountRef = useRef(0);
+  const endAdvanceArmedRef = useRef(false);
+  const seekHotkeyEpochRef = useRef(0);
   const eventListenersReadyRef = useRef(false);
   const [eventListenersReadyVersion, setEventListenersReadyVersion] = useState(0);
   // Set by handlePlaybackFinished's auto-advance branch so the [episode.id]
@@ -794,26 +818,43 @@ export function PlayerView(props: {
     }
   }, []);
 
+  const clearEndAdvancePolling = useCallback(() => {
+    if (endAdvancePollRef.current !== null) {
+      window.clearInterval(endAdvancePollRef.current);
+      endAdvancePollRef.current = null;
+    }
+    endAdvancePollCountRef.current = 0;
+    endAdvanceArmedRef.current = false;
+  }, []);
+
   const handlePlaybackFinished = useCallback(() => {
-    if (handlingEofRef.current) return;
+    const currentEpisodeId = playbackRef.current.episode.id;
+    if (advancingFromEpisodeIdRef.current === currentEpisodeId) return;
+    if (handlingEofRef.current) {
+      if (Date.now() - handlingEofStartedAtMsRef.current < EOF_HANDLING_STALL_MS) return;
+      handlingEofRef.current = false;
+    }
+
     handlingEofRef.current = true;
+    handlingEofStartedAtMsRef.current = Date.now();
+    advancingFromEpisodeIdRef.current = currentEpisodeId;
+
     const next = playlistRef.current[selectedIndexRef.current + 1];
     void (async () => {
       try {
-        await persistProgress(true, { deferAnilistSync: true });
         if (next) {
-          // Skip the load-fade between episodes — the previous episode's
-          // outro/credits already ended on a clean note, so flashing to
-          // black is more disruptive than just transitioning straight into
-          // the next file.
           seamlessAdvanceRef.current = true;
           pendingResumeSecondsRef.current = null;
+          await invoke("mpv_load", { path: next.path });
+          loadedPathRef.current = next.path;
+          handlingEofRef.current = false;
+          advancingFromEpisodeIdRef.current = null;
+          clearEndAdvancePolling();
+          void persistProgress(true, { deferAnilistSync: true }).catch((err) =>
+            propsRef.current.onError(errorMessage(err)),
+          );
           try {
-            const [saved] = await Promise.all([
-              saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
-              invoke("mpv_load", { path: next.path }),
-            ]);
-            loadedPathRef.current = next.path;
+            const saved = await saveEpisodeProgress(next.id, 0, next.duration_seconds, false);
             propsRef.current.onProgressSaved(saved);
             propsRef.current.onSelectEpisode(saved);
           } catch (err) {
@@ -823,18 +864,93 @@ export function PlayerView(props: {
           return;
         }
 
+        await persistProgress(true, { deferAnilistSync: true });
         await invoke("mpv_stop").catch((err) => propsRef.current.onError(errorMessage(err)));
         handlingEofRef.current = false;
+        advancingFromEpisodeIdRef.current = null;
+        clearEndAdvancePolling();
         loadedPathRef.current = null;
         setPosition(0);
         setDuration(0);
         setPaused(true);
         propsRef.current.onClose();
       } catch (err) {
+        handlingEofRef.current = false;
+        advancingFromEpisodeIdRef.current = null;
         propsRef.current.onError(errorMessage(err));
       }
     })();
-  }, [persistProgress]);
+  }, [clearEndAdvancePolling, persistProgress]);
+
+  const pollForEpisodeEndAdvance = useCallback(async () => {
+    if (playbackSuspendedRef.current || seekInteractingRef.current) return;
+    if (!endAdvanceArmedRef.current) {
+      clearEndAdvancePolling();
+      return;
+    }
+
+    if (
+      handlingEofRef.current &&
+      Date.now() - handlingEofStartedAtMsRef.current > EOF_HANDLING_STALL_MS
+    ) {
+      handlingEofRef.current = false;
+      advancingFromEpisodeIdRef.current = null;
+    }
+
+    endAdvancePollCountRef.current += 1;
+    if (endAdvancePollCountRef.current > END_ADVANCE_MAX_POLLS) {
+      clearEndAdvancePolling();
+      handlingEofRef.current = false;
+      advancingFromEpisodeIdRef.current = null;
+      return;
+    }
+
+    handlePlaybackFinished();
+  }, [clearEndAdvancePolling, handlePlaybackFinished]);
+
+  const startEndAdvancePolling = useCallback(() => {
+    if (endAdvancePollRef.current !== null) return;
+    endAdvancePollCountRef.current = 0;
+    endAdvancePollRef.current = window.setInterval(() => {
+      void pollForEpisodeEndAdvance();
+    }, END_ADVANCE_POLL_MS);
+  }, [pollForEpisodeEndAdvance]);
+
+  const armAndAdvanceFromEof = useCallback(() => {
+    endAdvanceArmedRef.current = true;
+    startEndAdvancePolling();
+    handlePlaybackFinished();
+  }, [handlePlaybackFinished, startEndAdvancePolling]);
+
+  const maybeAdvanceFromSeekTarget = useCallback((targetSeconds: number): boolean => {
+    const { duration, episode } = playbackRef.current;
+    const effectiveDuration = effectivePlaybackDuration(duration, episode.duration_seconds);
+    if (!seekTargetTriggersEpisodeEnd(targetSeconds, effectiveDuration)) return false;
+    handlePlaybackFinished();
+    return true;
+  }, [handlePlaybackFinished]);
+
+  const armAndAdvanceFromEofRef = useRef(armAndAdvanceFromEof);
+  armAndAdvanceFromEofRef.current = armAndAdvanceFromEof;
+  const maybeAdvanceFromSeekTargetRef = useRef(maybeAdvanceFromSeekTarget);
+  maybeAdvanceFromSeekTargetRef.current = maybeAdvanceFromSeekTarget;
+  const clearEndAdvancePollingRef = useRef(clearEndAdvancePolling);
+  clearEndAdvancePollingRef.current = clearEndAdvancePolling;
+
+  const seekRelativeFromHotkey = useCallback((delta: number) => {
+    const { position, duration, episode } = playbackRef.current;
+    const effectiveDuration = effectivePlaybackDuration(duration, episode.duration_seconds);
+    const targetSeconds = position + delta;
+    if (seekTargetTriggersEpisodeEnd(targetSeconds, effectiveDuration)) {
+      seekHotkeyEpochRef.current += 1;
+      maybeAdvanceFromSeekTargetRef.current(targetSeconds);
+      return;
+    }
+    seekHotkeyEpochRef.current += 1;
+    void invoke("mpv_seek_relative", { delta }).catch((err) =>
+      propsRef.current.onError(errorMessage(err)),
+    );
+  }, []);
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -865,7 +981,12 @@ export function PlayerView(props: {
           "mpv://pause",
           (e) => {
             if (playbackSuspendedRef.current || scrubSessionRef.current) return;
-            if (typeof e.payload === "boolean") setPaused(e.payload);
+            if (typeof e.payload === "boolean") {
+              setPaused(e.payload);
+              if (!e.payload) {
+                clearEndAdvancePollingRef.current();
+              }
+            }
           },
         ],
         [
@@ -874,7 +995,7 @@ export function PlayerView(props: {
             if (playbackSuspendedRef.current) return;
             if (e.payload === true) {
               setPaused(true);
-              handlePlaybackFinished();
+              armAndAdvanceFromEofRef.current();
             }
           },
         ],
@@ -955,6 +1076,8 @@ export function PlayerView(props: {
     sessionOpenedAsWatchedRef.current = episode.watched;
     sessionEpisodeSnapshotRef.current = episode;
     userRequestedStartResetRef.current = false;
+    advancingFromEpisodeIdRef.current = null;
+    clearEndAdvancePolling();
     setPosition(episode.position_seconds || 0);
     setDuration(episode.duration_seconds || 0);
     setTracks([]);
@@ -970,7 +1093,12 @@ export function PlayerView(props: {
     } else {
       setVideoCompositorRevealed(false);
     }
-  }, [episode.id]);
+  }, [clearEndAdvancePolling, episode.id]);
+
+  useEffect(() => {
+    if (!visible) clearEndAdvancePolling();
+    return clearEndAdvancePolling;
+  }, [clearEndAdvancePolling, visible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1115,6 +1243,14 @@ export function PlayerView(props: {
       scrubSeekEpochRef.current += 1;
       const endId = (scrubEndIdRef.current += 1);
       const resume = scrubSessionRef.current?.resumeAfter ?? false;
+      if (maybeAdvanceFromSeekTarget(seconds)) {
+        if (scrubEndIdRef.current === endId) {
+          scrubSessionRef.current = null;
+          seekInteractingRef.current = false;
+          setSeekInteracting(false);
+        }
+        return;
+      }
       void (async () => {
         try {
           await invoke("mpv_seek", { seconds, keyframe: true });
@@ -1142,7 +1278,7 @@ export function PlayerView(props: {
         }
       })();
     },
-    [onError],
+    [maybeAdvanceFromSeekTarget, onError],
   );
 
   const selectAudioTrack = useCallback(
@@ -1373,44 +1509,32 @@ export function PlayerView(props: {
       }
       if (e.code === "ArrowLeft") {
         e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: -5 }).catch((err) =>
-          onError(errorMessage(err)),
-        );
+        seekRelativeFromHotkey(-5);
         return;
       }
       if (e.code === "ArrowRight") {
         e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: 5 }).catch((err) =>
-          onError(errorMessage(err)),
-        );
+        seekRelativeFromHotkey(5);
         return;
       }
       if (e.code === "Numpad4") {
         e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: -28 }).catch((err) =>
-          onError(errorMessage(err)),
-        );
+        seekRelativeFromHotkey(-28);
         return;
       }
       if (e.code === "Numpad6") {
         e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: 28 }).catch((err) =>
-          onError(errorMessage(err)),
-        );
+        seekRelativeFromHotkey(28);
         return;
       }
       if (e.code === "Numpad7") {
         e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: -85 }).catch((err) =>
-          onError(errorMessage(err)),
-        );
+        seekRelativeFromHotkey(-85);
         return;
       }
       if (e.code === "Numpad9") {
         e.preventDefault();
-        void invoke("mpv_seek_relative", { delta: 85 }).catch((err) =>
-          onError(errorMessage(err)),
-        );
+        seekRelativeFromHotkey(85);
         return;
       }
       if (e.code === "KeyW") {
@@ -1469,9 +1593,9 @@ export function PlayerView(props: {
     clearControlsHideTimer,
     hidePlayer,
     loadSibling,
-    onError,
     onTogglePause,
     scheduleControlsHide,
+    seekRelativeFromHotkey,
     toggleFullscreen,
     visible,
   ]);
