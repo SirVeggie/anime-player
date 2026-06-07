@@ -2864,8 +2864,9 @@ pub fn clear_episode_op_ed_segments_for_anime(conn: &Connection, anime_id: i64) 
 }
 
 /// Manual template list order: OP before ED, then creation order (`id`) within each kind.
+/// Table alias `t` is required — `load_manual_templates` joins `episodes`.
 const MANUAL_TEMPLATE_LIST_ORDER: &str =
-    "CASE kind WHEN 'op' THEN 0 WHEN 'ed' THEN 1 ELSE 2 END, id";
+    "CASE t.kind WHEN 'op' THEN 0 WHEN 'ed' THEN 1 ELSE 2 END, t.id";
 
 fn load_manual_templates(conn: &Connection, anime_id: i64) -> Result<Vec<ManualTemplateRow>, String> {
     let mut stmt = conn
@@ -2928,17 +2929,51 @@ fn ensure_manual_template_fingerprint_sync(
     Ok(fp)
 }
 
-fn load_manual_templates_with_fingerprints(
+/// Fast gate before queueing rematch: templates exist and at least one has a source episode.
+pub fn validate_manual_templates_for_rematch(
+    conn: &Connection,
+    anime_id: i64,
+) -> Result<(), String> {
+    let templates = load_manual_templates(conn, anime_id)?;
+    if templates.is_empty() {
+        return Err("no manual templates to rematch".to_string());
+    }
+    let missing_source: Vec<String> = templates
+        .iter()
+        .filter(|t| t.source_path.is_empty())
+        .map(|t| format!("template #{} has no source episode path", t.id))
+        .collect();
+    if missing_source.len() == templates.len() {
+        return Err(format!(
+            "manual templates cannot be rematched: {}",
+            missing_source.join("; ")
+        ));
+    }
+    Ok(())
+}
+
+pub fn load_manual_templates_with_fingerprints(
     conn: &Connection,
     anime_id: i64,
 ) -> Result<Vec<(ManualTemplateRow, Fingerprint)>, String> {
     let mut templates = load_manual_templates(conn, anime_id)?;
+    if templates.is_empty() {
+        return Err("no manual templates to rematch".to_string());
+    }
     let mut out = Vec::with_capacity(templates.len());
+    let mut errors = Vec::new();
     for template in &mut templates {
         match ensure_manual_template_fingerprint_sync(conn, template) {
             Ok(fp) => out.push((template.clone(), fp)),
-            Err(_) => continue,
+            Err(e) => errors.push(format!("template #{}: {e}", template.id)),
         }
+    }
+    if out.is_empty() {
+        return Err(format!(
+            "could not load fingerprints for {} manual template(s): {}",
+            errors.len(),
+            errors.join("; ")
+        ));
     }
     Ok(out)
 }
@@ -2957,9 +2992,9 @@ pub fn list_manual_op_ed_templates(
 
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT id, kind, start_sec, duration_sec, source_episode_ids
-             FROM op_ed_templates
-             WHERE anime_id = ?1 AND source = 'manual'
+            "SELECT t.id, t.kind, t.start_sec, t.duration_sec, t.source_episode_ids
+             FROM op_ed_templates t
+             WHERE t.anime_id = ?1 AND t.source = 'manual'
              ORDER BY {MANUAL_TEMPLATE_LIST_ORDER}"
         ))
         .map_err(|e| e.to_string())?;
@@ -3094,7 +3129,8 @@ pub fn update_manual_op_ed_template(
     let (_, fp_key) = save_manual_template_fingerprint(&ep.path, start_sec, duration_sec)?;
     conn.execute(
         "UPDATE op_ed_templates
-         SET start_sec = ?2, duration_sec = ?3, confidence = 1.0, fingerprint_cache_key = ?4
+         SET start_sec = ?2, duration_sec = ?3, confidence = 1.0,
+             fingerprint_cache_key = ?4, created_at = CURRENT_TIMESTAMP
          WHERE id = ?1",
         params![template_id, start_sec, duration_sec, fp_key],
     )
@@ -3203,11 +3239,11 @@ pub fn run_manual_op_ed_rematch(
     on_step: impl Fn(u32, u32, &str),
 ) -> Result<(), String> {
     let episodes = db.with_conn(|conn| load_episodes(conn, anime_id))?;
+    if episodes.is_empty() {
+        return Err("no episodes to rematch".to_string());
+    }
     let templates =
         db.with_conn(|conn| load_manual_templates_with_fingerprints(conn, anime_id))?;
-    if templates.is_empty() {
-        return Err("no manual templates to rematch".to_string());
-    }
 
     db.with_conn(|conn| clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
     db.with_conn(|conn| ensure_pending_segments_for_anime(conn, anime_id))?;
@@ -3241,12 +3277,12 @@ pub fn run_manual_op_ed_rematch(
         if cancel.load(Ordering::Relaxed) {
             return Err("Manual OP/ED rematch cancelled".to_string());
         }
-        let duration = if ep.duration_seconds > 0.0 {
-            ep.duration_seconds
-        } else {
-            let path = normalized_video_path(&ep.path)?;
-            probe_duration(&path)?
+        let op_ed_ep = OpEdEpisode {
+            id: ep.id,
+            path: ep.path.clone(),
+            duration_seconds: ep.duration_seconds,
         };
+        let duration = episode_duration_seconds(&op_ed_ep)?;
         let extract_len = full_episode_extract_len(duration);
         let (candidate_key, candidate_fp) =
             ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
@@ -3707,5 +3743,37 @@ mod tests {
         assert!(!rerun[0].options.rematch_matched);
         assert!(!rerun[0].options.demote_matched_for_blocks);
         assert!(!rerun[0].options.init_anime_state);
+    }
+
+    #[test]
+    fn manual_rematch_kind_step_count_is_at_least_one_per_kind() {
+        let templates = vec![(
+            ManualTemplateRow {
+                id: 1,
+                kind: SegmentKind::Op,
+                start_sec: 0.0,
+                duration_sec: 90.0,
+                fingerprint_cache_key: "k".to_string(),
+                source_path: "/ep.mkv".to_string(),
+            },
+            Fingerprint { values: vec![1] },
+        )];
+        assert_eq!(manual_rematch_kind_step_count(&templates, SegmentKind::Op), 1);
+        assert_eq!(manual_rematch_kind_step_count(&templates, SegmentKind::Ed), 1);
+    }
+
+    #[test]
+    fn manual_rematch_kind_step_count_scales_with_template_count() {
+        let row = ManualTemplateRow {
+            id: 1,
+            kind: SegmentKind::Op,
+            start_sec: 0.0,
+            duration_sec: 90.0,
+            fingerprint_cache_key: "k".to_string(),
+            source_path: "/ep.mkv".to_string(),
+        };
+        let fp = Fingerprint { values: vec![1] };
+        let templates = vec![(row.clone(), fp.clone()), (row, fp)];
+        assert_eq!(manual_rematch_kind_step_count(&templates, SegmentKind::Op), 2);
     }
 }

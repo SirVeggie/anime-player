@@ -77,6 +77,7 @@ enum JobKind {
         episode: OpEdEpisode,
         /// Fingerprint was already on disk at job start — do not stagger the next chroma.
         skip_volume_stagger: bool,
+        cache_requirement: op_ed::OpEdChromaCacheRequirement,
     },
     OpEdDetect {
         anime_id: i64,
@@ -876,6 +877,7 @@ impl JobManager {
             kind: JobKind::OpEdChroma {
                 episode: ep.clone(),
                 skip_volume_stagger: false,
+                cache_requirement,
             },
             follow_ups: Vec::new(),
             prerequisite_job_ids: Vec::new(),
@@ -902,12 +904,8 @@ impl JobManager {
         request: EnqueueOpEdDetectJob,
     ) -> Result<EnqueueJobResult, String> {
         let chroma_priority = request.priority;
-        if let Some(existing_id) = self.active_op_ed_detect_job_id(request.anime_id) {
-            self.bump_queued_chroma_for_anime(db, request.anime_id, chroma_priority)?;
-            self.ensure_op_ed_detect_jobs_high_for_anime(request.anime_id)?;
-            return Ok(EnqueueJobResult::queued(Some(existing_id)));
-        }
 
+        // Manual skip templates own matching — do not return a stale auto-detect job.
         let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, request.anime_id))?;
         if has_manual {
             return self.enqueue_manual_op_ed_rematch(
@@ -916,6 +914,12 @@ impl JobManager {
                 request.anime_title.as_deref(),
                 chroma_priority,
             );
+        }
+
+        if let Some(existing_id) = self.active_op_ed_detect_job_id(request.anime_id) {
+            self.bump_queued_chroma_for_anime(db, request.anime_id, chroma_priority)?;
+            self.ensure_op_ed_detect_jobs_high_for_anime(request.anime_id)?;
+            return Ok(EnqueueJobResult::queued(Some(existing_id)));
         }
 
         let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
@@ -1142,6 +1146,8 @@ impl JobManager {
             }
         }
 
+        db.with_conn(|conn| op_ed::validate_manual_templates_for_rematch(conn, anime_id))?;
+
         let title = anime_title
             .map(str::trim)
             .filter(|t| !t.is_empty())
@@ -1149,6 +1155,10 @@ impl JobManager {
             .unwrap_or_else(|| format!("Anime #{anime_id}"));
 
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, anime_id))?;
+        if episodes.is_empty() {
+            self.finish_op_ed_enqueue_batch();
+            return Err("no episodes to rematch".to_string());
+        }
         let mut prerequisite_job_ids: Vec<String> = Vec::new();
         for ep in &episodes {
             if op_ed::op_ed_chroma_cache_satisfied(
@@ -1219,10 +1229,11 @@ impl JobManager {
         anime_id: i64,
         anime_title: Option<String>,
     ) -> Result<op_ed::PrepareManualOpEdRematchResult, String> {
-        db.with_conn(|conn| op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
         let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, anime_id))?;
         let title = anime_title.as_deref();
         if has_manual {
+            db.with_conn(|conn| op_ed::validate_manual_templates_for_rematch(conn, anime_id))?;
+            db.with_conn(|conn| op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
             let result =
                 self.enqueue_manual_op_ed_rematch(db, anime_id, title, JobPriority::Medium)?;
             Ok(op_ed::PrepareManualOpEdRematchResult {
@@ -1230,6 +1241,7 @@ impl JobManager {
                 used_manual_templates: true,
             })
         } else {
+            db.with_conn(|conn| op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
             let result = self.enqueue_op_ed_auto_rematch(db, anime_id, title)?;
             Ok(op_ed::PrepareManualOpEdRematchResult {
                 job_id: result.job_id,
@@ -1465,8 +1477,8 @@ impl JobManager {
         if record.view.status != JobStatus::Queued {
             return;
         }
-        let chroma_cache_hit = matches!(&record.kind, JobKind::OpEdChroma { episode, .. } if {
-            op_ed::full_episode_fingerprint_cached_for_enqueue(episode).unwrap_or(false)
+        let chroma_cache_hit = matches!(&record.kind, JobKind::OpEdChroma { episode, cache_requirement, .. } if {
+            op_ed::op_ed_chroma_cache_satisfied(episode, *cache_requirement).unwrap_or(false)
         });
         if let JobKind::OpEdChroma {
             skip_volume_stagger,
@@ -1527,6 +1539,7 @@ impl JobManager {
             JobKind::OpEdChroma {
                 episode,
                 skip_volume_stagger: true,
+                ..
             } => Some(episode.path.clone()),
             _ => None,
         });
