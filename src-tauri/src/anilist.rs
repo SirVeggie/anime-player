@@ -717,7 +717,7 @@ async fn get_media_status(
             status
             episodes
             meanScore
-            description(asHtml: false)
+            description(asHtml: true)
             mediaListEntry {
               progress
               score

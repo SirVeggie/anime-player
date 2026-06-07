@@ -144,7 +144,9 @@ view components. Per-screen UI lives in `src/components/`:
   debounced personal score input that writes back to AniList; when not logged in
   it shows `Episodes: total` and read-only community mean score instead. The
   synopsis from AniList fills the banner's middle column with a **Show more**
-  control when clamped. Cached media status includes `status` (e.g. `RELEASING`);
+  control when clamped. AniList returns HTML markup (`<i>`, `<br>`, etc.); the UI
+  sanitizes to a small tag whitelist before rendering. Cached media status includes
+  `status` (e.g. `RELEASING`);
   **missing episode** counts and episode-list gap separators use AniList total
   episodes to fill holes in the local sequence, but skip trailing gaps while
   status is `RELEASING` so unreleased episodes are not flagged. Local watched progress syncs on EOF / near-end saves only

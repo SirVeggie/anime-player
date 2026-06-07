@@ -522,7 +522,12 @@
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.45;
-  white-space: pre-wrap;
+}
+
+.anime-detail-summary-text i,
+.anime-detail-summary-text em {
+  color: rgba(232, 238, 247, 0.92);
+  font-style: italic;
 }
 
 .anime-detail-summary-text--clamped {

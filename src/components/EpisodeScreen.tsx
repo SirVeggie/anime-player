@@ -33,6 +33,7 @@ import {
   formatTime,
   isEpisodeNumberKnown,
   progressPercent,
+  sanitizeAnilistDescriptionHtml,
 } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -69,28 +70,34 @@ function formatAnilistMeanScore(score: number): string {
 
 function AnilistBannerSummary(props: { description: string | null | undefined }) {
   const { description } = props;
-  const textRef = useRef<HTMLParagraphElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const summary = description?.trim() ?? "";
+  const summaryHtml = useMemo(
+    () => (summary ? sanitizeAnilistDescriptionHtml(summary) : ""),
+    [summary],
+  );
 
   useLayoutEffect(() => {
-    if (!summary || expanded) {
+    if (!summaryHtml || expanded) {
       setTruncated(false);
       return;
     }
     const element = textRef.current;
     if (!element) return;
     setTruncated(element.scrollHeight > element.clientHeight + 1);
-  }, [expanded, summary]);
+  }, [expanded, summaryHtml]);
 
-  if (!summary) return null;
+  if (!summaryHtml) return null;
 
   return (
     <div className="anime-detail-summary">
-      <p ref={textRef} className={expanded ? "anime-detail-summary-text" : "anime-detail-summary-text anime-detail-summary-text--clamped"}>
-        {summary}
-      </p>
+      <div
+        ref={textRef}
+        className={expanded ? "anime-detail-summary-text" : "anime-detail-summary-text anime-detail-summary-text--clamped"}
+        dangerouslySetInnerHTML={{ __html: summaryHtml }}
+      />
       {truncated || expanded ? (
         <button
           type="button"

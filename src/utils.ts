@@ -254,3 +254,36 @@ export function isTextInputTarget(target: EventTarget | null): boolean {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
   return target.isContentEditable;
 }
+
+const ANILIST_DESCRIPTION_ALLOWED_TAGS = new Set(["i", "em", "b", "strong", "br", "p", "span"]);
+
+/** Strip unsafe markup while keeping common AniList synopsis formatting. */
+export function sanitizeAnilistDescriptionHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const sanitizeNode = (node: ParentNode): void => {
+    let child = node.firstChild;
+    while (child) {
+      const next = child.nextSibling;
+      if (child.nodeType === Node.COMMENT_NODE) {
+        child.remove();
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const element = child as Element;
+        const tag = element.tagName.toLowerCase();
+        if (!ANILIST_DESCRIPTION_ALLOWED_TAGS.has(tag)) {
+          while (element.firstChild) {
+            node.insertBefore(element.firstChild, element);
+          }
+          element.remove();
+        } else {
+          for (const attribute of [...element.attributes]) {
+            element.removeAttribute(attribute.name);
+          }
+          sanitizeNode(element);
+        }
+      }
+      child = next;
+    }
+  };
+  sanitizeNode(doc.body);
+  return doc.body.innerHTML;
+}
