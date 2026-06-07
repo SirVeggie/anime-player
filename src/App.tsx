@@ -1745,6 +1745,9 @@ function App() {
               onMoveAnime={(anime, categoryId) => void handleMoveAnimeSummary(anime, categoryId)}
               onOpenAnimeFolder={(anime) => void handleOpenAnimeFolderSummary(anime)}
               onSetAnimeThumbnail={(anime) => void handleSetAnimeThumbnailSummary(anime)}
+              anilistConnected={isAnilistConnected(anilistAuth)}
+              onSearchAnilist={handleSearchAnilist}
+              onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
             />
           ) : null}
 

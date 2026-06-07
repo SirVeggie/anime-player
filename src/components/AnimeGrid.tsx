@@ -7,9 +7,10 @@ import {
   storeGridSort,
 } from "../animeGridSort";
 import { loadAnimePosterUrls } from "../animePoster";
-import type { AnimeSummary, Category } from "../types";
+import type { AnimeSummary, AnilistSearchResult, Category } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { animeDisplayTitle, animeTooltipTitle } from "../utils";
+import { AnilistLinkModal } from "./AnilistLinkModal";
 import { AnimeCardLabel } from "./AnimeCardLabel";
 import { ConfirmModal } from "./ConfirmModal";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -28,6 +29,9 @@ export function AnimeGrid(props: {
   onMoveAnime: (anime: AnimeSummary, categoryId: number) => void;
   onOpenAnimeFolder: (anime: AnimeSummary) => void;
   onSetAnimeThumbnail: (anime: AnimeSummary) => void;
+  anilistConnected: boolean;
+  onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
+  onLinkAnilist: (animeId: number, anilistId: number) => void;
 }) {
   const {
     category,
@@ -41,6 +45,9 @@ export function AnimeGrid(props: {
     onMoveAnime,
     onOpenAnimeFolder,
     onSetAnimeThumbnail,
+    anilistConnected,
+    onSearchAnilist,
+    onLinkAnilist,
   } = props;
   const [sortValue, setSortValue] = useState(readStoredGridSort);
 
@@ -91,6 +98,9 @@ export function AnimeGrid(props: {
           onMoveAnime={onMoveAnime}
           onOpenAnimeFolder={onOpenAnimeFolder}
           onSetAnimeThumbnail={onSetAnimeThumbnail}
+          anilistConnected={anilistConnected}
+          onSearchAnilist={onSearchAnilist}
+          onLinkAnilist={onLinkAnilist}
         />
       )}
     </>
@@ -106,6 +116,9 @@ export function AnimeCardGrid(props: {
   onMoveAnime?: (anime: AnimeSummary, categoryId: number) => void;
   onOpenAnimeFolder?: (anime: AnimeSummary) => void;
   onSetAnimeThumbnail?: (anime: AnimeSummary) => void;
+  anilistConnected?: boolean;
+  onSearchAnilist?: (query: string) => Promise<AnilistSearchResult[]>;
+  onLinkAnilist?: (animeId: number, anilistId: number) => void;
 }) {
   const {
     anime,
@@ -116,9 +129,13 @@ export function AnimeCardGrid(props: {
     onMoveAnime,
     onOpenAnimeFolder,
     onSetAnimeThumbnail,
+    anilistConnected = false,
+    onSearchAnilist,
+    onLinkAnilist,
   } = props;
   const [covers, setCovers] = useState<Record<number, string>>({});
   const [deleteAnime, setDeleteAnime] = useState<AnimeSummary | null>(null);
+  const [linkAnime, setLinkAnime] = useState<AnimeSummary | null>(null);
   const getRovingItemProps = useRovingListNavigation(anime.length);
   const { menu, openMenu, closeMenu } = useContextMenu();
 
@@ -142,41 +159,57 @@ export function AnimeCardGrid(props: {
   );
 
   const buildAnimeMenuItems = useCallback(
-    (item: AnimeSummary): ContextMenuItem[] => [
-      {
-        type: "submenu",
-        id: "move-to",
-        label: "Move to",
-        items: categories.map((category) => ({
-          id: `category-${category.id}`,
-          label: category.name,
-          disabled: category.id === item.category_id,
-          onSelect: () => onMoveAnime?.(item, category.id),
-        })),
-      },
-      {
-        type: "action",
-        id: "open-folder",
-        label: "Open folder",
-        disabled: item.episode_count === 0,
-        onSelect: () => onOpenAnimeFolder?.(item),
-      },
-      {
-        type: "action",
-        id: "set-thumbnail",
-        label: "Set thumbnail",
-        onSelect: () => onSetAnimeThumbnail?.(item),
-      },
-      { type: "separator", id: "delete-separator" },
-      {
-        type: "action",
-        id: "delete",
-        label: "Delete",
-        danger: true,
-        onSelect: () => setDeleteAnime(item),
-      },
-    ],
-    [categories, onDeleteAnime, onMoveAnime, onOpenAnimeFolder, onSetAnimeThumbnail],
+    (item: AnimeSummary): ContextMenuItem[] => {
+      const items: ContextMenuItem[] = [
+        {
+          type: "submenu",
+          id: "move-to",
+          label: "Move to",
+          items: categories.map((category) => ({
+            id: `category-${category.id}`,
+            label: category.name,
+            disabled: category.id === item.category_id,
+            onSelect: () => onMoveAnime?.(item, category.id),
+          })),
+        },
+        {
+          type: "action",
+          id: "open-folder",
+          label: "Open folder",
+          disabled: item.episode_count === 0,
+          onSelect: () => onOpenAnimeFolder?.(item),
+        },
+        {
+          type: "action",
+          id: "set-thumbnail",
+          label: "Set thumbnail",
+          onSelect: () => onSetAnimeThumbnail?.(item),
+        },
+      ];
+
+      if (anilistConnected && !item.anilist_id && onSearchAnilist && onLinkAnilist) {
+        items.push({
+          type: "action",
+          id: "link-anilist",
+          label: "Link AniList",
+          onSelect: () => setLinkAnime(item),
+        });
+      }
+
+      items.push(
+        { type: "separator", id: "delete-separator" },
+        {
+          type: "action",
+          id: "delete",
+          label: "Delete",
+          danger: true,
+          onSelect: () => setDeleteAnime(item),
+        },
+      );
+
+      return items;
+    },
+    [anilistConnected, categories, onDeleteAnime, onLinkAnilist, onMoveAnime, onOpenAnimeFolder, onSearchAnilist, onSetAnimeThumbnail],
   );
 
   return (
@@ -225,6 +258,19 @@ export function AnimeCardGrid(props: {
         })}
       </div>
       {contextMenuEnabled ? <ContextMenu menu={menu} onClose={closeMenu} /> : null}
+
+      {linkAnime && onSearchAnilist && onLinkAnilist ? (
+        <AnilistLinkModal
+          animeTitle={linkAnime.title}
+          open
+          onClose={() => setLinkAnime(null)}
+          onSearch={onSearchAnilist}
+          onSelect={(anilistId) => {
+            onLinkAnilist(linkAnime.id, anilistId);
+            setLinkAnime(null);
+          }}
+        />
+      ) : null}
 
       {deleteAnime ? (
         <ConfirmModal
