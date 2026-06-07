@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -20,7 +20,8 @@ use crate::scrub_preview::{
 use super::types::{
     EnqueueEpisodePageScrubSprites, EnqueueJobResult, EnqueueOpEdChromaAnimeJob,
     EnqueueOpEdChromaEpisodeJob, EnqueueOpEdDetectJob, EnqueueScrubSpriteJob, JobPrerequisiteView,
-    JobPriority, JobProgress, JobResourceType, JobStatus, JobView, JobsSnapshot, TypeMaxParallel,
+    JobPriority, JobProgress, JobResourceType, JobStatus, JobView, JobsSnapshot,
+    OpEdAnalysisUpdatedEvent, TypeMaxParallel,
 };
 
 /// Episode newly imported during `rescan_library` (auto scrub enqueue).
@@ -50,6 +51,8 @@ const MAX_PARALLEL_CAP: u32 = 20;
 const HISTORY_CAP: usize = 200;
 /// Coalesce rapid `jobs://updated` emissions so the WebView is not flooded during parallel work.
 const SNAPSHOT_EMIT_MIN_INTERVAL_MS: u64 = 250;
+/// Coalesce `op-ed://analysis-updated` when many per-episode rematch jobs finish together.
+const OP_ED_ANALYSIS_UPDATED_EMIT_MIN_INTERVAL_MS: u64 = 500;
 /// Cap prerequisite pills in emitted snapshots (`prerequisite_pending` stays accurate).
 const SNAPSHOT_WAITING_FOR_CAP: usize = 8;
 
@@ -111,6 +114,9 @@ pub struct JobManager {
     chroma_disk_poll_wakeup_armed: bool,
     snapshot_emit_wakeup_armed: bool,
     last_snapshot_emit_ms: u64,
+    op_ed_analysis_emit_wakeup_armed: bool,
+    last_op_ed_analysis_emit_ms: u64,
+    pending_op_ed_analysis_anime_ids: HashSet<i64>,
 }
 
 impl JobManager {
@@ -129,6 +135,9 @@ impl JobManager {
             chroma_disk_poll_wakeup_armed: false,
             snapshot_emit_wakeup_armed: false,
             last_snapshot_emit_ms: 0,
+            op_ed_analysis_emit_wakeup_armed: false,
+            last_op_ed_analysis_emit_ms: 0,
+            pending_op_ed_analysis_anime_ids: HashSet::new(),
         }
     }
 
@@ -243,6 +252,50 @@ impl JobManager {
     pub fn on_snapshot_emit_wakeup(&mut self) {
         self.snapshot_emit_wakeup_armed = false;
         self.emit_snapshot_now();
+    }
+
+    pub fn on_op_ed_analysis_emit_wakeup(&mut self) {
+        self.op_ed_analysis_emit_wakeup_armed = false;
+        self.emit_op_ed_analysis_updated_now();
+    }
+
+    fn schedule_op_ed_analysis_updated(&mut self, anime_id: i64) {
+        self.pending_op_ed_analysis_anime_ids.insert(anime_id);
+        let now = now_ms();
+        if now.saturating_sub(self.last_op_ed_analysis_emit_ms)
+            >= OP_ED_ANALYSIS_UPDATED_EMIT_MIN_INTERVAL_MS
+        {
+            self.emit_op_ed_analysis_updated_now();
+            return;
+        }
+        if self.op_ed_analysis_emit_wakeup_armed {
+            return;
+        }
+        self.op_ed_analysis_emit_wakeup_armed = true;
+        let delay = OP_ED_ANALYSIS_UPDATED_EMIT_MIN_INTERVAL_MS
+            .saturating_sub(now.saturating_sub(self.last_op_ed_analysis_emit_ms))
+            .max(1);
+        super::schedule_op_ed_analysis_emit_after_ms(&self.app, delay);
+    }
+
+    fn emit_op_ed_analysis_updated_now(&mut self) {
+        self.op_ed_analysis_emit_wakeup_armed = false;
+        self.last_op_ed_analysis_emit_ms = now_ms();
+        let anime_ids: Vec<i64> = self.pending_op_ed_analysis_anime_ids.drain().collect();
+        for anime_id in anime_ids {
+            let _ = self.app.emit(
+                "op-ed://analysis-updated",
+                OpEdAnalysisUpdatedEvent { anime_id },
+            );
+        }
+    }
+
+    fn op_ed_job_anime_id(kind: &JobKind) -> Option<i64> {
+        match kind {
+            JobKind::OpEdDetect { anime_id, .. } => Some(*anime_id),
+            JobKind::OpEdManualRematch { anime_id, .. } => Some(*anime_id),
+            _ => None,
+        }
     }
 
     fn view_with_waiting_for(&self, record: &JobRecord) -> JobView {
@@ -1615,12 +1668,10 @@ impl JobManager {
             | JobKind::OpEdManualRematch { .. } => None,
         });
 
-        let emit_op_ed_updated = self.records.get(job_id).is_some_and(|r| {
-            matches!(
-                r.kind,
-                JobKind::OpEdDetect { .. } | JobKind::OpEdManualRematch { .. }
-            )
-        });
+        let op_ed_updated_anime_id = self
+            .records
+            .get(job_id)
+            .and_then(|r| Self::op_ed_job_anime_id(&r.kind));
 
         match outcome {
             WorkerOutcome::Done(message, scrub_ready) => {
@@ -1636,8 +1687,8 @@ impl JobManager {
                 for follow in follow_ups {
                     let _ = self.enqueue_scrub_sprite(follow);
                 }
-                if emit_op_ed_updated {
-                    let _ = self.app.emit("op-ed://analysis-updated", ());
+                if let Some(anime_id) = op_ed_updated_anime_id {
+                    self.schedule_op_ed_analysis_updated(anime_id);
                 }
             }
             WorkerOutcome::Failed(message) => {

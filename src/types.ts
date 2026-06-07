@@ -372,3 +372,7 @@ export type JobFinishedEvent = {
   jobType: string;
   status: JobStatus;
 };
+
+export type OpEdAnalysisUpdatedEvent = {
+  animeId: number;
+};

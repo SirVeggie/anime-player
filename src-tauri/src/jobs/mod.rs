@@ -60,6 +60,19 @@ fn wake_snapshot_emit(app: AppHandle) {
 }
 
 #[cfg(windows)]
+fn wake_op_ed_analysis_emit(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let Some(jobs_state) = app.try_state::<JobsState>() else {
+            return;
+        };
+        let Ok(mut guard) = jobs_state.manager.lock() else {
+            return;
+        };
+        guard.on_op_ed_analysis_emit_wakeup();
+    });
+}
+
+#[cfg(windows)]
 pub fn schedule_snapshot_emit_after_ms(app: &AppHandle, delay_ms: u64) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -71,6 +84,21 @@ pub fn schedule_snapshot_emit_after_ms(app: &AppHandle, delay_ms: u64) {
             return;
         }
         wake_snapshot_emit(app);
+    });
+}
+
+#[cfg(windows)]
+pub fn schedule_op_ed_analysis_emit_after_ms(app: &AppHandle, delay_ms: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let delay_ms = delay_ms.max(1);
+        let wait = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        });
+        if wait.await.is_err() {
+            return;
+        }
+        wake_op_ed_analysis_emit(app);
     });
 }
 

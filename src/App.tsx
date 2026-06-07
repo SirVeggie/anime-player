@@ -184,6 +184,7 @@ function App() {
   const [playerPaused, setPlayerPaused] = useState(true);
   const contentRef = useRef<HTMLElement | null>(null);
   const selectedAnimeIdRef = useRef<number | null>(null);
+  const opEdRefreshTimerRef = useRef<number | null>(null);
   const currentPageKeyRef = useRef("categories");
   const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
   const scrollPositionsRef = useRef(new Map<string, number>());
@@ -533,15 +534,24 @@ function App() {
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
-    void listen("op-ed://analysis-updated", () => {
-      const animeId = selectedAnimeIdRef.current;
-      if (animeId != null && viewRef.current === "episodes") {
-        void refreshAnimeEpisodes(animeId);
+    void listen<{ animeId: number }>("op-ed://analysis-updated", (event) => {
+      const animeId = event.payload.animeId;
+      if (viewRef.current !== "episodes" || selectedAnimeIdRef.current !== animeId) return;
+      if (opEdRefreshTimerRef.current !== null) {
+        window.clearTimeout(opEdRefreshTimerRef.current);
       }
+      opEdRefreshTimerRef.current = window.setTimeout(() => {
+        opEdRefreshTimerRef.current = null;
+        void refreshAnimeEpisodes(animeId);
+      }, 150);
     }).then((fn) => {
       unlisten = fn;
     });
     return () => {
+      if (opEdRefreshTimerRef.current !== null) {
+        window.clearTimeout(opEdRefreshTimerRef.current);
+        opEdRefreshTimerRef.current = null;
+      }
       void unlisten?.();
     };
   }, [refreshAnimeEpisodes]);

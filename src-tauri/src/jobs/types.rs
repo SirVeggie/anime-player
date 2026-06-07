@@ -170,6 +170,12 @@ pub struct JobFinishedEvent {
     pub status: JobStatus,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpEdAnalysisUpdatedEvent {
+    pub anime_id: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnqueueScrubSpriteJob {

@@ -1,5 +1,4 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
@@ -316,18 +315,6 @@ export function EpisodeScreen(props: {
     if (p == null) return;
     setProgressOverrideDraft(String(p));
   }, [animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listen("op-ed://analysis-updated", () => {
-      onOpEdAnalysisUpdated();
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
-      void unlisten?.();
-    };
-  }, [onOpEdAnalysisUpdated]);
 
   const handleCancelOpEdJob = useCallback(async () => {
     if (!activeOpEdJob) return;

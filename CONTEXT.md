@@ -295,8 +295,9 @@ view components. Per-screen UI lives in `src/components/`:
   first so discovery seeds from episode 1). Failed matches keep prior timestamps via
   SQL `COALESCE` on `start_sec`/`end_sec`. **12 or fewer** episodes
   use a single full pass. After `op_ed_analyzed_at` is set, newly imported episodes
-  enqueue one full all-episode pass only. `op-ed://analysis-updated` fires after each
-  detect job finishes. Auto-enqueue is skipped when analysis is already current
+  enqueue one full all-episode pass only. `op-ed://analysis-updated` fires after OP/ED
+  detect or manual rematch jobs finish, coalesced to at most ~2 per second per title so
+  parallel per-episode rematch work does not flood the WebView message queue. Auto-enqueue is skipped when analysis is already current
   (`op_ed_analyzed_at`, `ANALYSIS_VERSION`, segment rows for every episode).
   Chroma jobs that
   find an on-disk fingerprint at start finish immediately and release the HDD stagger
@@ -326,7 +327,7 @@ view components. Per-screen UI lives in `src/components/`:
   (`trim_both_*` passes); then for OP only a near-miss at offset ≤ ~2.5s with
   slightly relaxed gates (`edge_near`). The worker commits
   progress through many short `with_conn` calls while ffmpeg/fpcalc run unlocked.
-  On completion the job emits `op-ed://analysis-updated`; the UI reloads that title
+  On completion coalesced `op-ed://analysis-updated` events reload that title
   via `list_episodes` plus `get_anime_op_ed_summary` only (not a full `get_library_state`).
   The episode page navigates immediately and shows a loading state while
   `list_episodes` runs; episode row thumbnails load with bounded concurrency.
