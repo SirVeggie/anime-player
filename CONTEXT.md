@@ -117,11 +117,18 @@ view components. Per-screen UI lives in `src/components/`:
   the library when linked** toggle (`prefer_anilist_display_title` in SQLite
   `settings`) switches grids, search, continue watching, episode headers, and
   the player window title to the linked AniList name; unlinked titles always use
-  the detected filesystem name. Login uses the implicit
-  OAuth flow with the `anime-player://anilist-auth` deep-link callback;
-  `App.tsx` handles the callback, validates/stores the token through Rust, and
-  refreshes auth state in the UI.
-- Linked anime have search/link/unlink/open controls on the episode page.
+  the detected filesystem name. A **Hide AniList features** toggle
+  (`hide_anilist_features` in SQLite `settings`) controls whether linking UI,
+  the episode-page AniList banner, and score controls appear — independent of
+  login state. Login uses the implicit OAuth flow with the
+  `anime-player://anilist-auth` deep-link callback; `App.tsx` handles the
+  callback, validates/stores the token through Rust, and refreshes auth state in
+  the UI.
+- Users can link titles and use AniList covers/metadata without logging in.
+  Search, link, and public GraphQL reads (`episodes`, `status`, `meanScore`,
+  `description`) work without a token; account features (progress sync, personal
+  score, progress import) require login. Linked anime have search/link/unlink/open
+  controls on the episode page when AniList features are not hidden.
   Title Settings also exposes an optional per-anime `custom_thumbnail_path`
   (with browse/clear controls). Poster loading in grids and Continue Watching
   prefers that custom thumbnail first, then cached AniList cover art, then
@@ -132,14 +139,17 @@ view components. Per-screen UI lives in `src/components/`:
   extraction runs with limited concurrency; linked titles with a missing/legacy
   cover path can recover by checking `data/anilist-covers/<anilist_id>.*` and then
   re-downloading the cover from AniList.
-- The AniList card opens the linked AniList page, shows remote
-  `Progress: current/total`, and includes a debounced score input that writes
-  back to AniList. Cached media status includes `status` (e.g. `RELEASING`);
+- The AniList banner opens the linked AniList page from the title block only
+  (cover + title + meta). When logged in it shows `Progress: current/total` and a
+  debounced personal score input that writes back to AniList; when not logged in
+  it shows `Episodes: total` and read-only community mean score instead. The
+  synopsis from AniList fills the banner's middle column with a **Show more**
+  control when clamped. Cached media status includes `status` (e.g. `RELEASING`);
   **missing episode** counts and episode-list gap separators use AniList total
   episodes to fill holes in the local sequence, but skip trailing gaps while
   status is `RELEASING` so unreleased episodes are not flagged. Local watched progress syncs on EOF / near-end saves only
-  when the adjusted local episode number is ahead of the viewer's current
-  AniList progress. `persistProgress` in `PlayerView` awaits
+  when logged in and the adjusted local episode number is ahead of the viewer's
+  current AniList progress. `persistProgress` in `PlayerView` awaits
   `syncAnilistEpisodeProgress` when leaving the player (Q/back, window close,
   flush-on-exit). EOF auto-advance, near-end **Next**, and other episode
   switches defer AniList to the background after the local SQLite save so

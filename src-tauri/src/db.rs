@@ -78,6 +78,14 @@ fn ensure_schema_updates(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE anime ADD COLUMN op_ed_analyzed_at TEXT", [])
             .map_err(|e| e.to_string())?;
     }
+    if !table_has_column(conn, "anime", "anilist_cached_mean_score")? {
+        conn.execute("ALTER TABLE anime ADD COLUMN anilist_cached_mean_score REAL", [])
+            .map_err(|e| e.to_string())?;
+    }
+    if !table_has_column(conn, "anime", "anilist_cached_description")? {
+        conn.execute("ALTER TABLE anime ADD COLUMN anilist_cached_description TEXT", [])
+            .map_err(|e| e.to_string())?;
+    }
 
     conn.execute_batch(
         r#"

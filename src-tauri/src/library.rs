@@ -19,6 +19,7 @@ use crate::AppState;
 const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
 
 const PREFER_ANILIST_DISPLAY_TITLE_KEY: &str = "prefer_anilist_display_title";
+const HIDE_ANILIST_FEATURES_KEY: &str = "hide_anilist_features";
 
 /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
 /// When AniList status is `RELEASING`, trailing unreleased episodes are not counted.
@@ -158,6 +159,7 @@ pub struct LibraryState {
     missing_anime: Vec<MissingAnimeSummary>,
     unmatched_count: i64,
     prefer_anilist_display_title: bool,
+    hide_anilist_features: bool,
     skip_op_ed: bool,
     auto_op_ed_detect: bool,
     dont_skip_first_episode_op_ed: bool,
@@ -339,6 +341,28 @@ fn write_prefer_anilist_display_title(conn: &Connection, enabled: bool) -> Resul
     Ok(())
 }
 
+fn read_hide_anilist_features(conn: &Connection) -> Result<bool, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![HIDE_ANILIST_FEATURES_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(matches!(value.as_deref(), Some("1" | "true" | "yes")))
+}
+
+fn write_hide_anilist_features(conn: &Connection, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![HIDE_ANILIST_FEATURES_KEY, if enabled { "1" } else { "0" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_library_state(db: State<'_, AppDatabase>) -> Result<LibraryState, String> {
     db.with_conn(|conn| build_library_state(conn, &db))
@@ -360,6 +384,7 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         missing_anime: list_missing_anime(conn)?,
         unmatched_count: count_unmatched(conn)?,
         prefer_anilist_display_title: read_prefer_anilist_display_title(conn)?,
+        hide_anilist_features: read_hide_anilist_features(conn)?,
         skip_op_ed: op_ed::read_skip_op_ed(conn)?,
         auto_op_ed_detect: op_ed::read_auto_op_ed_detect(conn)?,
         dont_skip_first_episode_op_ed: op_ed::read_dont_skip_first_episode_op_ed(conn)?,
@@ -400,6 +425,17 @@ pub fn set_prefer_anilist_display_title(
 ) -> Result<LibraryState, String> {
     db.with_conn(|conn| {
         write_prefer_anilist_display_title(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
+}
+
+#[tauri::command]
+pub fn set_hide_anilist_features(
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        write_hide_anilist_features(conn, enabled)?;
         build_library_state(conn, &db)
     })
 }

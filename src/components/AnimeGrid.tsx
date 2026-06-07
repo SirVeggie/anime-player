@@ -29,7 +29,7 @@ export function AnimeGrid(props: {
   onMoveAnime: (anime: AnimeSummary, categoryId: number) => void;
   onOpenAnimeFolder: (anime: AnimeSummary) => void;
   onSetAnimeThumbnail: (anime: AnimeSummary) => void;
-  anilistConnected: boolean;
+  anilistFeaturesEnabled: boolean;
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onLinkAnilist: (animeId: number, anilistId: number) => void;
 }) {
@@ -45,7 +45,7 @@ export function AnimeGrid(props: {
     onMoveAnime,
     onOpenAnimeFolder,
     onSetAnimeThumbnail,
-    anilistConnected,
+    anilistFeaturesEnabled,
     onSearchAnilist,
     onLinkAnilist,
   } = props;
@@ -98,7 +98,7 @@ export function AnimeGrid(props: {
           onMoveAnime={onMoveAnime}
           onOpenAnimeFolder={onOpenAnimeFolder}
           onSetAnimeThumbnail={onSetAnimeThumbnail}
-          anilistConnected={anilistConnected}
+          anilistFeaturesEnabled={anilistFeaturesEnabled}
           onSearchAnilist={onSearchAnilist}
           onLinkAnilist={onLinkAnilist}
         />
@@ -116,7 +116,7 @@ export function AnimeCardGrid(props: {
   onMoveAnime?: (anime: AnimeSummary, categoryId: number) => void;
   onOpenAnimeFolder?: (anime: AnimeSummary) => void;
   onSetAnimeThumbnail?: (anime: AnimeSummary) => void;
-  anilistConnected?: boolean;
+  anilistFeaturesEnabled?: boolean;
   onSearchAnilist?: (query: string) => Promise<AnilistSearchResult[]>;
   onLinkAnilist?: (animeId: number, anilistId: number) => void;
 }) {
@@ -129,7 +129,7 @@ export function AnimeCardGrid(props: {
     onMoveAnime,
     onOpenAnimeFolder,
     onSetAnimeThumbnail,
-    anilistConnected = false,
+    anilistFeaturesEnabled = false,
     onSearchAnilist,
     onLinkAnilist,
   } = props;
@@ -187,7 +187,7 @@ export function AnimeCardGrid(props: {
         },
       ];
 
-      if (anilistConnected && !item.anilist_id && onSearchAnilist && onLinkAnilist) {
+      if (anilistFeaturesEnabled && !item.anilist_id && onSearchAnilist && onLinkAnilist) {
         items.push({
           type: "action",
           id: "link-anilist",
@@ -209,7 +209,7 @@ export function AnimeCardGrid(props: {
 
       return items;
     },
-    [anilistConnected, categories, onDeleteAnime, onLinkAnilist, onMoveAnime, onOpenAnimeFolder, onSearchAnilist, onSetAnimeThumbnail],
+    [anilistFeaturesEnabled, categories, onDeleteAnime, onLinkAnilist, onMoveAnime, onOpenAnimeFolder, onSearchAnilist, onSetAnimeThumbnail],
   );
 
   return (

@@ -46,6 +46,7 @@ export function SettingsScreen(props: {
   onLoginAnilist: () => void;
   onLogoutAnilist: () => void;
   onPreferAnilistDisplayTitle: (enabled: boolean) => void;
+  onHideAnilistFeatures: (enabled: boolean) => void;
   onAutoOpEdDetect: (enabled: boolean) => void;
   onSkipOpEd: (enabled: boolean) => void;
   onDontSkipFirstEpisodeOpEd: (enabled: boolean) => void;
@@ -78,6 +79,7 @@ export function SettingsScreen(props: {
     onLoginAnilist,
     onLogoutAnilist,
     onPreferAnilistDisplayTitle,
+    onHideAnilistFeatures,
     onAutoOpEdDetect,
     onSkipOpEd,
     onDontSkipFirstEpisodeOpEd,
@@ -137,6 +139,15 @@ export function SettingsScreen(props: {
             onChange={onPreferAnilistDisplayTitle}
             label="Use AniList title in the library when linked"
             tooltip="Linked titles show the AniList name in grids, search, and episode headers. Unlinked titles always use the detected name from your files."
+          />
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.hide_anilist_features}
+            disabled={busy}
+            onChange={onHideAnilistFeatures}
+            label="Hide AniList features"
+            tooltip="Hides linking controls, the episode-page AniList banner, and score UI. Linked covers and titles still work when enabled separately above."
           />
         </div>
       </section>

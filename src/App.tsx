@@ -42,6 +42,7 @@ import {
   setAutoOpEdDetect,
   setDontSkipFirstEpisodeOpEd,
   setPreferAnilistDisplayTitle,
+  setHideAnilistFeatures,
   setSkipOpEd,
   setAnimeCustomThumbnailPath,
   setAnimeTrackerOffset,
@@ -1163,6 +1164,11 @@ function App() {
     [],
   );
 
+  const handleHideAnilistFeatures = useCallback(async (enabled: boolean) => {
+    const state = await setHideAnilistFeatures(enabled);
+    setLibrary(state);
+  }, []);
+
   const handleSkipOpEd = useCallback(async (enabled: boolean) => {
     const state = await setSkipOpEd(enabled);
     setLibrary(state);
@@ -1223,7 +1229,7 @@ function App() {
         const result = await overrideAnimeProgress(animeId, progressOverride);
         const linkedAnime =
           selectedAnime?.id === animeId ? selectedAnime : library?.anime.find((anime) => anime.id === animeId);
-        if (linkedAnime?.anilist_id) {
+        if (linkedAnime?.anilist_id && isAnilistConnected(anilistAuth)) {
           const status = await setAnilistMediaProgress(animeId, result.progress);
           setAnilistProgressUpdate({
             animeId,
@@ -1239,7 +1245,7 @@ function App() {
         if (searchFieldsChanged) await reloadSearchIndex();
       }
     },
-    [library?.anime, refreshAnimePageData, reloadSearchIndex, selectedAnime, selectedEpisode?.anime_id],
+    [anilistAuth, library?.anime, refreshAnimePageData, reloadSearchIndex, selectedAnime, selectedEpisode?.anime_id],
   );
 
   const handleClearAnimeCustomThumbnail = useCallback(
@@ -1745,7 +1751,7 @@ function App() {
               onMoveAnime={(anime, categoryId) => void handleMoveAnimeSummary(anime, categoryId)}
               onOpenAnimeFolder={(anime) => void handleOpenAnimeFolderSummary(anime)}
               onSetAnimeThumbnail={(anime) => void handleSetAnimeThumbnailSummary(anime)}
-              anilistConnected={isAnilistConnected(anilistAuth)}
+              anilistFeaturesEnabled={!library.hide_anilist_features}
               onSearchAnilist={handleSearchAnilist}
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
             />
@@ -1805,7 +1811,8 @@ function App() {
               onLinkAnilist={(animeId, anilistId) => void handleLinkAnilist(animeId, anilistId)}
               onUnlinkAnilist={(animeId) => void handleUnlinkAnilist(animeId)}
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
-              anilistConnected={isAnilistConnected(anilistAuth)}
+              anilistFeaturesEnabled={!library.hide_anilist_features}
+              anilistAuthenticated={isAnilistConnected(anilistAuth)}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               onOpEdAnalysisUpdated={() => {
                 if (selectedAnime) void refreshAnimeEpisodes(selectedAnime.id);
@@ -1854,6 +1861,7 @@ function App() {
               onLoginAnilist={() => void handleLoginAnilist()}
               onLogoutAnilist={() => void handleLogoutAnilist()}
               onPreferAnilistDisplayTitle={(enabled) => void handlePreferAnilistDisplayTitle(enabled)}
+              onHideAnilistFeatures={(enabled) => void handleHideAnilistFeatures(enabled)}
               onAutoOpEdDetect={(enabled) => void handleAutoOpEdDetect(enabled)}
               onSkipOpEd={(enabled) => void handleSkipOpEd(enabled)}
               onDontSkipFirstEpisodeOpEd={(enabled) => void handleDontSkipFirstEpisodeOpEd(enabled)}

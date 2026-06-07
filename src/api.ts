@@ -50,6 +50,10 @@ export function setPreferAnilistDisplayTitle(enabled: boolean): Promise<LibraryS
   return invoke("set_prefer_anilist_display_title", { enabled });
 }
 
+export function setHideAnilistFeatures(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_hide_anilist_features", { enabled });
+}
+
 export function setSkipOpEd(enabled: boolean): Promise<LibraryState> {
   return invoke("set_skip_op_ed", { enabled });
 }

@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
@@ -61,6 +61,47 @@ function mergeWithLatestProgress(
         ? current.progress
         : Math.max(status.progress, current.progress);
   return { ...status, progress };
+}
+
+function formatAnilistMeanScore(score: number): string {
+  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+}
+
+function AnilistBannerSummary(props: { description: string | null | undefined }) {
+  const { description } = props;
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const summary = description?.trim() ?? "";
+
+  useLayoutEffect(() => {
+    if (!summary || expanded) {
+      setTruncated(false);
+      return;
+    }
+    const element = textRef.current;
+    if (!element) return;
+    setTruncated(element.scrollHeight > element.clientHeight + 1);
+  }, [expanded, summary]);
+
+  if (!summary) return null;
+
+  return (
+    <div className="anime-detail-summary">
+      <p ref={textRef} className={expanded ? "anime-detail-summary-text" : "anime-detail-summary-text anime-detail-summary-text--clamped"}>
+        {summary}
+      </p>
+      {truncated || expanded ? (
+        <button
+          type="button"
+          className="anime-detail-summary-toggle"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function parseIntegerDraft(value: string, label: string): number {
@@ -131,7 +172,8 @@ export function EpisodeScreen(props: {
   onLinkAnilist: (animeId: number, anilistId: number) => void;
   onUnlinkAnilist: (animeId: number) => void;
   onOpenAnilist: (url: string) => void;
-  anilistConnected: boolean;
+  anilistFeaturesEnabled: boolean;
+  anilistAuthenticated: boolean;
   preferAnilistDisplayTitle: boolean;
   onOpEdAnalysisUpdated: () => void;
   onOpenManualSkip: () => void;
@@ -161,7 +203,8 @@ export function EpisodeScreen(props: {
     onLinkAnilist,
     onUnlinkAnilist,
     onOpenAnilist,
-    anilistConnected,
+    anilistFeaturesEnabled,
+    anilistAuthenticated,
     onOpEdAnalysisUpdated,
     onOpenManualSkip,
     onShowToast,
@@ -366,6 +409,8 @@ export function EpisodeScreen(props: {
           episodes: null,
           score: null,
           status: null,
+          mean_score: null,
+          description: null,
         };
       }
       return {
@@ -379,12 +424,12 @@ export function EpisodeScreen(props: {
   }, [anime.id, anilistProgressUpdate]);
 
   useEffect(() => {
-    if (!animeSettingsOpen || anime.anilist_id == null) return;
+    if (!animeSettingsOpen || anime.anilist_id == null || !anilistAuthenticated) return;
     if (progressOverrideDraftTouchedRef.current) return;
     const p = anilistStatus?.progress;
     if (p == null) return;
     setProgressOverrideDraft(String(p));
-  }, [animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
+  }, [anilistAuthenticated, animeSettingsOpen, anime.anilist_id, anilistStatus?.progress]);
 
   const handleRunOpEdAnalysis = useCallback(async () => {
     setOpEdRunBusy(true);
@@ -563,11 +608,20 @@ export function EpisodeScreen(props: {
     setTrackerOffsetDraft(String(anime.tracker_offset));
     setCustomThumbnailDraft(anime.custom_thumbnail_path ?? "");
     setProgressOverrideDraft(
-      anime.anilist_id != null && anilistStatus?.progress != null ? String(anilistStatus.progress) : "",
+      anime.anilist_id != null && anilistAuthenticated && anilistStatus?.progress != null
+        ? String(anilistStatus.progress)
+        : "",
     );
     setAnimeSettingsError(null);
     setAnimeSettingsOpen(true);
-  }, [anime.anilist_id, anime.custom_thumbnail_path, anime.title, anime.tracker_offset, anilistStatus?.progress]);
+  }, [
+    anime.anilist_id,
+    anime.custom_thumbnail_path,
+    anime.title,
+    anime.tracker_offset,
+    anilistAuthenticated,
+    anilistStatus?.progress,
+  ]);
 
   const closeAnimeSettings = useCallback(() => {
     if (animeSettingsSaving) return;
@@ -592,12 +646,12 @@ export function EpisodeScreen(props: {
       const baseProgress =
         progressOverrideDraft.trim() && Number.isFinite(parsedDraft)
           ? parsedDraft
-          : anime.anilist_id != null && anilistStatus?.progress != null
+          : anime.anilist_id != null && anilistAuthenticated && anilistStatus?.progress != null
             ? anilistStatus.progress
             : 0;
       setProgressOverrideDraft(String(Math.max(0, Math.round(baseProgress + delta))));
     },
-    [anime.anilist_id, anilistStatus?.progress, progressOverrideDraft],
+    [anime.anilist_id, anilistAuthenticated, anilistStatus?.progress, progressOverrideDraft],
   );
 
   const saveAnimeSettings = useCallback(
@@ -614,6 +668,7 @@ export function EpisodeScreen(props: {
           if (progressOverride < 0) throw new Error("Override progress must be 0 or greater.");
         }
         if (
+          anilistAuthenticated &&
           anime.anilist_id != null &&
           anilistStatus?.progress != null &&
           progressOverride !== null &&
@@ -642,6 +697,7 @@ export function EpisodeScreen(props: {
     [
       anime.anilist_id,
       anime.id,
+      anilistAuthenticated,
       anilistStatus?.progress,
       animeTitleDraft,
       customThumbnailDraft,
@@ -686,7 +742,7 @@ export function EpisodeScreen(props: {
 
   const saveScore = useCallback(
     async (value: string) => {
-      if (!anime.anilist_id) return;
+      if (!anime.anilist_id || !anilistAuthenticated) return;
       if (scoreSaveTimerRef.current !== null) {
         window.clearTimeout(scoreSaveTimerRef.current);
         scoreSaveTimerRef.current = null;
@@ -717,7 +773,7 @@ export function EpisodeScreen(props: {
         }
       }
     },
-    [anime.anilist_id, anime.id, onSetAnilistScore],
+    [anilistAuthenticated, anime.anilist_id, anime.id, onSetAnilistScore],
   );
 
   const scheduleScoreSave = useCallback(
@@ -800,14 +856,16 @@ export function EpisodeScreen(props: {
             >
               <SettingsIcon />
             </button>
-            {anime.anilist_site_url ? (
-              <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
-                Unlink
-              </button>
-            ) : anilistConnected ? (
-              <button type="button" onClick={openLinkSearch}>
-                Link AniList
-              </button>
+            {anilistFeaturesEnabled ? (
+              anime.anilist_site_url ? (
+                <button type="button" onClick={() => onUnlinkAnilist(anime.id)}>
+                  Unlink
+                </button>
+              ) : (
+                <button type="button" onClick={openLinkSearch}>
+                  Link AniList
+                </button>
+              )
             ) : null}
             <button type="button" className="button-danger" onClick={() => setDeleteConfirmOpen(true)}>
               Delete Files
@@ -816,7 +874,7 @@ export function EpisodeScreen(props: {
         }
       />
 
-      {anime.anilist_id ? (
+      {anilistFeaturesEnabled && anime.anilist_id ? (
         <section className="anime-detail-panel">
           <button
             type="button"
@@ -835,55 +893,67 @@ export function EpisodeScreen(props: {
               <h2>{anime.anilist_title ?? anime.title}</h2>
               <p className="muted">Linked to AniList #{anime.anilist_id}</p>
               <p className="muted">
-                Progress: {anilistStatus?.progress ?? "?"}/{anilistStatus?.episodes ?? "?"}
+                {anilistAuthenticated
+                  ? `Progress: ${anilistStatus?.progress ?? "?"}/${anilistStatus?.episodes ?? "?"}`
+                  : `Episodes: ${anilistStatus?.episodes ?? "?"}`}
               </p>
             </div>
           </button>
-          <div className="anilist-score-control">
-            <label>
-              <span>Score</span>
-              <div className="score-stepper">
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={scoreDraft}
-                  placeholder="No score"
-                  disabled={scoreSaving}
-                  onChange={(e) => updateScoreDraft(e.currentTarget.value)}
-                  onBlur={(e) => {
-                    if (scoreSaveTimerRef.current !== null) {
-                      window.clearTimeout(scoreSaveTimerRef.current);
-                      scoreSaveTimerRef.current = null;
-                      void saveScore(e.currentTarget.value);
-                    }
-                  }}
-                />
-                <div className="score-stepper-buttons">
-                  <button
-                    type="button"
-                    className="score-stepper-button score-stepper-button--up"
-                    aria-label="Increase AniList score"
+          <AnilistBannerSummary description={anilistStatus?.description} />
+          {anilistAuthenticated ? (
+            <div className="anilist-score-control">
+              <label>
+                <span>Score</span>
+                <div className="score-stepper">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={scoreDraft}
+                    placeholder="No score"
                     disabled={scoreSaving}
-                    onClick={() => stepScoreDraft(1)}
+                    onChange={(e) => updateScoreDraft(e.currentTarget.value)}
+                    onBlur={(e) => {
+                      if (scoreSaveTimerRef.current !== null) {
+                        window.clearTimeout(scoreSaveTimerRef.current);
+                        scoreSaveTimerRef.current = null;
+                        void saveScore(e.currentTarget.value);
+                      }
+                    }}
                   />
-                  <button
-                    type="button"
-                    className="score-stepper-button score-stepper-button--down"
-                    aria-label="Decrease AniList score"
-                    disabled={scoreSaving}
-                    onClick={() => stepScoreDraft(-1)}
-                  />
+                  <div className="score-stepper-buttons">
+                    <button
+                      type="button"
+                      className="score-stepper-button score-stepper-button--up"
+                      aria-label="Increase AniList score"
+                      disabled={scoreSaving}
+                      onClick={() => stepScoreDraft(1)}
+                    />
+                    <button
+                      type="button"
+                      className="score-stepper-button score-stepper-button--down"
+                      aria-label="Decrease AniList score"
+                      disabled={scoreSaving}
+                      onClick={() => stepScoreDraft(-1)}
+                    />
+                  </div>
                 </div>
-              </div>
-            </label>
-            {scoreError ? <span className="anilist-score-error">{scoreError}</span> : null}
-          </div>
+              </label>
+              {scoreError ? <span className="anilist-score-error">{scoreError}</span> : null}
+            </div>
+          ) : (
+            <div className="anilist-mean-score">
+              <span>Mean score</span>
+              <strong>
+                {anilistStatus?.mean_score == null ? "—" : formatAnilistMeanScore(anilistStatus.mean_score)}
+              </strong>
+            </div>
+          )}
         </section>
       ) : null}
 
-      {linkSearchOpen && !anime.anilist_id ? (
+      {anilistFeaturesEnabled && linkSearchOpen && !anime.anilist_id ? (
         <div
           className="modal-backdrop"
           role="presentation"

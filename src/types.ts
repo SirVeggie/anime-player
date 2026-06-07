@@ -155,6 +155,8 @@ export type LibraryState = {
   unmatched_count: number;
   /** When true, linked titles use AniList name in library UI; unlinked titles always use the detected name. */
   prefer_anilist_display_title: boolean;
+  /** When true, hide AniList linking UI, episode banners, and score controls. */
+  hide_anilist_features: boolean;
   skip_op_ed: boolean;
   auto_op_ed_detect: boolean;
   dont_skip_first_episode_op_ed: boolean;
@@ -246,6 +248,10 @@ export type AnilistMediaStatus = {
   score: number | null;
   /** AniList MediaStatus, e.g. RELEASING or FINISHED */
   status: string | null;
+  /** Community mean score from AniList (available without login). */
+  mean_score: number | null;
+  /** Synopsis text from AniList (available without login). */
+  description: string | null;
 };
 
 export type AnilistLocalProgressApplyResult = {

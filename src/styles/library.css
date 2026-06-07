@@ -442,7 +442,7 @@
 
 .anime-detail-panel {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 16px;
   padding: 14px;
   margin-bottom: 18px;
@@ -454,7 +454,8 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  max-width: 100%;
+  flex-shrink: 0;
+  max-width: min(100%, 360px);
   min-width: 0;
   padding: 0;
   border: none;
@@ -506,12 +507,70 @@
   object-fit: cover;
 }
 
-.anilist-score-control {
+.anime-detail-summary {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.anime-detail-summary-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.anime-detail-summary-text--clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.anime-detail-summary-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8ec5ff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.anime-detail-summary-toggle:hover,
+.anime-detail-summary-toggle:focus-visible {
+  color: #cfe2ff;
+  text-decoration: underline;
+}
+
+.anilist-score-control,
+.anilist-mean-score {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-left: auto;
   flex-shrink: 0;
+  justify-content: center;
+}
+
+.anilist-mean-score {
+  align-items: flex-end;
+  min-width: 88px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.anilist-mean-score strong {
+  color: #e8eef7;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 .anilist-score-control label {

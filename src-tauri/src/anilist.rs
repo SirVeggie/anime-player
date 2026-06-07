@@ -59,6 +59,10 @@ pub struct AnilistMediaStatus {
     score: Option<f64>,
     /// AniList `MediaStatus` value, e.g. `RELEASING` or `FINISHED`.
     status: Option<String>,
+    /// Community mean score from AniList (available without login).
+    mean_score: Option<f64>,
+    /// Synopsis text from AniList (available without login).
+    description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -167,6 +171,8 @@ pub async fn link_anime_anilist(
                      anilist_cached_episodes = NULL,
                      anilist_cached_score = NULL,
                      anilist_cached_status = NULL,
+                     anilist_cached_mean_score = NULL,
+                     anilist_cached_description = NULL,
                      anilist_status_fetched_at = NULL,
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?5",
@@ -193,6 +199,8 @@ pub fn unlink_anime_anilist(db: State<'_, AppDatabase>, anime_id: i64) -> Result
                  anilist_cached_episodes = NULL,
                  anilist_cached_score = NULL,
                  anilist_cached_status = NULL,
+                 anilist_cached_mean_score = NULL,
+                 anilist_cached_description = NULL,
                  anilist_status_fetched_at = NULL,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
@@ -278,7 +286,9 @@ pub async fn sync_anilist_episode_progress(
     let remote_progress = match fresh_cached_media_status(&db, target.anime_id)? {
         Some(status) => status.progress.unwrap_or(0),
         None => {
-            let status = fetch_and_cache_media_status(&db, &token, target.anime_id, target.anilist_id).await?;
+            let status =
+                fetch_and_cache_media_status(&db, Some(token.as_str()), target.anime_id, target.anilist_id)
+                    .await?;
             status.progress.unwrap_or(0)
         }
     };
@@ -305,10 +315,11 @@ pub async fn get_anilist_media_status(
     db: State<'_, AppDatabase>,
     anime_id: i64,
 ) -> Result<Option<AnilistMediaStatus>, String> {
-    let Some((token, anilist_id)) = auth_and_media_id_for_anime(&db, anime_id)? else {
+    let Some(anilist_id) = media_id_for_anime(&db, anime_id)? else {
         return Ok(None);
     };
-    cached_or_fetch_media_status(&db, &token, anime_id, anilist_id)
+    let token = db.with_conn(|conn| get_setting(conn, TOKEN_KEY))?;
+    cached_or_fetch_media_status(&db, token.as_deref(), anime_id, anilist_id)
         .await
         .map(Some)
 }
@@ -332,6 +343,8 @@ pub async fn set_anilist_media_progress(
         episodes: None,
         score: None,
         status: None,
+        mean_score: None,
+        description: None,
     })
 }
 
@@ -343,7 +356,7 @@ pub async fn apply_anilist_progress_to_local(
     let Some((token, anilist_id)) = auth_and_media_id_for_anime(&db, anime_id)? else {
         return Ok(None);
     };
-    let status = cached_or_fetch_media_status(&db, &token, anime_id, anilist_id).await?;
+    let status = cached_or_fetch_media_status(&db, Some(token.as_str()), anime_id, anilist_id).await?;
     let progress = status.progress.unwrap_or(0).max(0);
     if progress == 0 {
         return Ok(Some(AnilistLocalProgressApplyResult {
@@ -395,7 +408,13 @@ pub async fn set_anilist_media_score(
 ) -> Result<AnilistMediaStatus, String> {
     let (token, anilist_id) = auth_and_media_id_for_anime(&db, anime_id)?
         .ok_or("Title is not linked to AniList or AniList is not logged in.")?;
-    let status = save_remote_score(&token, anilist_id, score).await?;
+    let mut status = save_remote_score(&token, anilist_id, score).await?;
+    if let Some(cached) = fresh_cached_media_status(&db, anime_id)? {
+        status.episodes = status.episodes.or(cached.episodes);
+        status.status = status.status.or(cached.status);
+        status.mean_score = cached.mean_score;
+        status.description = cached.description;
+    }
     db.with_conn(|conn| cache_anilist_media_status(conn, anime_id, &status))?;
     Ok(status)
 }
@@ -514,6 +533,19 @@ fn auth_and_media_id_for_anime(
     })
 }
 
+fn media_id_for_anime(db: &AppDatabase, anime_id: i64) -> Result<Option<i64>, String> {
+    db.with_conn(|conn| {
+        conn.query_row(
+            "SELECT anilist_id FROM anime WHERE id = ?1",
+            params![anime_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+        .map(|row| row.flatten())
+    })
+}
+
 fn now_seconds() -> Result<i64, String> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -540,6 +572,8 @@ fn cached_media_status(
                     anilist_cached_episodes,
                     anilist_cached_score,
                     anilist_cached_status,
+                    anilist_cached_mean_score,
+                    anilist_cached_description,
                     anilist_status_fetched_at
              FROM anime
              WHERE id = ?1",
@@ -550,14 +584,16 @@ fn cached_media_status(
                     row.get::<_, Option<i64>>(1)?,
                     row.get::<_, Option<f64>>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<f64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((progress, episodes, score, status, fetched_at)) = row else {
+    let Some((progress, episodes, score, status, mean_score, description, fetched_at)) = row else {
         return Ok(None);
     };
     let Some(fetched_at) = fetched_at else {
@@ -571,12 +607,14 @@ fn cached_media_status(
         episodes,
         score,
         status,
+        mean_score,
+        description,
     }))
 }
 
 async fn cached_or_fetch_media_status(
     db: &AppDatabase,
-    token: &str,
+    token: Option<&str>,
     anime_id: i64,
     anilist_id: i64,
 ) -> Result<AnilistMediaStatus, String> {
@@ -588,7 +626,7 @@ async fn cached_or_fetch_media_status(
 
 async fn fetch_and_cache_media_status(
     db: &AppDatabase,
-    token: &str,
+    token: Option<&str>,
     anime_id: i64,
     anilist_id: i64,
 ) -> Result<AnilistMediaStatus, String> {
@@ -609,13 +647,17 @@ fn cache_anilist_media_status(
              anilist_cached_episodes = ?2,
              anilist_cached_score = ?3,
              anilist_cached_status = ?4,
-             anilist_status_fetched_at = ?5
-         WHERE id = ?6",
+             anilist_cached_mean_score = ?5,
+             anilist_cached_description = ?6,
+             anilist_status_fetched_at = ?7
+         WHERE id = ?8",
         params![
             status.progress,
             status.episodes,
             status.score,
             status.status,
+            status.mean_score,
+            status.description,
             fetched_at,
             anime_id
         ],
@@ -657,7 +699,10 @@ async fn validate_token(token: &str) -> Result<Viewer, String> {
     Ok(data.viewer)
 }
 
-async fn get_media_status(token: &str, anilist_id: i64) -> Result<AnilistMediaStatus, String> {
+async fn get_media_status(
+    token: Option<&str>,
+    anilist_id: i64,
+) -> Result<AnilistMediaStatus, String> {
     #[derive(Debug, Deserialize)]
     struct MediaData {
         #[serde(rename = "Media")]
@@ -665,12 +710,14 @@ async fn get_media_status(token: &str, anilist_id: i64) -> Result<AnilistMediaSt
     }
 
     let data: MediaData = graphql(
-        Some(token),
+        token,
         r#"
         query MediaStatus($id: Int!) {
           Media(id: $id, type: ANIME) {
             status
             episodes
+            meanScore
+            description(asHtml: false)
             mediaListEntry {
               progress
               score
@@ -755,6 +802,8 @@ async fn save_remote_score(
             .and_then(|media| media.episodes),
         score: data.save_media_list_entry.score,
         status: None,
+        mean_score: None,
+        description: None,
     })
 }
 
@@ -980,6 +1029,9 @@ struct AnilistProgressTarget {
 struct StatusMedia {
     status: Option<String>,
     episodes: Option<i64>,
+    #[serde(rename = "meanScore")]
+    mean_score: Option<f64>,
+    description: Option<String>,
     #[serde(rename = "mediaListEntry")]
     media_list_entry: Option<StatusMediaListEntry>,
 }
@@ -998,6 +1050,8 @@ impl From<StatusMedia> for AnilistMediaStatus {
             episodes: media.episodes,
             score: entry.and_then(|entry| entry.score),
             status: media.status,
+            mean_score: media.mean_score,
+            description: media.description,
         }
     }
 }
