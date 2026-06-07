@@ -440,6 +440,7 @@ export function PlayerView(props: {
   const visibleRef = useRef(visible);
   const playbackSuspendedRef = useRef(playbackSuspended);
   playbackSuspendedRef.current = playbackSuspended;
+  const prevPlaybackSuspendedRef = useRef(playbackSuspended);
   const minPositionSecondsToPersistRef = useRef(60);
   const sessionOpenedAtMsRef = useRef(Date.now());
   const sessionOpenedAsWatchedRef = useRef(episode.watched);
@@ -1096,6 +1097,16 @@ export function PlayerView(props: {
     if (!visible) clearEndAdvancePolling();
     return clearEndAdvancePolling;
   }, [clearEndAdvancePolling, visible]);
+
+  // Manual skip (or any suspended owner) may load a different file or leave mpv
+  // paused without unloading. Clear the cached path so the visible effect reloads.
+  useEffect(() => {
+    const wasSuspended = prevPlaybackSuspendedRef.current;
+    prevPlaybackSuspendedRef.current = playbackSuspended;
+    if (wasSuspended && !playbackSuspended) {
+      loadedPathRef.current = null;
+    }
+  }, [playbackSuspended]);
 
   useEffect(() => {
     let cancelled = false;

@@ -801,7 +801,6 @@ function App() {
   const openManualSkip = useCallback(() => {
     if (!selectedAnime) return;
     setManualSkipAnimeId(selectedAnime.id);
-    void stopMpv().catch(() => undefined);
     navigateToView("manualSkip", "restore");
   }, [navigateToView, selectedAnime]);
 

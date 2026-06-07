@@ -220,12 +220,13 @@ export function ManualSkipScreen(props: {
 
   const teardownMpv = useCallback(async () => {
     try {
-      await invoke("mpv_stop");
+      if (mpvReadyRef.current) {
+        await invoke("mpv_set_pause", { paused: true });
+      }
       await mpvClearPreviewRect(window.innerWidth, HIDDEN_PLAYER_SIDEBAR_PX);
     } catch {
       /* ignore teardown errors */
     }
-    mpvReadyRef.current = false;
   }, []);
 
   const applyEditorDuration = useCallback((stored: number, probed: number, mpv: number) => {
