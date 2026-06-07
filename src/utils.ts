@@ -285,5 +285,17 @@ export function sanitizeAnilistDescriptionHtml(html: string): string {
     }
   };
   sanitizeNode(doc.body);
-  return doc.body.innerHTML;
+  return formatAnilistDescriptionParagraphs(doc.body.innerHTML);
+}
+
+/** Turn AniList's `<br><br>` paragraph breaks into `<p>` blocks with modest spacing. */
+function formatAnilistDescriptionParagraphs(html: string): string {
+  const trimmed = html.trim();
+  if (!trimmed) return "";
+
+  const split = trimmed.replace(/(?:<br\s*\/?>\s*){2,}/gi, "</p><p>");
+  if (split.includes("</p><p>") || !/^<p[\s>]/i.test(split)) {
+    return `<p>${split}</p>`;
+  }
+  return split;
 }

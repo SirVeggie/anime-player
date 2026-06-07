@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   getAnilistCoverImage,
@@ -66,49 +66,6 @@ function mergeWithLatestProgress(
 
 function formatAnilistMeanScore(score: number): string {
   return Number.isInteger(score) ? String(score) : score.toFixed(1);
-}
-
-function AnilistBannerSummary(props: { description: string | null | undefined }) {
-  const { description } = props;
-  const textRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [truncated, setTruncated] = useState(false);
-  const summary = description?.trim() ?? "";
-  const summaryHtml = useMemo(
-    () => (summary ? sanitizeAnilistDescriptionHtml(summary) : ""),
-    [summary],
-  );
-
-  useLayoutEffect(() => {
-    if (!summaryHtml || expanded) {
-      setTruncated(false);
-      return;
-    }
-    const element = textRef.current;
-    if (!element) return;
-    setTruncated(element.scrollHeight > element.clientHeight + 1);
-  }, [expanded, summaryHtml]);
-
-  if (!summaryHtml) return null;
-
-  return (
-    <div className="anime-detail-summary">
-      <div
-        ref={textRef}
-        className={expanded ? "anime-detail-summary-text" : "anime-detail-summary-text anime-detail-summary-text--clamped"}
-        dangerouslySetInnerHTML={{ __html: summaryHtml }}
-      />
-      {truncated || expanded ? (
-        <button
-          type="button"
-          className="anime-detail-summary-toggle"
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? "Show less" : "Show more"}
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 function parseIntegerDraft(value: string, label: string): number {
@@ -243,6 +200,11 @@ export function EpisodeScreen(props: {
   const [animeSettingsSaving, setAnimeSettingsSaving] = useState(false);
   const [animeSettingsError, setAnimeSettingsError] = useState<string | null>(null);
   const [anilistStatus, setAnilistStatus] = useState<AnilistMediaStatus | null>(null);
+  const [anilistSummaryOpen, setAnilistSummaryOpen] = useState(false);
+  const anilistSummaryHtml = useMemo(() => {
+    const summary = anilistStatus?.description?.trim() ?? "";
+    return summary ? sanitizeAnilistDescriptionHtml(summary) : "";
+  }, [anilistStatus?.description]);
   const [scoreDraft, setScoreDraft] = useState("");
   const [scoreSaving, setScoreSaving] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
@@ -386,6 +348,10 @@ export function EpisodeScreen(props: {
       cancelled = true;
     };
   }, [anime.anilist_cover_path, anime.id]);
+
+  useEffect(() => {
+    setAnilistSummaryOpen(false);
+  }, [anime.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -882,81 +848,117 @@ export function EpisodeScreen(props: {
       />
 
       {anilistFeaturesEnabled && anime.anilist_id ? (
-        <section className="anime-detail-panel">
-          <button
-            type="button"
-            className="anime-detail-main"
-            onClick={() => {
-              const url = anime.anilist_site_url;
-              if (url) onOpenAnilist(url);
-            }}
-            disabled={!anime.anilist_site_url}
-            aria-label={`Open ${anime.anilist_title ?? anime.title} on AniList`}
-          >
-            <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
-              {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <h2>{anime.anilist_title ?? anime.title}</h2>
-              <p className="muted">Linked to AniList #{anime.anilist_id}</p>
-              <p className="muted">
-                {anilistAuthenticated
-                  ? `Progress: ${anilistStatus?.progress ?? "?"}/${anilistStatus?.episodes ?? "?"}`
-                  : `Episodes: ${anilistStatus?.episodes ?? "?"}`}
-              </p>
-            </div>
-          </button>
-          <AnilistBannerSummary description={anilistStatus?.description} />
-          {anilistAuthenticated ? (
-            <div className="anilist-score-control">
-              <label>
-                <span>Score</span>
-                <div className="score-stepper">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={scoreDraft}
-                    placeholder="No score"
-                    disabled={scoreSaving}
-                    onChange={(e) => updateScoreDraft(e.currentTarget.value)}
-                    onBlur={(e) => {
-                      if (scoreSaveTimerRef.current !== null) {
-                        window.clearTimeout(scoreSaveTimerRef.current);
-                        scoreSaveTimerRef.current = null;
-                        void saveScore(e.currentTarget.value);
-                      }
-                    }}
-                  />
-                  <div className="score-stepper-buttons">
-                    <button
-                      type="button"
-                      className="score-stepper-button score-stepper-button--up"
-                      aria-label="Increase AniList score"
-                      disabled={scoreSaving}
-                      onClick={() => stepScoreDraft(1)}
-                    />
-                    <button
-                      type="button"
-                      className="score-stepper-button score-stepper-button--down"
-                      aria-label="Decrease AniList score"
-                      disabled={scoreSaving}
-                      onClick={() => stepScoreDraft(-1)}
-                    />
-                  </div>
+        <section
+          className={`anime-detail-panel${anilistSummaryOpen ? " anime-detail-panel--summary-open" : ""}`}
+        >
+          <div className="anime-detail-top">
+            <div className="anime-detail-main">
+              <button
+                type="button"
+                className="anime-detail-cover-link"
+                onClick={() => {
+                  const url = anime.anilist_site_url;
+                  if (url) onOpenAnilist(url);
+                }}
+                disabled={!anime.anilist_site_url}
+                aria-label={`Open ${anime.anilist_title ?? anime.title} on AniList`}
+              >
+                <div className={`anime-detail-cover${animeCover ? " anime-detail-cover--image" : ""}`}>
+                  {animeCover ? <img src={animeCover} alt="" /> : anime.title.slice(0, 2).toUpperCase()}
                 </div>
-              </label>
-              {scoreError ? <span className="anilist-score-error">{scoreError}</span> : null}
+              </button>
+              <div className="anime-detail-text">
+                <button
+                  type="button"
+                  className="anime-detail-title-link"
+                  onClick={() => {
+                    const url = anime.anilist_site_url;
+                    if (url) onOpenAnilist(url);
+                  }}
+                  disabled={!anime.anilist_site_url}
+                  aria-label={`Open ${anime.anilist_title ?? anime.title} on AniList`}
+                >
+                  <h2>{anime.anilist_title ?? anime.title}</h2>
+                  <p className="muted">Linked to AniList #{anime.anilist_id}</p>
+                  <p className="muted">
+                    {anilistAuthenticated
+                      ? `Progress: ${anilistStatus?.progress ?? "?"}/${anilistStatus?.episodes ?? "?"}`
+                      : `Episodes: ${anilistStatus?.episodes ?? "?"}`}
+                  </p>
+                </button>
+                {anilistSummaryHtml ? (
+                  <button
+                    type="button"
+                    className="anime-detail-summary-toggle"
+                    aria-expanded={anilistSummaryOpen}
+                    onClick={() => setAnilistSummaryOpen((open) => !open)}
+                  >
+                    {anilistSummaryOpen ? "Hide summary" : "Show summary"}
+                  </button>
+                ) : null}
+              </div>
             </div>
-          ) : (
-            <div className="anilist-mean-score">
-              <span>Mean score</span>
-              <strong>
-                {anilistStatus?.mean_score == null ? "—" : formatAnilistMeanScore(anilistStatus.mean_score)}
-              </strong>
+            {anilistAuthenticated ? (
+              <div className="anilist-score-control">
+                <label>
+                  <span>Score</span>
+                  <div className="score-stepper">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={scoreDraft}
+                      placeholder="No score"
+                      disabled={scoreSaving}
+                      onChange={(e) => updateScoreDraft(e.currentTarget.value)}
+                      onBlur={(e) => {
+                        if (scoreSaveTimerRef.current !== null) {
+                          window.clearTimeout(scoreSaveTimerRef.current);
+                          scoreSaveTimerRef.current = null;
+                          void saveScore(e.currentTarget.value);
+                        }
+                      }}
+                    />
+                    <div className="score-stepper-buttons">
+                      <button
+                        type="button"
+                        className="score-stepper-button score-stepper-button--up"
+                        aria-label="Increase AniList score"
+                        disabled={scoreSaving}
+                        onClick={() => stepScoreDraft(1)}
+                      />
+                      <button
+                        type="button"
+                        className="score-stepper-button score-stepper-button--down"
+                        aria-label="Decrease AniList score"
+                        disabled={scoreSaving}
+                        onClick={() => stepScoreDraft(-1)}
+                      />
+                    </div>
+                  </div>
+                </label>
+                {scoreError ? <span className="anilist-score-error">{scoreError}</span> : null}
+              </div>
+            ) : (
+              <div className="anilist-mean-score">
+                <span>Mean score</span>
+                <strong>
+                  {anilistStatus?.mean_score == null ? "—" : formatAnilistMeanScore(anilistStatus.mean_score)}
+                </strong>
+              </div>
+            )}
+          </div>
+          {anilistSummaryHtml ? (
+            <div className="anime-detail-summary-expand" aria-hidden={!anilistSummaryOpen}>
+              <div className="anime-detail-summary-inner">
+                <div
+                  className="anime-detail-summary-text"
+                  dangerouslySetInnerHTML={{ __html: anilistSummaryHtml }}
+                />
+              </div>
             </div>
-          )}
+          ) : null}
         </section>
       ) : null}
 
