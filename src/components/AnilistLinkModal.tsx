@@ -14,10 +14,12 @@ export function AnilistLinkModal(props: {
   const [linkSearchBusy, setLinkSearchBusy] = useState(false);
   const [linkSearchError, setLinkSearchError] = useState<string | null>(null);
   const linkSearchRequestRef = useRef(0);
+  const linkQueryRef = useRef(linkQuery);
+  linkQueryRef.current = linkQuery;
 
   const runLinkSearch = useCallback(
     async (queryOverride?: string) => {
-      const query = (queryOverride ?? linkQuery).trim();
+      const query = (queryOverride ?? linkQueryRef.current).trim();
       if (!query) return;
       const requestId = linkSearchRequestRef.current + 1;
       linkSearchRequestRef.current = requestId;
@@ -38,7 +40,7 @@ export function AnilistLinkModal(props: {
         }
       }
     },
-    [linkQuery, onSearch],
+    [onSearch],
   );
 
   useEffect(() => {
