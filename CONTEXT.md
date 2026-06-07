@@ -354,9 +354,12 @@ view components. Per-screen UI lives in `src/components/`:
   `manual_op_ed_rematch:{anime_id}:{episode_id}` job per episode (medium priority;
   each waits only on that episode's chroma prerequisite). Deleting all manual templates and leaving rematches against auto templates only.
   **Run analysis** with manual templates enqueues chroma for episodes missing a
-  full-episode fingerprint, then one rematch job per episode (clears existing segment
-  rows first so every episode is rematched). Results stream in per episode as each
-  job finishes — no need to wait for all chroma jobs before the first timestamps appear.
+  full-episode fingerprint, then one rematch job per episode plus a summary shell job
+  (`manual_op_ed_rematch:{anime_id}`, type `manual_op_ed_rematch_summary`) that lists every
+  episode rematch as a prerequisite for the episode-page progress bar; the shell finishes
+  immediately when all episode jobs complete. Clears existing segment rows first so every
+  episode is rematched. Results stream in per episode as each job finishes — no need to
+  wait for all chroma jobs before the first timestamps appear.
   Missing custom template `.fp` files are regenerated from the stored source episode and range before matching. Chromaprint cache files
   live under `data/op-ed/fp-full` (full episodes), `fp-part` (discovery
   windows and auto templates), and `fp-custom` (manual template extracts). Opening the

@@ -10,6 +10,10 @@ export function manualOpEdRematchJobIdentity(animeId: number): string {
   return `manual_op_ed_rematch:${animeId}`;
 }
 
+export function manualOpEdRematchSummaryJobIdentity(animeId: number): string {
+  return manualOpEdRematchJobIdentity(animeId);
+}
+
 export function manualOpEdRematchEpisodeJobIdentity(animeId: number, episodeId: number): string {
   return `manual_op_ed_rematch:${animeId}:${episodeId}`;
 }
@@ -41,6 +45,19 @@ export function opEdDetectBatchFraction(jobName: string): string | null {
   return match ? `(${match[1]})` : null;
 }
 
+/** Progress fraction for the manual-rematch summary shell (two prerequisite steps per episode). */
+export function manualRematchBatchFraction(job: JobRecord): string | null {
+  if (job.jobType !== "manual_op_ed_rematch_summary") return null;
+  if (job.prerequisiteProgressTotal <= 0) return null;
+  const totalEpisodes = job.prerequisiteProgressTotal / 2;
+  if (totalEpisodes <= 0) return null;
+  const doneEpisodes = Math.min(
+    totalEpisodes,
+    Math.floor(job.prerequisiteProgressCurrent / 2),
+  );
+  return `(${doneEpisodes}/${totalEpisodes})`;
+}
+
 export function findActiveOpEdJob(
   snapshot: JobsSnapshot | null | undefined,
   animeId: number,
@@ -48,15 +65,22 @@ export function findActiveOpEdJob(
   if (!snapshot) return null;
   const legacy = opEdJobIdentity(animeId);
   const batchPrefix = `${legacy}:`;
+  const manualSummary = manualOpEdRematchSummaryJobIdentity(animeId);
   const manualRematchPrefix = manualOpEdRematchJobIdentityPrefix(animeId);
-  const legacyManualRematch = manualOpEdRematchJobIdentity(animeId);
+
+  const summaryJob = snapshot.active.find(
+    (job) =>
+      job.identity === manualSummary &&
+      (job.status === "queued" || job.status === "running"),
+  );
+  if (summaryJob) return summaryJob;
+
   return (
     snapshot.active.find(
       (job) =>
         (job.identity === legacy ||
           job.identity.startsWith(batchPrefix) ||
-          job.identity.startsWith(manualRematchPrefix) ||
-          job.identity === legacyManualRematch) &&
+          job.identity.startsWith(manualRematchPrefix)) &&
         (job.status === "queued" || job.status === "running"),
     ) ?? null
   );

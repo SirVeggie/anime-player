@@ -91,6 +91,10 @@ enum JobKind {
         anime_id: i64,
         episode_id: i64,
     },
+    /// Episode-page progress shell; waits on per-episode rematch jobs then finishes immediately.
+    OpEdManualRematchSummary {
+        anime_id: i64,
+    },
 }
 
 struct JobRecord {
@@ -294,6 +298,7 @@ impl JobManager {
         match kind {
             JobKind::OpEdDetect { anime_id, .. } => Some(*anime_id),
             JobKind::OpEdManualRematch { anime_id, .. } => Some(*anime_id),
+            JobKind::OpEdManualRematchSummary { .. } => None,
             _ => None,
         }
     }
@@ -413,6 +418,13 @@ impl JobManager {
     }
 
     pub fn cancel(&mut self, job_id: &str) -> Result<(), String> {
+        let child_ids: Vec<String> = self
+            .records
+            .get(job_id)
+            .filter(|r| matches!(r.kind, JobKind::OpEdManualRematchSummary { .. }))
+            .map(|r| r.prerequisite_job_ids.clone())
+            .unwrap_or_default();
+
         let Some(record) = self.records.get(job_id) else {
             return Err(format!("job not found: {job_id}"));
         };
@@ -434,6 +446,9 @@ impl JobManager {
                 JobStatus::Canceled,
                 Some("Canceled by user".to_string()),
             );
+        }
+        for child_id in child_ids {
+            let _ = self.cancel(&child_id);
         }
         Ok(())
     }
@@ -1217,8 +1232,15 @@ impl JobManager {
 
         let episode_labels = db.with_conn(|conn| op_ed::episode_display_labels(conn, anime_id))?;
 
-        let mut first_job_id: Option<String> = None;
-        let mut any_queued = false;
+        let summary_identity = op_ed::manual_op_ed_rematch_summary_job_identity(anime_id);
+        if let Some(existing_id) = self.identity_to_id.get(&summary_identity).cloned() {
+            if self.records.contains_key(&existing_id) {
+                self.finish_op_ed_enqueue_batch();
+                return Ok(EnqueueJobResult::queued(Some(existing_id)));
+            }
+        }
+
+        let mut episode_job_ids: Vec<String> = Vec::new();
         for ep in &episodes {
             let episode_label = episode_labels
                 .get(&ep.id)
@@ -1233,19 +1255,75 @@ impl JobManager {
                 chroma_priority,
                 anime_title,
             )? {
-                any_queued = true;
-                if first_job_id.is_none() {
-                    first_job_id = Some(job_id);
-                }
+                episode_job_ids.push(job_id);
             }
         }
 
-        self.finish_op_ed_enqueue_batch();
-        if any_queued {
-            Ok(EnqueueJobResult::queued(first_job_id))
-        } else {
-            Ok(EnqueueJobResult::skipped())
+        if episode_job_ids.is_empty() {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult::skipped());
         }
+
+        let summary_id =
+            self.enqueue_manual_op_ed_rematch_summary(anime_id, &title, episode_job_ids)?;
+        self.finish_op_ed_enqueue_batch();
+        Ok(EnqueueJobResult::queued(Some(summary_id)))
+    }
+
+    fn enqueue_manual_op_ed_rematch_summary(
+        &mut self,
+        anime_id: i64,
+        anime_title: &str,
+        episode_job_ids: Vec<String>,
+    ) -> Result<String, String> {
+        let identity = op_ed::manual_op_ed_rematch_summary_job_identity(anime_id);
+        if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
+            if self.records.contains_key(&existing_id) {
+                return Ok(existing_id);
+            }
+        }
+
+        let episode_count = episode_job_ids.len();
+        let (id, short_id) = alloc_job_ids();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let view = JobView {
+            id: id.clone(),
+            short_id,
+            name: format!("Rematch manual skip ({episode_count} episodes)"),
+            desc: anime_title.to_string(),
+            identity: identity.clone(),
+            job_type: "manual_op_ed_rematch_summary".to_string(),
+            resource_type: JobResourceType::None,
+            priority: JobPriority::Medium,
+            status: JobStatus::Queued,
+            cancelable: true,
+            progress: JobProgress {
+                current_step: 0,
+                total_steps: 1,
+            },
+            step_label: "Waiting for episode jobs".to_string(),
+            completion_message: None,
+            created_at: now_ms(),
+            started_at: None,
+            finished_at: None,
+            waiting_for: Vec::new(),
+            prerequisite_total: episode_job_ids.len() as u32,
+            prerequisite_pending: 0,
+            prerequisite_progress_current: 0,
+            prerequisite_progress_total: 0,
+        };
+        let record = JobRecord {
+            view,
+            cancel,
+            kind: JobKind::OpEdManualRematchSummary { anime_id },
+            follow_ups: Vec::new(),
+            prerequisite_job_ids: episode_job_ids,
+        };
+        self.records.insert(id.clone(), record);
+        self.identity_to_id.insert(identity, id.clone());
+        self.try_start_or_queue(&id, false);
+        self.queued_ids.push(id.clone());
+        Ok(id)
     }
 
     /// One rematch job per episode; prerequisite is that episode's chroma job only.
@@ -1647,6 +1725,13 @@ impl JobManager {
                     cancel,
                 );
             }
+            JobKind::OpEdManualRematchSummary { .. } => {
+                self.complete_worker(
+                    job_id,
+                    WorkerOutcome::Done("Manual skip rematch complete".to_string(), None),
+                );
+                return;
+            }
         }
         self.emit_snapshot();
     }
@@ -1665,7 +1750,8 @@ impl JobManager {
             JobKind::ScrubSprite { path } => Some(path.clone()),
             JobKind::OpEdChroma { .. }
             | JobKind::OpEdDetect { .. }
-            | JobKind::OpEdManualRematch { .. } => None,
+            | JobKind::OpEdManualRematch { .. }
+            | JobKind::OpEdManualRematchSummary { .. } => None,
         });
 
         let op_ed_updated_anime_id = self

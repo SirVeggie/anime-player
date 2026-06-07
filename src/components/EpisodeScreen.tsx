@@ -16,7 +16,7 @@ import { loadEpisodeThumbnailUrls } from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
 import { useJobsSnapshot } from "../jobs/jobClient";
-import { findActiveOpEdJob, opEdDetectBatchFraction, opEdSegmentLabel } from "../opEd";
+import { findActiveOpEdJob, manualRematchBatchFraction, opEdDetectBatchFraction, opEdSegmentLabel } from "../opEd";
 import type {
   AnimeSummary,
   AnilistMediaStatus,
@@ -196,7 +196,10 @@ export function EpisodeScreen(props: {
     () => findActiveOpEdJob(jobsSnapshot, anime.id),
     [anime.id, jobsSnapshot],
   );
-  const activeOpEdBatch = activeOpEdJob ? opEdDetectBatchFraction(activeOpEdJob.name) : null;
+  const activeOpEdBatch = activeOpEdJob
+    ? (manualRematchBatchFraction(activeOpEdJob) ??
+      opEdDetectBatchFraction(activeOpEdJob.name))
+    : null;
   const linkSearchRequestRef = useRef(0);
   const scoreSaveTimerRef = useRef<number | null>(null);
   const scoreSaveRequestRef = useRef(0);

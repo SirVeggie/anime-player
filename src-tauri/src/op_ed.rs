@@ -2811,7 +2811,12 @@ pub fn manual_op_ed_rematch_job_identity_prefix(anime_id: i64) -> String {
     format!("{MANUAL_REMATCH_JOB_NAME}:{anime_id}:")
 }
 
-/// Legacy single-job identity prefix; per-episode jobs use [`manual_op_ed_rematch_episode_job_identity`].
+/// Episode-page progress shell; per-episode work uses [`manual_op_ed_rematch_episode_job_identity`].
+pub fn manual_op_ed_rematch_summary_job_identity(anime_id: i64) -> String {
+    format!("{MANUAL_REMATCH_JOB_NAME}:{anime_id}")
+}
+
+/// Same as [`manual_op_ed_rematch_job_identity_prefix`]; kept for call-site clarity.
 pub fn manual_op_ed_rematch_job_identity(anime_id: i64) -> String {
     manual_op_ed_rematch_job_identity_prefix(anime_id)
 }
