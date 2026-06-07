@@ -1513,7 +1513,6 @@ function App() {
               onOpenAnilist={(url) => void handleOpenAnilist(url)}
               anilistConnected={isAnilistConnected(anilistAuth)}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
-              autoOpEdDetect={library.auto_op_ed_detect}
               onOpEdAnalysisUpdated={() => {
                 if (selectedAnime) void refreshAnimeEpisodes(selectedAnime.id);
               }}

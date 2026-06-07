@@ -4,6 +4,7 @@ import { formatTime } from "../utils";
 const MIN_DURATION_SEC = 5;
 const MAX_DURATION_SEC = 180;
 const REPEAT_MS = 80;
+const REPEAT_DELAY_MS = 200;
 const COARSE_FRAME_MULTIPLIER = 5;
 
 type DragMode = "left" | "right" | "move" | null;
@@ -48,6 +49,7 @@ function FrameStepButton(props: {
   onStep: (delta: number) => void;
 }) {
   const { label, config, frameStepSec, onStep } = props;
+  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const holdingRef = useRef(false);
   const onStepRef = useRef(onStep);
@@ -57,6 +59,10 @@ function FrameStepButton(props: {
 
   const clearRepeat = useCallback(() => {
     holdingRef.current = false;
+    if (delayRef.current !== null) {
+      window.clearTimeout(delayRef.current);
+      delayRef.current = null;
+    }
     if (repeatRef.current !== null) {
       window.clearInterval(repeatRef.current);
       repeatRef.current = null;
@@ -74,7 +80,10 @@ function FrameStepButton(props: {
       e.stopPropagation();
       holdingRef.current = true;
       stepOnce();
-      repeatRef.current = window.setInterval(stepOnce, REPEAT_MS);
+      delayRef.current = window.setTimeout(() => {
+        delayRef.current = null;
+        repeatRef.current = window.setInterval(stepOnce, REPEAT_MS);
+      }, REPEAT_DELAY_MS);
     },
     [stepOnce],
   );
@@ -262,6 +271,41 @@ export function TemplateRangeScrubber(props: {
     onEndChangeRef.current(next.endSec);
     onSeekRef.current(next.endSec);
   }, []);
+
+  const frameStepSecRef = useRef(frameStepSec);
+  frameStepSecRef.current = frameStepSec;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "ArrowLeft" && e.code !== "ArrowRight") return;
+      const target = e.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      ) {
+        return;
+      }
+      if (durationRef.current <= 0) return;
+
+      const direction = e.code === "ArrowLeft" ? -1 : 1;
+      const frames = e.shiftKey ? COARSE_FRAME_MULTIPLIER : 1;
+      const delta = direction * frames * frameStepSecRef.current;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.ctrlKey) {
+        stepEnd(delta);
+      } else {
+        stepStart(delta);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [stepEnd, stepStart]);
 
   return (
     <div className="template-range-scrubber">

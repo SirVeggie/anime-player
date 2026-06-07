@@ -185,7 +185,7 @@ export function SettingsScreen(props: {
             disabled={busy}
             onChange={onAutoOpEdDetect}
             label="Auto-detect anime openings/endings"
-            tooltip="When enabled, opening and ending detection runs automatically when you open a title's episode list or after a small library rescan. Turn this off to run analysis manually from each title's settings."
+            tooltip="When enabled, OP/ED detection runs automatically for titles that do not have skip timestamps yet (episode list visits and small rescans). Titles that already have matched skip timestamps keep automatic follow-up even when this is off."
           />
         </div>
         <div className="settings-item settings-item--stacked">

@@ -198,8 +198,8 @@ export function ManualSkipScreen(props: {
       height: rect.height,
       windowWidth: window.innerWidth,
       windowHeight: window.innerHeight,
-    }).catch((e) => onError(errorMessage(e)));
-  }, [onError]);
+    }).catch((e) => onErrorRef.current(errorMessage(e)));
+  }, []);
 
   const schedulePreviewRect = useCallback(() => {
     if (layoutTimerRef.current !== null) {
@@ -227,8 +227,10 @@ export function ManualSkipScreen(props: {
     );
   }, []);
 
+  const mpvFileReadyRef = useRef(false);
+
   const loadEditorEpisode = useCallback(
-    async (episode: Episode) => {
+    async (episode: Episode): Promise<boolean> => {
       try {
         if (!mpvReadyRef.current) {
           await invoke("mpv_init", {
@@ -246,11 +248,13 @@ export function ManualSkipScreen(props: {
         await invoke("mpv_set_pause", { paused: true });
         setFrameStepSec(fps > 0 ? 1 / fps : 1 / 24);
         schedulePreviewRect();
+        return true;
       } catch (e) {
-        onError(errorMessage(e));
+        onErrorRef.current(errorMessage(e));
+        return false;
       }
     },
-    [applyEditorDuration, onError, schedulePreviewRect],
+    [applyEditorDuration, schedulePreviewRect],
   );
 
   const editorEpisode = view.kind === "editor" ? view.episode : null;
@@ -281,8 +285,8 @@ export function ManualSkipScreen(props: {
 
   useEffect(() => {
     if (view.kind !== "editor") return;
-    void setMpvVolume(muted ? 0 : volume).catch((e) => onError(errorMessage(e)));
-  }, [muted, onError, view.kind, volume]);
+    void setMpvVolume(muted ? 0 : volume).catch((e) => onErrorRef.current(errorMessage(e)));
+  }, [muted, view.kind, volume]);
 
   useEffect(() => {
     return () => {
@@ -326,21 +330,30 @@ export function ManualSkipScreen(props: {
     };
   }, [teardownMpv]);
 
+  const editorEpisodeId = view.kind === "editor" ? view.episode.id : null;
+  const editorEpisodePath = view.kind === "editor" ? view.episode.path : null;
+
   useEffect(() => {
-    if (!editorEpisode || view.kind !== "editor") return;
+    if (editorEpisodeId == null || editorEpisodePath == null || view.kind !== "editor") return;
+
+    const episode = view.episode;
     const startSec = view.startSec;
-    void (async () => {
-      await loadEditorEpisode(editorEpisode);
-      try {
-        await invoke("mpv_seek", { seconds: startSec, keyframe: false });
-        await invoke("mpv_set_pause", { paused: true });
-      } catch (e) {
-        onError(errorMessage(e));
-      }
-    })();
+    let cancelled = false;
+    let initialSeekDone = false;
+    mpvFileReadyRef.current = false;
+
+    const seekToStart = () => {
+      if (cancelled || initialSeekDone || !mpvFileReadyRef.current) return;
+      initialSeekDone = true;
+      void invoke("mpv_seek", { seconds: startSec, keyframe: false })
+        .then(() => invoke("mpv_set_pause", { paused: true }))
+        .catch((e) => {
+          if (!cancelled) onErrorRef.current(errorMessage(e));
+        });
+    };
+
     const el = previewRef.current;
     if (!el) return;
-    let cancelled = false;
     const observer = new ResizeObserver(() => schedulePreviewRect());
     observer.observe(el);
     const onResize = () => schedulePreviewRect();
@@ -349,16 +362,24 @@ export function ManualSkipScreen(props: {
     let unlistenPlaybackRestart: (() => void) | undefined;
     let unlistenTimePos: (() => void) | undefined;
     let unlistenDuration: (() => void) | undefined;
+
     void (async () => {
       unlistenDuration = await listen("mpv://duration", (e) => {
         if (cancelled || typeof e.payload !== "number" || e.payload <= 0) return;
-        applyEditorDuration(editorEpisode.duration_seconds, 0, e.payload);
+        applyEditorDuration(episode.duration_seconds, 0, e.payload);
       });
-      unlistenFileLoaded = await listen("mpv://file-loaded", () => schedulePreviewRect());
+      unlistenFileLoaded = await listen("mpv://file-loaded", () => {
+        if (cancelled) return;
+        mpvFileReadyRef.current = true;
+        schedulePreviewRect();
+        seekToStart();
+      });
       unlistenPlaybackRestart = await listen("mpv://playback-restart", () => {
         if (cancelled) return;
+        mpvFileReadyRef.current = true;
         setPreviewCompositorRevealed(true);
         schedulePreviewRect();
+        seekToStart();
       });
       unlistenTimePos = await listen("mpv://time-pos", (e) => {
         if (cancelled) return;
@@ -370,7 +391,7 @@ export function ManualSkipScreen(props: {
             playbackRef.current = null;
             setPlaybackMode(null);
             void invoke("mpv_set_pause", { paused: true }).catch((err) =>
-              onError(errorMessage(err)),
+              onErrorRef.current(errorMessage(err)),
             );
           }
           return;
@@ -378,7 +399,7 @@ export function ManualSkipScreen(props: {
         if (playback.phase === "pre" && pos >= playback.startSec && pos < playback.endSec) {
           playback.phase = "post-skip";
           void invoke("mpv_seek", { seconds: playback.endSec, keyframe: false }).catch((err) =>
-            onError(errorMessage(err)),
+            onErrorRef.current(errorMessage(err)),
           );
           return;
         }
@@ -386,13 +407,20 @@ export function ManualSkipScreen(props: {
           playbackRef.current = null;
           setPlaybackMode(null);
           void invoke("mpv_set_pause", { paused: true }).catch((err) =>
-            onError(errorMessage(err)),
+            onErrorRef.current(errorMessage(err)),
           );
         }
       });
+
+      if (cancelled) return;
+      const loaded = await loadEditorEpisode(episode);
+      if (cancelled || !loaded) return;
+      seekToStart();
     })();
+
     return () => {
       cancelled = true;
+      mpvFileReadyRef.current = false;
       playbackRef.current = null;
       setPlaybackMode(null);
       observer.disconnect();
@@ -403,15 +431,7 @@ export function ManualSkipScreen(props: {
       unlistenDuration?.();
       void teardownMpv();
     };
-  }, [
-    applyEditorDuration,
-    editorEpisode?.duration_seconds,
-    editorEpisode?.id,
-    loadEditorEpisode,
-    onError,
-    schedulePreviewRect,
-    teardownMpv,
-  ]);
+  }, [applyEditorDuration, editorEpisodeId, editorEpisodePath, loadEditorEpisode, schedulePreviewRect, teardownMpv]);
 
   const exitScreen = useCallback(() => {
     void teardownMpv().finally(() => {
@@ -432,13 +452,14 @@ export function ManualSkipScreen(props: {
 
   const seekPreview = useCallback(
     (seconds: number) => {
+      if (!mpvFileReadyRef.current) return;
       void stopEditorPlayback().then(() =>
         invoke("mpv_seek", { seconds, keyframe: false })
           .then(() => invoke("mpv_set_pause", { paused: true }))
-          .catch((e) => onError(errorMessage(e))),
+          .catch((e) => onErrorRef.current(errorMessage(e))),
       );
     },
-    [onError, stopEditorPlayback],
+    [stopEditorPlayback],
   );
 
   const stopPlaybackOnRangeChange = useCallback(() => {

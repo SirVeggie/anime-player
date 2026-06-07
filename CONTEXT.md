@@ -267,9 +267,10 @@ view components. Per-screen UI lives in `src/components/`:
   via CSS `background-position`.
 - **OP/ED detection** is queued automatically like scrub sprites when
   `settings.auto_op_ed_detect` is enabled (default off): opening a title’s
-  episode page calls `jobs_enqueue_episode_page_op_ed` (the request’s `priority`
-  field controls **chroma** scheduling only — medium on the episode page).
-  Titles with manual skip templates use `anime_needs_manual_op_ed_rematch` instead
+  episode page may enqueue OP/ED work when needed. The setting applies only to
+  titles with no matched skip timestamps yet; titles that already have matched
+  OP/ED segments keep automatic follow-up (new episodes, staleness) even when
+  the setting is off. Titles with manual skip templates use `anime_needs_manual_op_ed_rematch` instead
   of the auto-detect staleness check: rematch runs only when episodes lack segment
   rows (new imports) or custom templates changed without a follow-up rematch.
   Detect jobs (`op_ed_detect:{anime_id}`, resource type `none`) always enqueue at
@@ -333,7 +334,8 @@ view components. Per-screen UI lives in `src/components/`:
   `jobs_enqueue_op_ed_detect`, not gated by `auto_op_ed_detect`) and **Reset**
   (clears auto-detected templates and segment rows; manual/custom templates and
   Chromaprint cache files are kept for faster rematch). Settings **Auto-detect anime openings/endings**
-  toggles `settings.auto_op_ed_detect`. Global **Skip detected OP/ED**
+  toggles `settings.auto_op_ed_detect` for titles without matched skip timestamps;
+  analyzed titles with existing timestamps are not gated by it. Global **Skip detected OP/ED**
   (`settings.skip_op_ed`, player **Skip OP/ED** toggle) seeks past matched
   segments on `mpv://time-pos`. **Don't skip first episode opening/ending**
   (`settings.dont_skip_first_episode_op_ed`) exempts display episode 1 from that
@@ -362,7 +364,10 @@ view components. Per-screen UI lives in `src/components/`:
   `matched` segment, **Missing segments** (OP/ED columns). The source picker marks
   episodes missing that kind at lower opacity. New templates pre-fill the scrubber
   from auto-detected `matched` segments (`search_pass != 'manual'`) when present.
-  **Escape** steps back (editor → list, picker → list, list → episodes).
+  **Escape** steps back (editor → list, picker → list, list → episodes). In the
+  range editor, **ArrowLeft/ArrowRight** nudge the start handle by one frame
+  (Shift: five frames); **Ctrl+ArrowLeft/ArrowRight** nudge the end handle the
+  same way. Frame step buttons repeat after a 200ms hold delay.
 - Scrubber drag pauses playback (if it was playing), issues throttled keyframe
   `mpv_seek` preview seeks (`keyframe: true` / `absolute+keyframes`), then on
   release one final keyframe seek. After the seek settles, the UI reads

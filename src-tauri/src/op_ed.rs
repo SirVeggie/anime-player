@@ -2555,6 +2555,30 @@ pub fn read_auto_op_ed_detect(conn: &Connection) -> Result<bool, String> {
     Ok(matches!(value.as_deref(), Some("1" | "true" | "yes")))
 }
 
+/// True when at least one non-missing episode has a matched OP or ED skip timestamp.
+pub fn anime_has_op_ed_skip_timestamps(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM episode_op_ed_segments s
+            INNER JOIN episodes e ON e.id = s.episode_id
+            WHERE e.anime_id = ?1 AND e.missing = 0 AND s.status = 'matched'
+         )",
+        params![anime_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Whether automatic OP/ED enqueue (episode page / small rescan) may run for this title.
+/// Titles with existing matched skip timestamps keep automatic follow-up; the setting
+/// gates only titles that have never produced skip timestamps.
+pub fn auto_op_ed_enqueue_allowed(conn: &Connection, anime_id: i64) -> Result<bool, String> {
+    if anime_has_op_ed_skip_timestamps(conn, anime_id)? {
+        return Ok(true);
+    }
+    read_auto_op_ed_detect(conn)
+}
+
 pub fn write_auto_op_ed_detect(conn: &Connection, enabled: bool) -> Result<(), String> {
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2)

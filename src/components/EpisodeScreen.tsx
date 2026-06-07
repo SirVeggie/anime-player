@@ -133,7 +133,6 @@ export function EpisodeScreen(props: {
   onOpenAnilist: (url: string) => void;
   anilistConnected: boolean;
   preferAnilistDisplayTitle: boolean;
-  autoOpEdDetect: boolean;
   onOpEdAnalysisUpdated: () => void;
   onOpenManualSkip: () => void;
   onShowToast: (kind: "success" | "error", message: string) => void;
@@ -144,7 +143,6 @@ export function EpisodeScreen(props: {
     episodesLoading = false,
     categories,
     preferAnilistDisplayTitle,
-    autoOpEdDetect,
     onBack,
     onPlay,
     onMoveAnime,
@@ -457,8 +455,6 @@ export function EpisodeScreen(props: {
   }, [anime.id, episodes.length]);
 
   useEffect(() => {
-    if (!autoOpEdDetect) return;
-
     void jobsEnqueueEpisodePageOpEd({
       animeId: anime.id,
       priority: "medium",
@@ -466,7 +462,7 @@ export function EpisodeScreen(props: {
     }).catch(() => {
       /* background queue; ignore */
     });
-  }, [anime.id, autoOpEdDetect, preferAnilistDisplayTitle]);
+  }, [anime.id, preferAnilistDisplayTitle]);
 
   const closeLinkSearch = useCallback(() => {
     linkSearchRequestRef.current += 1;

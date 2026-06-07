@@ -488,13 +488,15 @@ impl JobManager {
         if imports.is_empty() || imports.len() > RESCAN_AUTO_SCRUB_MAX {
             return Ok(());
         }
-        let auto_detect = db.with_conn(|conn| op_ed::read_auto_op_ed_detect(conn))?;
-        if !auto_detect {
-            return Ok(());
-        }
         let mut seen = std::collections::HashSet::new();
         for item in imports {
             if !seen.insert(item.anime_id) {
+                continue;
+            }
+            let allowed = db.with_conn(|conn| {
+                op_ed::auto_op_ed_enqueue_allowed(conn, item.anime_id)
+            })?;
+            if !allowed {
                 continue;
             }
             let needs =
@@ -519,8 +521,10 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<(), String> {
-        let auto_detect = db.with_conn(|conn| op_ed::read_auto_op_ed_detect(conn))?;
-        if !auto_detect {
+        let allowed = db.with_conn(|conn| {
+            op_ed::auto_op_ed_enqueue_allowed(conn, request.anime_id)
+        })?;
+        if !allowed {
             return Ok(());
         }
         let needs =
