@@ -589,6 +589,9 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<(), String> {
+        if self.active_manual_op_ed_rematch_job_id(request.anime_id).is_some() {
+            return Ok(());
+        }
         let allowed = db.with_conn(|conn| {
             op_ed::auto_op_ed_enqueue_allowed(conn, request.anime_id)
         })?;
@@ -1204,6 +1207,33 @@ impl JobManager {
         Ok(EnqueueJobResult::queued(Some(id)))
     }
 
+    /// Queued or running manual rematch work for a title (summary shell or per-episode jobs).
+    fn active_manual_op_ed_rematch_job_id(&self, anime_id: i64) -> Option<String> {
+        let summary_identity = op_ed::manual_op_ed_rematch_summary_job_identity(anime_id);
+        if let Some(existing_id) = self.identity_to_id.get(&summary_identity) {
+            if let Some(record) = self.records.get(existing_id) {
+                if matches!(
+                    record.view.status,
+                    JobStatus::Queued | JobStatus::Running
+                ) {
+                    return Some(existing_id.clone());
+                }
+            }
+        }
+        let prefix = op_ed::manual_op_ed_rematch_job_identity_prefix(anime_id);
+        for (id, record) in &self.records {
+            if record.view.identity.starts_with(&prefix)
+                && matches!(
+                    record.view.status,
+                    JobStatus::Queued | JobStatus::Running
+                )
+            {
+                return Some(id.clone());
+            }
+        }
+        None
+    }
+
     pub fn enqueue_manual_op_ed_rematch(
         &mut self,
         db: &AppDatabase,
@@ -1212,6 +1242,11 @@ impl JobManager {
         chroma_priority: JobPriority,
     ) -> Result<EnqueueJobResult, String> {
         db.with_conn(|conn| op_ed::validate_manual_templates_for_rematch(conn, anime_id))?;
+
+        if let Some(existing_id) = self.active_manual_op_ed_rematch_job_id(anime_id) {
+            self.finish_op_ed_enqueue_batch();
+            return Ok(EnqueueJobResult::queued(Some(existing_id)));
+        }
 
         let title = anime_title
             .map(str::trim)
@@ -1231,14 +1266,6 @@ impl JobManager {
         })?;
 
         let episode_labels = db.with_conn(|conn| op_ed::episode_display_labels(conn, anime_id))?;
-
-        let summary_identity = op_ed::manual_op_ed_rematch_summary_job_identity(anime_id);
-        if let Some(existing_id) = self.identity_to_id.get(&summary_identity).cloned() {
-            if self.records.contains_key(&existing_id) {
-                self.finish_op_ed_enqueue_batch();
-                return Ok(EnqueueJobResult::queued(Some(existing_id)));
-            }
-        }
 
         let mut episode_job_ids: Vec<String> = Vec::new();
         for ep in &episodes {
@@ -1418,6 +1445,12 @@ impl JobManager {
         let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, anime_id))?;
         let title = anime_title.as_deref();
         if has_manual {
+            if let Some(job_id) = self.active_manual_op_ed_rematch_job_id(anime_id) {
+                return Ok(op_ed::PrepareManualOpEdRematchResult {
+                    job_id: Some(job_id),
+                    used_manual_templates: true,
+                });
+            }
             db.with_conn(|conn| op_ed::validate_manual_templates_for_rematch(conn, anime_id))?;
             db.with_conn(|conn| op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
             let result =
@@ -1427,6 +1460,12 @@ impl JobManager {
                 used_manual_templates: true,
             })
         } else {
+            if let Some(job_id) = self.active_manual_op_ed_rematch_job_id(anime_id) {
+                return Ok(op_ed::PrepareManualOpEdRematchResult {
+                    job_id: Some(job_id),
+                    used_manual_templates: false,
+                });
+            }
             db.with_conn(|conn| op_ed::clear_episode_op_ed_segments_for_anime(conn, anime_id))?;
             let result = self.enqueue_op_ed_auto_rematch(db, anime_id, title)?;
             Ok(op_ed::PrepareManualOpEdRematchResult {

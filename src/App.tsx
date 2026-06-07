@@ -536,7 +536,9 @@ function App() {
     let unlisten: UnlistenFn | undefined;
     void listen<{ animeId: number }>("op-ed://analysis-updated", (event) => {
       const animeId = event.payload.animeId;
-      if (viewRef.current !== "episodes" || selectedAnimeIdRef.current !== animeId) return;
+      const currentView = viewRef.current;
+      if (selectedAnimeIdRef.current !== animeId) return;
+      if (currentView !== "episodes" && currentView !== "manualSkip") return;
       if (opEdRefreshTimerRef.current !== null) {
         window.clearTimeout(opEdRefreshTimerRef.current);
       }
@@ -1585,9 +1587,10 @@ function App() {
         </div>
       </section>
 
-      {showManualSkip && manualSkipAnime ? (
+      {showManualSkip && manualSkipAnime && library ? (
         <ManualSkipScreen
           anime={manualSkipAnime}
+          animeTitle={animeDisplayTitle(manualSkipAnime, library.prefer_anilist_display_title)}
           episodes={episodes}
           onBack={closeManualSkip}
           onDirtyClose={() => void handleManualSkipDirtyClose()}

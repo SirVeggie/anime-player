@@ -1,4 +1,4 @@
-import type { JobRecord, JobsSnapshot, OpEdSegmentInfo } from "./types";
+import type { Episode, JobRecord, JobsSnapshot, OpEdSegmentInfo } from "./types";
 import { jobStepProgressPercent } from "./jobs/jobUi";
 import { formatTime } from "./utils";
 
@@ -93,6 +93,13 @@ export function jobProgressPercent(job: JobRecord): number {
 export function isOpEdSegmentMissing(segments: OpEdSegmentInfo[], kind: "op" | "ed"): boolean {
   const seg = segments.find((s) => s.kind === kind);
   return seg?.status !== "matched";
+}
+
+/** True when at least one episode has a matched OP or ED skip timestamp. */
+export function animeHasMatchedSkipTimestamps(episodes: Episode[]): boolean {
+  return episodes.some((episode) =>
+    episode.op_ed_segments.some((segment) => segment.status === "matched"),
+  );
 }
 
 /** Time range for episode list OP/ED pills; null hides the pill for that kind. */

@@ -6,6 +6,7 @@ import {
   listManualOpEdTemplates,
   mpvClearPreviewRect,
   mpvSetPreviewRect,
+  prepareManualOpEdRematch,
   probeVideoDuration,
   probeVideoFps,
   saveManualOpEdTemplate,
@@ -16,7 +17,7 @@ import {
   readStoredManualSkipHideMatched,
   storeManualSkipHideMatched,
 } from "../manualSkipPicker";
-import { isOpEdSegmentMissing } from "../opEd";
+import { animeHasMatchedSkipTimestamps, isOpEdSegmentMissing } from "../opEd";
 import { clampVolume, HOTKEY_STEP, loadVolume, MAX_VOLUME, saveVolume } from "../volume";
 import type { AnimeSummary, Episode, ManualOpEdTemplate } from "../types";
 import {
@@ -125,16 +126,18 @@ function MissingSegmentColumn(props: {
 
 export function ManualSkipScreen(props: {
   anime: AnimeSummary;
+  animeTitle: string;
   episodes: Episode[];
   onBack: () => void;
   onDirtyClose: () => void;
   onError: (message: string) => void;
 }) {
-  const { anime, episodes, onBack, onDirtyClose, onError } = props;
+  const { anime, animeTitle, episodes, onBack, onDirtyClose, onError } = props;
   const [view, setView] = useState<ScreenView>({ kind: "list" });
   const [templates, setTemplates] = useState<ManualOpEdTemplate[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [matchBusy, setMatchBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [frameStepSec, setFrameStepSec] = useState(1 / 24);
   const [previewCompositorRevealed, setPreviewCompositorRevealed] = useState(false);
@@ -175,17 +178,31 @@ export function ManualSkipScreen(props: {
     );
   }, [episodes, hideMatched, view]);
 
-  const reloadTemplates = useCallback(async () => {
+  const reloadTemplates = useCallback(async (): Promise<ManualOpEdTemplate[]> => {
     setLoading(true);
     try {
       const rows = await listManualOpEdTemplates(anime.id);
       setTemplates(rows);
+      return rows;
     } catch (e) {
       onErrorRef.current(errorMessage(e));
+      return [];
     } finally {
       setLoading(false);
     }
   }, [anime.id]);
+
+  const runMatch = useCallback(async () => {
+    setMatchBusy(true);
+    try {
+      await prepareManualOpEdRematch(anime.id, animeTitle);
+      setDirty(false);
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+    } finally {
+      setMatchBusy(false);
+    }
+  }, [anime.id, animeTitle]);
 
   useEffect(() => {
     setView({ kind: "list" });
@@ -598,6 +615,7 @@ export function ManualSkipScreen(props: {
   const handleSave = useCallback(async () => {
     if (view.kind !== "editor") return;
     const durationSec = view.endSec - view.startSec;
+    const autoMatchAfterSave = animeHasMatchedSkipTimestamps(episodes);
     setSaving(true);
     try {
       if (view.templateId != null) {
@@ -617,14 +635,17 @@ export function ManualSkipScreen(props: {
       }
       setDirty(true);
       await teardownMpv();
-      await reloadTemplates();
+      const nextTemplates = await reloadTemplates();
       setView({ kind: "list" });
+      if (autoMatchAfterSave && nextTemplates.length > 0) {
+        await runMatch();
+      }
     } catch (e) {
       onError(errorMessage(e));
     } finally {
       setSaving(false);
     }
-  }, [anime.id, onError, reloadTemplates, teardownMpv, view]);
+  }, [anime.id, episodes, onError, reloadTemplates, runMatch, teardownMpv, view]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -693,6 +714,13 @@ export function ManualSkipScreen(props: {
             onBack={() => exitScreen()}
             action={
               <>
+                <button
+                  type="button"
+                  disabled={templates.length === 0 || loading || matchBusy}
+                  onClick={() => void runMatch()}
+                >
+                  {matchBusy ? "Matching…" : "Run Match"}
+                </button>
                 <button type="button" onClick={() => setView({ kind: "picker", templateKind: "op" })}>
                   Add OP
                 </button>
