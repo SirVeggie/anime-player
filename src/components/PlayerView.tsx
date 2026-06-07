@@ -865,14 +865,11 @@ export function PlayerView(props: {
         }
 
         await persistProgress(true, { deferAnilistSync: true });
-        await invoke("mpv_stop").catch((err) => propsRef.current.onError(errorMessage(err)));
         handlingEofRef.current = false;
         advancingFromEpisodeIdRef.current = null;
         clearEndAdvancePolling();
-        loadedPathRef.current = null;
-        setPosition(0);
-        setDuration(0);
-        setPaused(true);
+        // Keep mpv loaded so the last frame stays composited until App's screen
+        // cover is opaque; stopping here flashes the transparent window.
         propsRef.current.onClose();
       } catch (err) {
         handlingEofRef.current = false;

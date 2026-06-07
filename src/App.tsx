@@ -1114,19 +1114,25 @@ function App() {
     }
   }, []);
 
-  const runScreenTransition = useCallback(async (between: () => void) => {
-    if (screenTransitionRef.current !== "idle") return;
-    screenTransitionRef.current = "cover";
-    setScreenTransition("cover");
-    await waitMs(SCREEN_COVER_MS);
-    between();
-    await waitTwoFrames();
-    screenTransitionRef.current = "uncover";
-    setScreenTransition("uncover");
-    await waitMs(SCREEN_UNCOVER_MS);
-    screenTransitionRef.current = "idle";
-    setScreenTransition("idle");
-  }, []);
+  const runScreenTransition = useCallback(
+    async (between: () => void, options?: { afterCover?: () => Promise<void> }) => {
+      if (screenTransitionRef.current !== "idle") return;
+      screenTransitionRef.current = "cover";
+      setScreenTransition("cover");
+      await waitMs(SCREEN_COVER_MS);
+      if (options?.afterCover) {
+        await options.afterCover();
+      }
+      between();
+      await waitTwoFrames();
+      screenTransitionRef.current = "uncover";
+      setScreenTransition("uncover");
+      await waitMs(SCREEN_UNCOVER_MS);
+      screenTransitionRef.current = "idle";
+      setScreenTransition("idle");
+    },
+    [],
+  );
 
   const openEpisode = useCallback(
     (episode: Episode) => {
@@ -1146,10 +1152,15 @@ function App() {
       const unload = options?.unload === true;
       void (async () => {
         await restoreFullscreenAfterPlayerIfNeeded();
-        await runScreenTransition(() => {
-          if (unload) setSelectedEpisode(null);
-          navigateToView("episodes", "restore");
-        });
+        await runScreenTransition(
+          () => {
+            if (unload) setSelectedEpisode(null);
+            navigateToView("episodes", "restore");
+          },
+          unload
+            ? { afterCover: () => stopMpv().catch(() => undefined) }
+            : undefined,
+        );
       })();
     },
     [navigateToView, restoreFullscreenAfterPlayerIfNeeded, runScreenTransition],
