@@ -1245,9 +1245,7 @@ export function PlayerView(props: {
 
   const onScrubEnd = useCallback(
     (seconds: number) => {
-      if (seconds < minPositionSecondsToPersistRef.current) {
-        userRequestedStartResetRef.current = true;
-      }
+      userRequestedStartResetRef.current = seconds < minPositionSecondsToPersistRef.current;
       scrubSeekEpochRef.current += 1;
       const endId = (scrubEndIdRef.current += 1);
       const resume = scrubSessionRef.current?.resumeAfter ?? false;
