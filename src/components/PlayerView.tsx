@@ -1118,6 +1118,10 @@ export function PlayerView(props: {
     (async () => {
       try {
         if (playbackSuspended || !eventListenersReadyRef.current) return;
+        // Manual skip may load another file while the player stays hidden in the
+        // background. Clearing loadedPathRef on suspension end defers reload until
+        // the user opens the player again — do not load or unpause here.
+        if (!visible) return;
         const sidebarPx = sidebarPxForVisibility(visible);
         if (!mpvReadyRef.current) {
           await invoke("mpv_init", {
