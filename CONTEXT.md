@@ -269,7 +269,8 @@ view components. Per-screen UI lives in `src/components/`:
   under `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
   every five seconds capped at 120). **Scrub thumbnail** work runs as background
   jobs (`jobs_enqueue_scrub_sprite`): a rescan that imports ≤20 episodes
-  auto-queues scrub jobs (low priority); opening an anime’s episode list uses one
+  auto-queues scrub jobs (low priority) on a background thread after the scan
+  IPC returns (batched scheduler flush, same as episode-page scrub); opening an anime’s episode list uses one
   batched command (`jobs_enqueue_episode_page_scrub_sprites`, medium priority for
   uncached episodes) and downgrades them to **low** when leaving that page
   (`jobs_set_scrub_sprite_priority_for_paths`, one emit); opening
@@ -458,8 +459,8 @@ view components. Per-screen UI lives in `src/components/`:
   episode page shows the resulting rule name without persisting it),
   `save_episode_progress`, `rename_anime`, `get_local_data_stats`, `clean_local_data`,
   and `rescan_library`. On Windows, when a rescan imports at most 20 episodes
-  (new or updated paths), it enqueues low-priority scrub-thumbnail jobs for
-  those files. `rescan_library` commits one SQLite transaction per
+  (new or updated paths), scrub and OP/ED auto-enqueue run on a background
+  thread after the command returns (one batched scheduler flush). `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
   series is upserted once per scan instead of once per file. The upserts are
   idempotent: unchanged anime, episode, and unmatched-file rows are not

@@ -529,33 +529,39 @@ impl JobManager {
         Ok(())
     }
 
-    pub fn enqueue_scrub_for_rescan_imports(
+    /// Scrub + OP/ED auto-enqueue after `rescan_library` (one scheduler flush at the end).
+    pub fn enqueue_rescan_import_jobs(
         &mut self,
-        imports: &[RescanScrubImport],
+        db: &AppDatabase,
+        scrub_imports: &[RescanScrubImport],
+        op_ed_imports: &[RescanOpEdImport],
     ) -> Result<(), String> {
-        if imports.len() > RESCAN_AUTO_SCRUB_MAX {
-            return Ok(());
+        if scrub_imports.len() <= RESCAN_AUTO_SCRUB_MAX {
+            for item in scrub_imports {
+                let _ = self.enqueue_scrub_sprite_inner(
+                    EnqueueScrubSpriteJob {
+                        path: item.path.clone(),
+                        priority: JobPriority::Low,
+                        anime_title: Some(item.anime_title.clone()),
+                        episode_label: Some(item.episode_label.clone()),
+                        follow_up: Vec::new(),
+                    },
+                    false,
+                )?;
+            }
         }
-        for item in imports {
-            let _ = self.enqueue_scrub_sprite(EnqueueScrubSpriteJob {
-                path: item.path.clone(),
-                priority: JobPriority::Low,
-                anime_title: Some(item.anime_title.clone()),
-                episode_label: Some(item.episode_label.clone()),
-                follow_up: Vec::new(),
-            })?;
+        if !op_ed_imports.is_empty() && op_ed_imports.len() <= RESCAN_AUTO_SCRUB_MAX {
+            self.enqueue_op_ed_for_rescan_imports_inner(db, op_ed_imports)?;
         }
+        self.finish_scheduling_batch();
         Ok(())
     }
 
-    pub fn enqueue_op_ed_for_rescan_imports(
+    fn enqueue_op_ed_for_rescan_imports_inner(
         &mut self,
         db: &AppDatabase,
         imports: &[RescanOpEdImport],
     ) -> Result<(), String> {
-        if imports.is_empty() || imports.len() > RESCAN_AUTO_SCRUB_MAX {
-            return Ok(());
-        }
         let mut seen = std::collections::HashSet::new();
         for item in imports {
             if !seen.insert(item.anime_id) {
@@ -572,13 +578,14 @@ impl JobManager {
             if !needs {
                 continue;
             }
-            let _ = self.enqueue_op_ed_detect(
+            let _ = self.enqueue_op_ed_detect_inner(
                 db,
                 EnqueueOpEdDetectJob {
                     anime_id: item.anime_id,
                     priority: JobPriority::Low,
                     anime_title: Some(item.anime_title.clone()),
                 },
+                false,
             )?;
         }
         Ok(())
@@ -979,16 +986,26 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<EnqueueJobResult, String> {
+        self.enqueue_op_ed_detect_inner(db, request, true)
+    }
+
+    fn enqueue_op_ed_detect_inner(
+        &mut self,
+        db: &AppDatabase,
+        request: EnqueueOpEdDetectJob,
+        flush_scheduling: bool,
+    ) -> Result<EnqueueJobResult, String> {
         let chroma_priority = request.priority;
 
         // Manual skip templates own matching — do not return a stale auto-detect job.
         let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, request.anime_id))?;
         if has_manual {
-            return self.enqueue_manual_op_ed_rematch(
+            return self.enqueue_manual_op_ed_rematch_inner(
                 db,
                 request.anime_id,
                 request.anime_title.as_deref(),
                 chroma_priority,
+                flush_scheduling,
             );
         }
 
@@ -1000,7 +1017,9 @@ impl JobManager {
 
         let needs = db.with_conn(|conn| op_ed::anime_needs_op_ed_detect(conn, request.anime_id))?;
         if !needs {
-            self.finish_op_ed_enqueue_batch();
+            if flush_scheduling {
+                self.finish_op_ed_enqueue_batch();
+            }
             return Ok(EnqueueJobResult::skipped());
         }
 
@@ -1014,7 +1033,9 @@ impl JobManager {
 
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, request.anime_id))?;
         if episodes.is_empty() {
-            self.finish_op_ed_enqueue_batch();
+            if flush_scheduling {
+                self.finish_op_ed_enqueue_batch();
+            }
             return Ok(EnqueueJobResult::skipped());
         }
         let mut chroma_job_by_episode: HashMap<i64, String> = HashMap::new();
@@ -1040,7 +1061,9 @@ impl JobManager {
             db.with_conn(|conn| op_ed::anime_redetect_full_pass_only(conn, request.anime_id))?;
         let plans = op_ed::plan_op_ed_detect_jobs(&all_episode_ids, full_pass_only);
         if plans.is_empty() {
-            self.finish_op_ed_enqueue_batch();
+            if flush_scheduling {
+                self.finish_op_ed_enqueue_batch();
+            }
             return Ok(EnqueueJobResult::skipped());
         }
         let mut last_detect_id: Option<String> = None;
@@ -1108,7 +1131,9 @@ impl JobManager {
             last_detect_id = Some(id);
         }
 
-        self.finish_op_ed_enqueue_batch();
+        if flush_scheduling {
+            self.finish_op_ed_enqueue_batch();
+        }
         Ok(EnqueueJobResult::queued(first_detect_id))
     }
 
@@ -1241,10 +1266,23 @@ impl JobManager {
         anime_title: Option<&str>,
         chroma_priority: JobPriority,
     ) -> Result<EnqueueJobResult, String> {
+        self.enqueue_manual_op_ed_rematch_inner(db, anime_id, anime_title, chroma_priority, true)
+    }
+
+    fn enqueue_manual_op_ed_rematch_inner(
+        &mut self,
+        db: &AppDatabase,
+        anime_id: i64,
+        anime_title: Option<&str>,
+        chroma_priority: JobPriority,
+        flush_scheduling: bool,
+    ) -> Result<EnqueueJobResult, String> {
         db.with_conn(|conn| op_ed::validate_manual_templates_for_rematch(conn, anime_id))?;
 
         if let Some(existing_id) = self.active_manual_op_ed_rematch_job_id(anime_id) {
-            self.finish_op_ed_enqueue_batch();
+            if flush_scheduling {
+                self.finish_op_ed_enqueue_batch();
+            }
             return Ok(EnqueueJobResult::queued(Some(existing_id)));
         }
 
@@ -1256,7 +1294,9 @@ impl JobManager {
 
         let episodes = db.with_conn(|conn| op_ed::list_anime_episodes(conn, anime_id))?;
         if episodes.is_empty() {
-            self.finish_op_ed_enqueue_batch();
+            if flush_scheduling {
+                self.finish_op_ed_enqueue_batch();
+            }
             return Err("no episodes to rematch".to_string());
         }
 
@@ -1287,13 +1327,17 @@ impl JobManager {
         }
 
         if episode_job_ids.is_empty() {
-            self.finish_op_ed_enqueue_batch();
+            if flush_scheduling {
+                self.finish_op_ed_enqueue_batch();
+            }
             return Ok(EnqueueJobResult::skipped());
         }
 
         let summary_id =
             self.enqueue_manual_op_ed_rematch_summary(anime_id, &title, episode_job_ids)?;
-        self.finish_op_ed_enqueue_batch();
+        if flush_scheduling {
+            self.finish_op_ed_enqueue_batch();
+        }
         Ok(EnqueueJobResult::queued(Some(summary_id)))
     }
 

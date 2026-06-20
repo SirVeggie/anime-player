@@ -1463,8 +1463,8 @@ fn rescan_library_in_conn(conn: &mut Connection) -> Result<(ScanSummary, Vec<Res
 #[tauri::command]
 #[cfg(windows)]
 pub fn rescan_library(
+    app: AppHandle,
     db: State<'_, AppDatabase>,
-    jobs: State<'_, crate::jobs::JobsState>,
 ) -> Result<ScanSummary, String> {
     let (summary, new_imports) = db.with_conn(rescan_library_in_conn)?;
     let import_count = new_imports.len();
@@ -1483,18 +1483,8 @@ pub fn rescan_library(
             episode_label: item.episode_label,
         })
         .collect();
-    if !scrub_imports.is_empty() {
-        crate::crash_log::log(
-            "INFO",
-            &format!(
-                "rescan_library: enqueueing {} scrub sprite job(s)",
-                scrub_imports.len()
-            ),
-        );
-    }
-    crate::jobs::enqueue_scrub_for_rescan_imports(&jobs, &scrub_imports)?;
     if import_count > 0 && import_count <= crate::jobs::RESCAN_AUTO_SCRUB_MAX {
-        crate::jobs::enqueue_op_ed_for_rescan_imports(&jobs, &db, &op_ed_imports)?;
+        crate::jobs::schedule_rescan_job_enqueue(app, scrub_imports, op_ed_imports);
     }
     Ok(summary)
 }

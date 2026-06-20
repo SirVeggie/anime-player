@@ -130,26 +130,51 @@ pub fn notify_job_step(app: &AppHandle, job_id: &str, current: u32, total: u32, 
 #[cfg(windows)]
 pub use manager::{RescanOpEdImport, RescanScrubImport, RESCAN_AUTO_SCRUB_MAX};
 
+/// Queue scrub/OP/ED jobs after `rescan_library` on a background thread so the scan IPC returns immediately.
 #[cfg(windows)]
-pub fn enqueue_scrub_for_rescan_imports(
-    jobs: &JobsState,
-    imports: &[RescanScrubImport],
-) -> Result<(), String> {
-    if imports.len() > manager::RESCAN_AUTO_SCRUB_MAX {
-        return Ok(());
+pub fn schedule_rescan_job_enqueue(
+    app: tauri::AppHandle,
+    scrub_imports: Vec<RescanScrubImport>,
+    op_ed_imports: Vec<RescanOpEdImport>,
+) {
+    if scrub_imports.is_empty() && op_ed_imports.is_empty() {
+        return;
     }
-    let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
-    guard.enqueue_scrub_for_rescan_imports(imports)
-}
+    crate::crash_log::log(
+        "INFO",
+        &format!(
+            "rescan_library: scheduling background enqueue (scrub={}, op_ed_anime_rows={})",
+            scrub_imports.len(),
+            op_ed_imports.len()
+        ),
+    );
+    tauri::async_runtime::spawn(async move {
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            let jobs = app.state::<JobsState>();
+            let db = app.state::<AppDatabase>();
+            let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+            guard.enqueue_rescan_import_jobs(&db, &scrub_imports, &op_ed_imports)
+        })
+        .await;
 
-#[cfg(windows)]
-pub fn enqueue_op_ed_for_rescan_imports(
-    jobs: &JobsState,
-    db: &crate::db::AppDatabase,
-    imports: &[RescanOpEdImport],
-) -> Result<(), String> {
-    let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
-    guard.enqueue_op_ed_for_rescan_imports(db, imports)
+        match outcome {
+            Ok(Ok(())) => {
+                crate::crash_log::log("INFO", "rescan_library: background enqueue complete");
+            }
+            Ok(Err(e)) => {
+                crate::crash_log::log(
+                    "ERROR",
+                    &format!("rescan_library: background enqueue failed: {e}"),
+                );
+            }
+            Err(e) => {
+                crate::crash_log::log(
+                    "ERROR",
+                    &format!("rescan_library: background enqueue thread failed: {e}"),
+                );
+            }
+        }
+    });
 }
 
 #[cfg(windows)]
