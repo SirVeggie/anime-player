@@ -8,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createPortal } from "react-dom";
 
 export type ContextMenuAction = {
@@ -58,13 +59,21 @@ type DisabledTooltipState = {
   y: number;
 };
 
+/** Nudge the menu away from the cursor so the pointer does not cover the first item. */
+const MENU_OPEN_OFFSET_X = 10;
+const MENU_OPEN_OFFSET_Y = 4;
+
 export function useContextMenu() {
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
 
   const openMenu = useCallback((event: ReactMouseEvent, items: ContextMenuItem[]) => {
     event.preventDefault();
     event.stopPropagation();
-    setMenu({ x: event.clientX, y: event.clientY, items });
+    setMenu({
+      x: event.clientX + MENU_OPEN_OFFSET_X,
+      y: event.clientY + MENU_OPEN_OFFSET_Y,
+      items,
+    });
   }, []);
 
   const closeMenu = useCallback(() => {
@@ -310,11 +319,25 @@ function ContextMenuPanel(props: {
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    setPosition(clampMenuPosition(x, y, rect.width, rect.height));
+    setPosition(clampMenuPosition(x, y, panel.offsetWidth, panel.offsetHeight));
   }, [items, x, y]);
 
   useEffect(() => {
+    let disposed = false;
+    let unlistenFocus: (() => void) | undefined;
+
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused) onClose();
+      })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        unlistenFocus = unlisten;
+      });
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -333,6 +356,8 @@ function ContextMenuPanel(props: {
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
     return () => {
+      disposed = true;
+      unlistenFocus?.();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("scroll", onScroll, true);
