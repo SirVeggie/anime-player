@@ -277,7 +277,13 @@ pub fn library_ops_request_clean_local_data(
     db: State<'_, AppDatabase>,
     ops: State<'_, LibraryOpsState>,
 ) -> Result<LibraryOperationView, String> {
-    enqueue_simple_operation(app, db, ops, LibraryOperationType::CleanLocalData, "clean-queued")
+    enqueue_simple_operation(
+        app,
+        db,
+        ops,
+        LibraryOperationType::CleanLocalData,
+        Some("clean-queued"),
+    )
 }
 
 #[tauri::command]
@@ -286,7 +292,7 @@ pub fn library_ops_request_rescan(
     db: State<'_, AppDatabase>,
     ops: State<'_, LibraryOpsState>,
 ) -> Result<LibraryOperationView, String> {
-    enqueue_simple_operation(app, db, ops, LibraryOperationType::RescanLibrary, "rescan-queued")
+    enqueue_simple_operation(app, db, ops, LibraryOperationType::RescanLibrary, None)
 }
 
 #[tauri::command]
@@ -295,7 +301,13 @@ pub fn library_ops_request_local_data_stats_refresh(
     db: State<'_, AppDatabase>,
     ops: State<'_, LibraryOpsState>,
 ) -> Result<LibraryOperationView, String> {
-    enqueue_simple_operation(app, db, ops, LibraryOperationType::LocalDataStats, "stats-queued")
+    enqueue_simple_operation(
+        app,
+        db,
+        ops,
+        LibraryOperationType::LocalDataStats,
+        Some("stats-queued"),
+    )
 }
 
 fn enqueue_simple_operation(
@@ -303,13 +315,15 @@ fn enqueue_simple_operation(
     db: State<'_, AppDatabase>,
     ops: State<'_, LibraryOpsState>,
     operation_type: LibraryOperationType,
-    reason: &str,
+    reason: Option<&str>,
 ) -> Result<LibraryOperationView, String> {
     let operation = db.with_conn(|conn| {
         let operation_id = insert_operation(conn, operation_type, None, None, "{}", 1)?;
         load_operation(conn, operation_id)
     })?;
-    emit_library_updated(&app, reason, Some(operation.id), false);
+    if let Some(reason) = reason {
+        emit_library_updated(&app, reason, Some(operation.id), false);
+    }
     wake_worker(app, ops);
     Ok(operation)
 }
@@ -460,8 +474,8 @@ fn run_rescan(app: &AppHandle, record: &OperationRecord) -> Result<(), String> {
     let summary: ScanSummary = library::rescan_library_for_operation(&db)?;
     let _ = library::refresh_local_data_stats_cache(&db);
     let summary_json = serde_json::to_string(&summary).map_err(|e| e.to_string())?;
-    finish_operation(app, record.id, "done", Some(summary_json), None, true)?;
-    emit_library_updated(app, "stats-updated", Some(record.id), true);
+    finish_operation(app, record.id, "done", Some(summary_json), None, false)?;
+    emit_library_updated(app, "done", Some(record.id), true);
     Ok(())
 }
 
