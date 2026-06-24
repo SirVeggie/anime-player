@@ -10,6 +10,8 @@ import type {
   DeleteAnimeFilesSummary,
   Episode,
   LibraryState,
+  LibraryOperationRecord,
+  LibraryOpsSnapshot,
   LocalDataCleanupSummary,
   LocalDataStats,
   MpvTrack,
@@ -88,6 +90,30 @@ export function getLocalDataStats(): Promise<LocalDataStats> {
 
 export function cleanLocalData(): Promise<LocalDataCleanupSummary> {
   return invoke("clean_local_data");
+}
+
+export function libraryOpsGetSnapshot(): Promise<LibraryOpsSnapshot> {
+  return invoke("library_ops_get_snapshot");
+}
+
+export function libraryOpsRequestDeleteAnime(animeId: number): Promise<LibraryOperationRecord> {
+  return invoke("library_ops_request_delete_anime", { animeId });
+}
+
+export function libraryOpsRequestDeleteEpisode(episodeId: number): Promise<LibraryOperationRecord> {
+  return invoke("library_ops_request_delete_episode", { episodeId });
+}
+
+export function libraryOpsRequestCleanLocalData(): Promise<LibraryOperationRecord> {
+  return invoke("library_ops_request_clean_local_data");
+}
+
+export function libraryOpsRequestRescan(): Promise<LibraryOperationRecord> {
+  return invoke("library_ops_request_rescan");
+}
+
+export function libraryOpsRequestLocalDataStatsRefresh(): Promise<LibraryOperationRecord> {
+  return invoke("library_ops_request_local_data_stats_refresh");
 }
 
 export function createCategory(name: string): Promise<Category> {

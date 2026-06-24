@@ -12,6 +12,8 @@ use crate::op_ed;
 
 use manager::{JobManager, WorkerOutcome};
 
+const EPISODE_PAGE_SCRUB_ENQUEUE_CHUNK: usize = 50;
+
 #[cfg(windows)]
 pub struct JobsState {
     pub manager: Mutex<JobManager>,
@@ -264,9 +266,21 @@ pub async fn jobs_enqueue_episode_page_scrub_sprites(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let jobs = app.state::<JobsState>();
-        let db = app.state::<AppDatabase>();
-        let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
-        guard.enqueue_episode_page_scrub_sprites(request)
+        let EnqueueEpisodePageScrubSprites {
+            priority,
+            anime_title,
+            episodes,
+        } = request;
+        for chunk in episodes.chunks(EPISODE_PAGE_SCRUB_ENQUEUE_CHUNK) {
+            let chunk_request = EnqueueEpisodePageScrubSprites {
+                priority,
+                anime_title: anime_title.clone(),
+                episodes: chunk.to_vec(),
+            };
+            let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+            guard.enqueue_episode_page_scrub_sprites(chunk_request)?;
+        }
+        Ok(())
     })
     .await
     .map_err(|e| format!("enqueue thread failed: {e}"))?

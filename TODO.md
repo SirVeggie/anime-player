@@ -50,7 +50,7 @@ Episode selection page features
 # Performance
 
 - [ ] Improve thumbnail loading speed
-- [ ] Reduce freezes caused by expensive operations
+- [x] Reduce freezes caused by expensive operations
 - [ ] UI may break on startup (usually linked to queuing jobs)
 
 ## Reliability

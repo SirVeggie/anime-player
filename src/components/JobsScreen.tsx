@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { jobsCancel, jobsCancelAll, jobsSetMaxParallel, jobsSetTypeMaxParallel } from "../api";
 import { useJobsSnapshot } from "../jobs/jobClient";
 import { jobProgressBarPercent, shouldShowJobProgressBar } from "../jobs/jobUi";
-import type { JobPriority, JobRecord, JobResourceType } from "../types";
+import { useLibraryOpsSnapshot } from "../libraryOps/libraryOpsClient";
+import type { JobPriority, JobRecord, JobResourceType, LibraryOperationRecord } from "../types";
 import { errorMessage, formatDurationMs } from "../utils";
 import { ViewHeader } from "./ViewHeader";
 
@@ -153,6 +154,102 @@ function sortJobsNewestFirst(
   return [...jobs].sort((a, b) => sortKey(b) - sortKey(a));
 }
 
+function operationLabel(operation: LibraryOperationRecord): string {
+  switch (operation.operationType) {
+    case "delete_anime":
+      return "Delete title files";
+    case "delete_episode":
+      return "Delete episode file";
+    case "clean_local_data":
+      return "Clean local data";
+    case "rescan_library":
+      return "Rescan library";
+    case "local_data_stats":
+      return "Measure local data";
+    default: {
+      const _exhaustive: never = operation.operationType;
+      return _exhaustive;
+    }
+  }
+}
+
+function operationTimeMs(value: string | null): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function operationDurationLabel(operation: LibraryOperationRecord, nowMs: number, history: boolean): string | null {
+  if (history) {
+    const finished = operationTimeMs(operation.finishedAt);
+    if (finished === 0) return null;
+    const started = operationTimeMs(operation.startedAt) || operationTimeMs(operation.createdAt);
+    return `Ran for ${formatDurationMs(finished - started)}`;
+  }
+  if (operation.status === "running") {
+    const started = operationTimeMs(operation.startedAt) || operationTimeMs(operation.createdAt);
+    return `Running for ${formatDurationMs(nowMs - started)}`;
+  }
+  if (operation.status === "queued") {
+    return `Queued ${formatDurationMs(nowMs - operationTimeMs(operation.createdAt))} ago`;
+  }
+  return null;
+}
+
+function operationProgressPercent(operation: LibraryOperationRecord): number {
+  if (operation.progressTotal <= 0) return 0;
+  return Math.min(100, Math.max(0, (operation.progressCurrent / operation.progressTotal) * 100));
+}
+
+function LibraryOperationList(props: {
+  operations: LibraryOperationRecord[];
+  nowMs: number;
+  history?: boolean;
+}) {
+  const { operations, nowMs, history = false } = props;
+  if (operations.length === 0) return null;
+  return (
+    <div className="job-list">
+      {operations.map((operation) => {
+        const durationLabel = operationDurationLabel(operation, nowMs, history);
+        const showProgress = !history && (operation.status === "queued" || operation.status === "running");
+        return (
+          <div key={operation.id} className="job-row">
+            <div className="job-row-body">
+              <div className="job-row-header">
+                <div className="job-row-name-line">
+                  <span className="job-short-id">L{operation.id}</span>
+                  <strong>{operationLabel(operation)}</strong>
+                </div>
+                <span className="muted job-row-desc">Library operation</span>
+              </div>
+              {durationLabel || operation.phase ?
+                <p className="muted job-row-meta">
+                  {durationLabel}
+                  {durationLabel && operation.phase ?
+                    <span className="job-row-meta-sep" aria-hidden="true">
+                      {" · "}
+                    </span>
+                  : null}
+                  {operation.phase ? <span>{operation.phase}</span> : null}
+                </p>
+              : null}
+              {showProgress && operation.progressTotal > 0 ?
+                <div className="job-progress-track" aria-hidden>
+                  <div className="job-progress-fill" style={{ width: `${operationProgressPercent(operation)}%` }} />
+                </div>
+              : null}
+            </div>
+            <div className="job-row-actions">
+              <span className={`job-status job-status--${operation.status}`}>{operation.status}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function JobList(props: {
   jobs: JobRecord[];
   nowMs: number;
@@ -274,6 +371,7 @@ export function JobsScreen(props: {
   onError: (message: string) => void;
 }) {
   const snapshot = useJobsSnapshot();
+  const libraryOpsSnapshot = useLibraryOpsSnapshot();
   const { onBack, onError } = props;
   const [activeTab, setActiveTab] = useState<JobsTab>("active");
   const [maxParallelDraft, setMaxParallelDraft] = useState(12);
@@ -382,7 +480,25 @@ export function JobsScreen(props: {
     [snapshot?.history],
   );
 
-  const tickNow = activeTab === "active" && activeJobs.length > 0;
+  const activeLibraryOps = useMemo(
+    () =>
+      (libraryOpsSnapshot?.active ?? []).filter(
+        (operation) => operation.status === "queued" || operation.status === "running",
+      ),
+    [libraryOpsSnapshot?.active],
+  );
+
+  const historyLibraryOps = useMemo(
+    () =>
+      [...(libraryOpsSnapshot?.history ?? [])].sort(
+        (a, b) =>
+          operationTimeMs(b.finishedAt) -
+          operationTimeMs(a.finishedAt),
+      ),
+    [libraryOpsSnapshot?.history],
+  );
+
+  const tickNow = activeTab === "active" && (activeJobs.length > 0 || activeLibraryOps.length > 0);
   const nowMs = useNowMs(tickNow);
 
   const handleCancel = useCallback(
@@ -422,7 +538,7 @@ export function JobsScreen(props: {
           className={activeTab === "active" ? "bulk-edit-tab bulk-edit-tab--active" : "bulk-edit-tab"}
           onClick={() => setActiveTab("active")}
         >
-          Active ({activeJobs.length})
+          Active ({activeJobs.length + activeLibraryOps.length})
         </button>
         <button
           type="button"
@@ -431,7 +547,7 @@ export function JobsScreen(props: {
           className={activeTab === "history" ? "bulk-edit-tab bulk-edit-tab--active" : "bulk-edit-tab"}
           onClick={() => setActiveTab("history")}
         >
-          History ({snapshot?.history.length ?? 0})
+          History ({(snapshot?.history.length ?? 0) + (libraryOpsSnapshot?.history.length ?? 0)})
         </button>
       </div>
 
@@ -469,7 +585,7 @@ export function JobsScreen(props: {
               <button
                 type="button"
                 className="jobs-cancel-all"
-                disabled={cancelBusy || activeJobs.length === 0}
+              disabled={cancelBusy || activeJobs.length === 0}
                 onClick={() => void handleCancelAll()}
               >
                 Cancel all
@@ -477,10 +593,16 @@ export function JobsScreen(props: {
             </div>
           </div>
 
-          {activeJobs.length === 0 ?
+          {activeJobs.length === 0 && activeLibraryOps.length === 0 ?
             <p className="muted">No queued or running jobs.</p>
           : (
             <div className="jobs-active-sections">
+              {activeLibraryOps.length > 0 ?
+                <section className="jobs-active-section" aria-label="Library operations">
+                  <h3 className="jobs-section-title">Library operations</h3>
+                  <LibraryOperationList operations={activeLibraryOps} nowMs={nowMs} />
+                </section>
+              : null}
               <JobList
                 jobs={runningJobs}
                 nowMs={nowMs}
@@ -510,10 +632,13 @@ export function JobsScreen(props: {
         </section>
       : (
         <section className="panel bulk-edit-panel jobs-panel">
-          {(snapshot?.history.length ?? 0) === 0 ?
+          {(snapshot?.history.length ?? 0) === 0 && historyLibraryOps.length === 0 ?
             <p className="muted">No completed jobs yet.</p>
           : (
-            <JobList jobs={historyJobs} nowMs={nowMs} history />
+            <>
+              <LibraryOperationList operations={historyLibraryOps} nowMs={nowMs} history />
+              <JobList jobs={historyJobs} nowMs={nowMs} history />
+            </>
           )}
         </section>
       )}

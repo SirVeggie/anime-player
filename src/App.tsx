@@ -9,12 +9,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
   applyAnilistProgressToLocal,
-  cleanLocalData,
   completeAnilistLogin,
   createCategory,
   createRegexRule,
-  deleteAnimeFiles,
-  deleteEpisodeFiles,
   deleteCategory,
   deleteRegexRule,
   resetRegexRulesToDefaults,
@@ -28,6 +25,11 @@ import {
   linkAnimeAnilist,
   listEpisodes,
   listRootVideoFiles,
+  libraryOpsRequestCleanLocalData,
+  libraryOpsRequestDeleteAnime,
+  libraryOpsRequestDeleteEpisode,
+  libraryOpsRequestLocalDataStatsRefresh,
+  libraryOpsRequestRescan,
   logoutAnilist,
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
@@ -37,7 +39,6 @@ import {
   renameAnime,
   renameFiles,
   removeRootFolder,
-  rescanLibrary,
   saveEpisodeProgress,
   syncAnilistEpisodeProgress,
   searchAnilistAnime,
@@ -75,6 +76,11 @@ import {
 } from "./components/Icons";
 import { JobsScreen } from "./components/JobsScreen";
 import { useJobsActiveCount } from "./jobs/jobClient";
+import {
+  subscribeLibraryOperationFinished,
+  subscribeLibraryUpdated,
+  useLibraryOpsActiveCount,
+} from "./libraryOps/libraryOpsClient";
 import { ManualSkipScreen } from "./components/ManualSkipScreen";
 import { MissingScreen } from "./components/MissingScreen";
 import { PlayerView } from "./components/PlayerView";
@@ -103,7 +109,6 @@ import {
   animeDisplayTitle,
   APP_WINDOW_TITLE,
   errorMessage,
-  formatSize,
   isAnilistConnected,
   isTextInputTarget,
   shortenForOsTitle,
@@ -166,6 +171,8 @@ function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedAnime, setSelectedAnime] = useState<AnimeSummary | null>(null);
   const [episodeReturnView, setEpisodeReturnView] = useState<EpisodeReturnView>("anime");
+  const episodeReturnViewRef = useRef<EpisodeReturnView>("anime");
+  episodeReturnViewRef.current = episodeReturnView;
   const [anilistAuth, setAnilistAuth] = useState<AnilistAuthState | null>(null);
   const [localDataStats, setLocalDataStats] = useState<LocalDataStats | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -183,6 +190,8 @@ function App() {
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const jobsActiveCount = useJobsActiveCount();
+  const libraryOpsActiveCount = useLibraryOpsActiveCount();
+  const backgroundActiveCount = jobsActiveCount + libraryOpsActiveCount;
   const [screenTransition, setScreenTransition] = useState<ScreenTransitionPhase>("idle");
   const screenTransitionRef = useRef<ScreenTransitionPhase>("idle");
   const [playerControlsChromeVisible, setPlayerControlsChromeVisible] = useState(true);
@@ -254,6 +263,9 @@ function App() {
         await reloadAnilistAuth();
         diagnosticLog("startup: loading local data stats");
         await reloadLocalDataStats();
+        void libraryOpsRequestLocalDataStatsRefresh().catch((e) => {
+          diagnosticLog(`startup: local data stats refresh failed to queue: ${errorMessage(e)}`, "ERROR");
+        });
         if (state.root_folders.length > 0) {
           pendingStartupRescanRef.current = true;
           diagnosticLog("startup: rescan_library deferred until app is ready");
@@ -280,13 +292,8 @@ function App() {
 
       void (async () => {
         try {
-          diagnosticLog("startup: rescan_library begin (deferred)");
-          const summary = await rescanLibrary();
-          diagnosticLog(
-            `startup: rescan_library ok (roots=${summary.roots_scanned}, imported=${summary.episodes_imported}, unmatched=${summary.unmatched_files})`,
-          );
-          await reloadLibraryAndSearchIndex();
-          await reloadLocalDataStats();
+          diagnosticLog("startup: rescan_library queued (deferred)");
+          await libraryOpsRequestRescan();
         } catch (e) {
           const msg = errorMessage(e);
           diagnosticLog(`startup: rescan_library failed: ${msg}`, "ERROR");
@@ -296,7 +303,37 @@ function App() {
     });
 
     return cancelSchedule;
-  }, [loading, reloadLibraryAndSearchIndex, reloadLocalDataStats, showToast]);
+  }, [loading, showToast]);
+
+  useEffect(() => {
+    return subscribeLibraryOperationFinished((event) => {
+      if (event.status === "failed") {
+        showToast("error", event.errorText ?? "Background library operation failed.");
+        return;
+      }
+      if (event.status !== "done") return;
+      switch (event.operationType) {
+        case "delete_anime":
+          showToast("success", "Title deletion finished.");
+          return;
+        case "delete_episode":
+          showToast("success", "Episode deletion finished.");
+          return;
+        case "clean_local_data":
+          showToast("success", "Local data cleanup finished.");
+          return;
+        case "rescan_library":
+          showToast("success", "Library rescan finished.");
+          return;
+        case "local_data_stats":
+          return;
+        default: {
+          const _exhaustive: never = event.operationType;
+          return _exhaustive;
+        }
+      }
+    });
+  }, [showToast]);
 
   const handleAnilistCallback = useCallback(
     async (url: string) => {
@@ -399,6 +436,33 @@ function App() {
     },
     [saveCurrentScrollPosition],
   );
+
+  useEffect(() => {
+    return subscribeLibraryUpdated((event) => {
+      void (async () => {
+        try {
+          const state = await reloadLibraryAndSearchIndex();
+          const selectedId = selectedAnimeIdRef.current;
+          if (selectedId !== null && viewRef.current === "episodes") {
+            const updated = state.anime.find((anime) => anime.id === selectedId);
+            if (updated) {
+              setSelectedAnime(updated);
+              setEpisodes(await listEpisodes(selectedId));
+            } else {
+              setSelectedAnime(null);
+              setEpisodes([]);
+              navigateToView(episodeReturnViewRef.current, "restore");
+            }
+          }
+          if (event.statsChanged) {
+            await reloadLocalDataStats();
+          }
+        } catch (e) {
+          showToast("error", errorMessage(e));
+        }
+      })();
+    });
+  }, [navigateToView, reloadLibraryAndSearchIndex, reloadLocalDataStats, showToast]);
 
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -652,26 +716,13 @@ function App() {
 
   const handleRescan = useCallback(async () => {
     pendingStartupRescanRef.current = false;
-    await runAction(async () => {
-      const summary = await rescanLibrary();
-      const state = await reloadLibraryAndSearchIndex();
-      if (view === "episodes" && selectedAnimeIdRef.current !== null) {
-        const selectedId = selectedAnimeIdRef.current;
-        const updated = state.anime.find((anime) => anime.id === selectedId);
-        if (updated) {
-          setSelectedAnime(updated);
-          setEpisodes(await listEpisodes(selectedId));
-        } else {
-          setSelectedAnime(null);
-          setEpisodes([]);
-          const isMissing = state.missing_anime.some((anime) => anime.id === selectedId);
-          navigateToView(isMissing ? "missing" : "categories", "restore");
-        }
-      }
-      await reloadLocalDataStats();
-      return `Scanned ${summary.roots_scanned} root folder${summary.roots_scanned === 1 ? "" : "s"}: ${summary.episodes_imported} episode${summary.episodes_imported === 1 ? "" : "s"} added or updated, ${summary.unmatched_files} unmatched.`;
-    });
-  }, [navigateToView, reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction, view]);
+    try {
+      await libraryOpsRequestRescan();
+      showToast("success", "Library rescan queued.");
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [showToast]);
 
   const handleCleanLocalData = useCallback(async () => {
     const staleSpriteNote = library?.clean_unused_scrub_sprites
@@ -682,22 +733,13 @@ function App() {
     );
     if (!confirmed) return;
 
-    await runAction(async () => {
-      const summary = await cleanLocalData();
-      await reloadLibraryAndSearchIndex();
-      await reloadLocalDataStats();
-      const staleEpisodes = `${summary.stale_episodes_removed} stale episode${summary.stale_episodes_removed === 1 ? "" : "s"}`;
-      const emptyAnime = `${summary.empty_anime_removed} empty title entr${summary.empty_anime_removed === 1 ? "y" : "ies"}`;
-      const thumbnails = `${summary.thumbnails_removed} unused thumbnail${summary.thumbnails_removed === 1 ? "" : "s"}`;
-      const scrubSprites = `${summary.scrub_sprites_removed} unused scrub sprite${summary.scrub_sprites_removed === 1 ? "" : "s"}`;
-      const opEdFp = `${summary.op_ed_fingerprints_removed} unused OP/ED fingerprint${summary.op_ed_fingerprints_removed === 1 ? "" : "s"}`;
-      const opEdTemp =
-        summary.op_ed_temp_pcm_removed > 0
-          ? `, ${summary.op_ed_temp_pcm_removed} stale OP/ED temp PCM file${summary.op_ed_temp_pcm_removed === 1 ? "" : "s"}`
-          : "";
-      return `Cleaned local data: removed ${staleEpisodes}, ${emptyAnime}, ${thumbnails}, ${scrubSprites}, and ${opEdFp}${opEdTemp}.`;
-    });
-  }, [library?.clean_unused_scrub_sprites, reloadLibraryAndSearchIndex, reloadLocalDataStats, runAction]);
+    try {
+      await libraryOpsRequestCleanLocalData();
+      showToast("success", "Local data cleanup queued.");
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [library?.clean_unused_scrub_sprites, showToast]);
 
   const handleCreateCategory = useCallback(async () => {
     const name = newCategoryName.trim();
@@ -870,16 +912,24 @@ function App() {
 
   const handleDeleteAnimeSummary = useCallback(
     async (anime: AnimeSummary) => {
-      setBusy(true);
       try {
         if (selectedEpisode?.anime_id === anime.id) {
           await stopMpv().catch(() => undefined);
           setSelectedEpisode(null);
         }
 
-        const summary = await deleteAnimeFiles(anime.id);
-        const state = await reloadLibraryAndSearchIndex();
-        await reloadLocalDataStats();
+        await libraryOpsRequestDeleteAnime(anime.id);
+        setLibrary((current) =>
+          current ?
+            {
+              ...current,
+              anime: current.anime.filter((item) => item.id !== anime.id),
+              recent_anime: current.recent_anime.filter((item) => item.id !== anime.id),
+              missing_anime: current.missing_anime.filter((item) => item.id !== anime.id),
+            }
+          : current,
+        );
+        setAnimeSearchIndex((current) => current.filter((item) => item.id !== anime.id));
 
         if (selectedAnimeIdRef.current === anime.id) {
           setEpisodes([]);
@@ -887,31 +937,23 @@ function App() {
           navigateToView(episodeReturnView, "restore");
         }
 
-        const deleted = `${summary.episodes_deleted} episode file${summary.episodes_deleted === 1 ? "" : "s"}`;
-        const bytes = summary.bytes_deleted > 0 ? ` (${formatSize(summary.bytes_deleted)})` : "";
-        if (summary.episodes_failed > 0) {
-          showToast("error", `Deleted ${deleted}${bytes}; ${summary.episodes_failed} failed.`);
-        } else {
-          showToast("success", `Deleted ${deleted}${bytes}.`);
-        }
-
-        if (state.anime.every((item) => item.id !== anime.id) && viewRef.current === "anime" && selectedCategoryId === anime.category_id) {
-          const remaining = state.anime.filter((item) => item.category_id === anime.category_id);
+        showToast("success", "Title deletion queued.");
+        if (viewRef.current === "anime" && selectedCategoryId === anime.category_id) {
+          const remaining = (library?.anime ?? []).filter(
+            (item) => item.id !== anime.id && item.category_id === anime.category_id,
+          );
           if (remaining.length === 0) {
             navigateToView("categories", "restore");
           }
         }
       } catch (e) {
         showToast("error", errorMessage(e));
-      } finally {
-        setBusy(false);
       }
     },
     [
       episodeReturnView,
+      library?.anime,
       navigateToView,
-      reloadLibraryAndSearchIndex,
-      reloadLocalDataStats,
       selectedCategoryId,
       selectedEpisode?.anime_id,
       showToast,
@@ -1019,7 +1061,6 @@ function App() {
       return;
     }
 
-    setBusy(true);
     try {
       const deletingLoadedEpisode = selectedEpisode?.anime_id === selectedAnime.id;
       if (deletingLoadedEpisode) {
@@ -1027,35 +1068,29 @@ function App() {
         setSelectedEpisode(null);
       }
 
-      const summary = await deleteAnimeFiles(selectedAnime.id);
-      await reloadLibraryAndSearchIndex();
-      await reloadLocalDataStats();
+      await libraryOpsRequestDeleteAnime(selectedAnime.id);
+      setLibrary((current) =>
+        current ?
+          {
+            ...current,
+            anime: current.anime.filter((item) => item.id !== selectedAnime.id),
+            recent_anime: current.recent_anime.filter((item) => item.id !== selectedAnime.id),
+            missing_anime: current.missing_anime.filter((item) => item.id !== selectedAnime.id),
+          }
+        : current,
+      );
+      setAnimeSearchIndex((current) => current.filter((item) => item.id !== selectedAnime.id));
       setEpisodes([]);
       setSelectedAnime(null);
       navigateToView(episodeReturnView, "restore");
-
-      const deleted = `${summary.episodes_deleted} episode file${summary.episodes_deleted === 1 ? "" : "s"}`;
-      const bytes = summary.bytes_deleted > 0 ? ` (${formatSize(summary.bytes_deleted)})` : "";
-      const cover = summary.cover_deleted ? " Cached cover removed." : "";
-      const coverFailure = summary.cover_failed ? " Cached cover could not be removed." : "";
-      const permanent = summary.permanent_delete_used ? " Some files could not be trashed and were deleted permanently." : "";
-      if (summary.episodes_failed > 0 || summary.cover_failed) {
-        const episodeFailure = summary.episodes_failed > 0 ? `; ${summary.episodes_failed} failed` : "";
-        showToast("error", `Deleted ${deleted}${bytes}${episodeFailure}.${cover}${coverFailure}${permanent}`);
-      } else {
-        showToast("success", `Deleted ${deleted}${bytes}.${cover}${permanent}`);
-      }
+      showToast("success", "Title deletion queued.");
     } catch (e) {
       showToast("error", errorMessage(e));
-    } finally {
-      setBusy(false);
     }
   }, [
     episodeReturnView,
     episodes.length,
     navigateToView,
-    reloadLibraryAndSearchIndex,
-    reloadLocalDataStats,
     selectedAnime,
     selectedEpisode?.anime_id,
     showToast,
@@ -1064,43 +1099,40 @@ function App() {
   const handleDeleteEpisode = useCallback(
     async (episode: Episode) => {
       if (!selectedAnime) return;
-      setBusy(true);
       try {
         if (selectedEpisode?.id === episode.id) {
           await stopMpv().catch(() => undefined);
           setSelectedEpisode(null);
         }
 
-        const summary = await deleteEpisodeFiles(episode.id);
-        const state = await reloadLibraryAndSearchIndex();
-        await reloadLocalDataStats();
-
-        const updatedAnime = state.anime.find((item) => item.id === selectedAnime.id);
-        if (!updatedAnime) {
+        await libraryOpsRequestDeleteEpisode(episode.id);
+        const nextEpisodes = episodes.filter((item) => item.id !== episode.id);
+        setEpisodes(nextEpisodes);
+        if (nextEpisodes.length === 0) {
           setSelectedAnime(null);
-          setEpisodes([]);
           navigateToView(episodeReturnView, "restore");
         } else {
-          setSelectedAnime(updatedAnime);
-          setEpisodes(await listEpisodes(updatedAnime.id));
+          setSelectedAnime((current) =>
+            current && current.id === selectedAnime.id ?
+              {
+                ...current,
+                episode_count: Math.max(0, current.episode_count - 1),
+                unwatched_count: episode.watched
+                  ? current.unwatched_count
+                  : Math.max(0, current.unwatched_count - 1),
+              }
+            : current,
+          );
         }
-
-        if (summary.episodes_failed > 0) {
-          showToast("error", "Episode file could not be deleted.");
-        } else {
-          showToast("success", "Episode deleted.");
-        }
+        showToast("success", "Episode deletion queued.");
       } catch (e) {
         showToast("error", errorMessage(e));
-      } finally {
-        setBusy(false);
       }
     },
     [
+      episodes,
       episodeReturnView,
       navigateToView,
-      reloadLibraryAndSearchIndex,
-      reloadLocalDataStats,
       selectedAnime,
       selectedEpisode?.id,
       showToast,
@@ -1120,13 +1152,13 @@ function App() {
       const renames: RenameFileRequest[] = [{ old_path: episode.path, new_path: newPath }];
       await validateFileRenames(renames);
       await renameFiles(renames);
-      await rescanLibrary();
+      await libraryOpsRequestRescan();
+      showToast("success", "File renamed. Library rescan queued.");
       if (selectedAnime) {
-        await refreshAnimePageData(selectedAnime.id);
         await reloadSearchIndex();
       }
     },
-    [refreshAnimePageData, reloadSearchIndex, selectedAnime],
+    [reloadSearchIndex, selectedAnime, showToast],
   );
 
   const handleBulkMoveAnime = useCallback(
@@ -1152,19 +1184,11 @@ function App() {
       if (renames.length === 0) return;
       await runAction(async () => {
         const summary = await renameFiles(renames);
-        await rescanLibrary();
-        const state = await reloadLibraryAndSearchIndex();
-        if (selectedAnimeIdRef.current !== null) {
-          const updated = state.anime.find((anime) => anime.id === selectedAnimeIdRef.current);
-          if (updated) {
-            setSelectedAnime(updated);
-            setEpisodes(await listEpisodes(updated.id));
-          }
-        }
+        await libraryOpsRequestRescan();
         return `Renamed ${summary.files_renamed} file${summary.files_renamed === 1 ? "" : "s"}.`;
       });
     },
-    [reloadLibraryAndSearchIndex, runAction],
+    [runAction],
   );
 
   const handleSaveAnilistClientId = useCallback(
@@ -1717,9 +1741,9 @@ function App() {
           >
             <JobsIcon />
             <span className="nav-label">Jobs</span>
-            {jobsActiveCount > 0 ?
+            {backgroundActiveCount > 0 ?
               <span className="nav-item-badge" aria-hidden>
-                {jobsActiveCount > 99 ? "99+" : jobsActiveCount}
+                {backgroundActiveCount > 99 ? "99+" : backgroundActiveCount}
               </span>
             : null}
           </button>

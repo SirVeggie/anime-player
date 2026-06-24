@@ -86,6 +86,20 @@ fn ensure_schema_updates(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE anime ADD COLUMN anilist_cached_description TEXT", [])
             .map_err(|e| e.to_string())?;
     }
+    if !table_has_column(conn, "anime", "pending_delete")? {
+        conn.execute(
+            "ALTER TABLE anime ADD COLUMN pending_delete INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if !table_has_column(conn, "episodes", "pending_delete")? {
+        conn.execute(
+            "ALTER TABLE episodes ADD COLUMN pending_delete INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     conn.execute_batch(
         r#"
@@ -123,6 +137,31 @@ CREATE TABLE IF NOT EXISTS episode_op_ed_segments (
 
 CREATE INDEX IF NOT EXISTS idx_op_ed_templates_anime ON op_ed_templates(anime_id);
 CREATE INDEX IF NOT EXISTS idx_episode_op_ed_status ON episode_op_ed_segments(episode_id, status);
+
+CREATE TABLE IF NOT EXISTS library_operations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  operation_type TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'done', 'failed', 'canceled')),
+  phase TEXT NOT NULL DEFAULT 'queued',
+  target_anime_id INTEGER,
+  target_episode_id INTEGER,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  progress_current INTEGER NOT NULL DEFAULT 0,
+  progress_total INTEGER NOT NULL DEFAULT 0,
+  summary_json TEXT,
+  error_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(target_anime_id) REFERENCES anime(id) ON DELETE SET NULL,
+  FOREIGN KEY(target_episode_id) REFERENCES episodes(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_library_operations_status ON library_operations(status, id);
+CREATE INDEX IF NOT EXISTS idx_library_operations_type ON library_operations(operation_type, id);
+CREATE INDEX IF NOT EXISTS idx_library_operations_target_anime ON library_operations(target_anime_id);
+CREATE INDEX IF NOT EXISTS idx_library_operations_target_episode ON library_operations(target_episode_id);
 "#,
     )
     .map_err(|e| e.to_string())?;
@@ -285,11 +324,11 @@ pub fn refresh_anime_latest_episode_at(conn: &Connection) -> Result<(), String> 
     conn.execute(
         "UPDATE anime SET latest_episode_at = (
             SELECT MAX(e.updated_at) FROM episodes e
-            WHERE e.anime_id = anime.id AND e.missing = 0
+            WHERE e.anime_id = anime.id AND e.missing = 0 AND e.pending_delete = 0
         )
         WHERE latest_episode_at IS NOT (
             SELECT MAX(e.updated_at) FROM episodes e
-            WHERE e.anime_id = anime.id AND e.missing = 0
+            WHERE e.anime_id = anime.id AND e.missing = 0 AND e.pending_delete = 0
         )",
         [],
     )
@@ -346,6 +385,7 @@ CREATE TABLE IF NOT EXISTS anime (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_watched_at TEXT,
   latest_episode_at TEXT,
+  pending_delete INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(category_id) REFERENCES categories(id)
 );
 
@@ -366,6 +406,7 @@ CREATE TABLE IF NOT EXISTS episodes (
   date_added TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_watched_at TEXT,
+  pending_delete INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(anime_id) REFERENCES anime(id) ON DELETE CASCADE,
   FOREIGN KEY(root_folder_id) REFERENCES root_folders(id) ON DELETE SET NULL
 );

@@ -204,6 +204,54 @@ export type DeleteAnimeFilesSummary = {
   permanent_delete_used: boolean;
 };
 
+export type LibraryOperationType =
+  | "delete_anime"
+  | "delete_episode"
+  | "clean_local_data"
+  | "rescan_library"
+  | "local_data_stats";
+
+export type LibraryOperationStatus = "queued" | "running" | "done" | "failed" | "canceled";
+
+export type LibraryOperationRecord = {
+  id: number;
+  operationType: LibraryOperationType;
+  status: LibraryOperationStatus;
+  phase: string;
+  targetAnimeId: number | null;
+  targetEpisodeId: number | null;
+  progressCurrent: number;
+  progressTotal: number;
+  summaryJson: string | null;
+  errorText: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+};
+
+export type LibraryOpsSnapshot = {
+  active: LibraryOperationRecord[];
+  history: LibraryOperationRecord[];
+  activeCount: number;
+};
+
+export type LibraryOperationFinishedEvent = {
+  operationId: number;
+  operationType: LibraryOperationType;
+  status: LibraryOperationStatus;
+  targetAnimeId: number | null;
+  targetEpisodeId: number | null;
+  summaryJson: string | null;
+  errorText: string | null;
+};
+
+export type LibraryUpdatedEvent = {
+  reason: string;
+  operationId: number | null;
+  statsChanged: boolean;
+};
+
 export type RenameFileRequest = {
   old_path: string;
   new_path: string;

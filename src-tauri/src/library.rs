@@ -21,6 +21,7 @@ const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
 const PREFER_ANILIST_DISPLAY_TITLE_KEY: &str = "prefer_anilist_display_title";
 const HIDE_ANILIST_FEATURES_KEY: &str = "hide_anilist_features";
 const CLEAN_UNUSED_SCRUB_SPRITES_KEY: &str = "clean_unused_scrub_sprites";
+const LOCAL_DATA_STATS_CACHE_KEY: &str = "local_data_stats_cache";
 
 /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
 /// When AniList status is `RELEASING`, trailing unreleased episodes are not counted.
@@ -167,12 +168,12 @@ pub struct LibraryState {
     clean_unused_scrub_sprites: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ScanSummary {
-    roots_scanned: i64,
-    episodes_imported: i64,
-    episodes_removed: i64,
-    unmatched_files: i64,
+    pub roots_scanned: i64,
+    pub episodes_imported: i64,
+    pub episodes_removed: i64,
+    pub unmatched_files: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -181,36 +182,36 @@ pub struct ProgressOverrideSummary {
     updated_episodes: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalDataStats {
-    database_bytes: u64,
-    thumbnails_bytes: u64,
-    scrub_sprites_bytes: u64,
-    op_ed_fingerprints_bytes: u64,
-    total_bytes: u64,
+    pub database_bytes: u64,
+    pub thumbnails_bytes: u64,
+    pub scrub_sprites_bytes: u64,
+    pub op_ed_fingerprints_bytes: u64,
+    pub total_bytes: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LocalDataCleanupSummary {
-    roots_scanned: i64,
-    stale_episodes_removed: i64,
-    empty_anime_removed: i64,
-    unmatched_files_removed: i64,
-    thumbnails_removed: i64,
-    scrub_sprites_removed: i64,
-    op_ed_fingerprints_removed: i64,
-    op_ed_temp_pcm_removed: i64,
-    bytes_removed: u64,
+    pub roots_scanned: i64,
+    pub stale_episodes_removed: i64,
+    pub empty_anime_removed: i64,
+    pub unmatched_files_removed: i64,
+    pub thumbnails_removed: i64,
+    pub scrub_sprites_removed: i64,
+    pub op_ed_fingerprints_removed: i64,
+    pub op_ed_temp_pcm_removed: i64,
+    pub bytes_removed: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DeleteAnimeFilesSummary {
-    episodes_deleted: i64,
-    episodes_failed: i64,
-    bytes_deleted: u64,
-    cover_deleted: bool,
-    cover_failed: bool,
-    permanent_delete_used: bool,
+    pub episodes_deleted: i64,
+    pub episodes_failed: i64,
+    pub bytes_deleted: u64,
+    pub cover_deleted: bool,
+    pub cover_failed: bool,
+    pub permanent_delete_used: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -753,8 +754,23 @@ pub fn delete_anime_files(
     db: State<'_, AppDatabase>,
     anime_id: i64,
 ) -> Result<DeleteAnimeFilesSummary, String> {
+    delete_anime_files_impl(&db, anime_id, false)
+}
+
+pub(crate) fn delete_anime_files_for_operation(
+    db: &AppDatabase,
+    anime_id: i64,
+) -> Result<DeleteAnimeFilesSummary, String> {
+    delete_anime_files_impl(db, anime_id, true)
+}
+
+fn delete_anime_files_impl(
+    db: &AppDatabase,
+    anime_id: i64,
+    include_pending_delete: bool,
+) -> Result<DeleteAnimeFilesSummary, String> {
     let (episodes, cover_path, custom_thumbnail_path, root_folders) = db.with_conn(|conn| {
-        let episodes = list_deletable_episodes_for_anime(conn, anime_id)?;
+        let episodes = list_deletable_episodes_for_anime(conn, anime_id, include_pending_delete)?;
         let (cover_path, custom_thumbnail_path) = conn
             .query_row(
                 "SELECT anilist_cover_path, custom_thumbnail_path FROM anime WHERE id = ?1",
@@ -820,7 +836,7 @@ pub fn delete_anime_files(
     let mut cover_failed = false;
     let mut clear_cover_path = false;
     if let Some(cover_path) = cover_path {
-        let path = data_file_path(&db, &cover_path);
+        let path = data_file_path(db, &cover_path);
         if path.exists() {
             let size = fs::metadata(&path)
                 .map(|metadata| metadata.len())
@@ -912,14 +928,30 @@ pub fn delete_episode_files(
     db: State<'_, AppDatabase>,
     episode_id: i64,
 ) -> Result<DeleteAnimeFilesSummary, String> {
+    delete_episode_files_impl(&db, episode_id, false)
+}
+
+pub(crate) fn delete_episode_files_for_operation(
+    db: &AppDatabase,
+    episode_id: i64,
+) -> Result<DeleteAnimeFilesSummary, String> {
+    delete_episode_files_impl(db, episode_id, true)
+}
+
+fn delete_episode_files_impl(
+    db: &AppDatabase,
+    episode_id: i64,
+    include_pending_delete: bool,
+) -> Result<DeleteAnimeFilesSummary, String> {
     let (episode, anime_id, cover_path, custom_thumbnail_path, root_folders) = db.with_conn(|conn| {
         let episode = conn
             .query_row(
                 "SELECT id, path, size, anime_id
                  FROM episodes
                  WHERE id = ?1
-                   AND missing = 0",
-                params![episode_id],
+                   AND missing = 0
+                   AND (pending_delete = 0 OR ?2 != 0)",
+                params![episode_id, if include_pending_delete { 1 } else { 0 }],
                 |row| {
                     Ok(DeletableEpisode {
                         id: row.get(0)?,
@@ -1002,7 +1034,8 @@ pub fn delete_episode_files(
     if episode_deleted {
         let remaining = db.with_conn(|conn| {
             conn.query_row(
-                "SELECT COUNT(*) FROM episodes WHERE anime_id = ?1 AND missing = 0 AND id != ?2",
+                "SELECT COUNT(*) FROM episodes
+                 WHERE anime_id = ?1 AND missing = 0 AND pending_delete = 0 AND id != ?2",
                 params![anime_id, episode_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -1010,7 +1043,7 @@ pub fn delete_episode_files(
         })?;
         if remaining == 0 {
             if let Some(cover_path) = cover_path {
-                let cover_file = data_file_path(&db, &cover_path);
+                let cover_file = data_file_path(db, &cover_path);
                 if cover_file.exists() {
                     let size = fs::metadata(&cover_file)
                         .map(|metadata| metadata.len())
@@ -1183,7 +1216,7 @@ pub fn open_episode_folder(
 ) -> Result<(), String> {
     let path = db.with_conn(|conn| {
         conn.query_row(
-            "SELECT path FROM episodes WHERE id = ?1 AND missing = 0",
+            "SELECT path FROM episodes WHERE id = ?1 AND missing = 0 AND pending_delete = 0",
             params![episode_id],
             |row| row.get::<_, String>(0),
         )
@@ -1311,7 +1344,8 @@ pub fn override_anime_progress(
                      END,
                      updated_at = CURRENT_TIMESTAMP
                  WHERE anime_id = ?1
-                   AND missing = 0",
+                   AND missing = 0
+                   AND pending_delete = 0",
                 params![anime_id, tracker_offset, progress],
             )
             .map(|count| count as i64)
@@ -1379,6 +1413,7 @@ pub fn save_episode_progress(
                      FROM episodes
                      WHERE anime_id = ?1
                        AND missing = 0
+                       AND pending_delete = 0
                  ),
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
@@ -1495,6 +1530,14 @@ pub fn rescan_library(
     app: AppHandle,
     db: State<'_, AppDatabase>,
 ) -> Result<ScanSummary, String> {
+    rescan_library_for_operation(app, &db)
+}
+
+#[cfg(windows)]
+pub(crate) fn rescan_library_for_operation(
+    app: AppHandle,
+    db: &AppDatabase,
+) -> Result<ScanSummary, String> {
     let (summary, new_imports) = db.with_conn(rescan_library_in_conn)?;
     let import_count = new_imports.len();
     let op_ed_imports: Vec<crate::jobs::RescanOpEdImport> = new_imports
@@ -1521,16 +1564,42 @@ pub fn rescan_library(
 #[tauri::command]
 #[cfg(not(windows))]
 pub fn rescan_library(db: State<'_, AppDatabase>) -> Result<ScanSummary, String> {
+    rescan_library_for_operation(&db)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn rescan_library_for_operation(db: &AppDatabase) -> Result<ScanSummary, String> {
     db.with_conn(|conn| rescan_library_in_conn(conn).map(|(summary, _)| summary))
 }
 
 #[tauri::command]
 pub fn get_local_data_stats(db: State<'_, AppDatabase>) -> Result<LocalDataStats, String> {
-    local_data_stats(&db)
+    cached_local_data_stats(&db)
+}
+
+pub(crate) fn refresh_local_data_stats_cache(db: &AppDatabase) -> Result<LocalDataStats, String> {
+    let stats = local_data_stats(db)?;
+    let json = serde_json::to_string(&stats).map_err(|e| e.to_string())?;
+    db.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![LOCAL_DATA_STATS_CACHE_KEY, json],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })?;
+    Ok(stats)
 }
 
 #[tauri::command]
 pub fn clean_local_data(db: State<'_, AppDatabase>) -> Result<LocalDataCleanupSummary, String> {
+    clean_local_data_for_operation(&db)
+}
+
+pub(crate) fn clean_local_data_for_operation(
+    db: &AppDatabase,
+) -> Result<LocalDataCleanupSummary, String> {
     let database_bytes_before = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
     let mut summary = db.with_conn(|conn| {
         let roots = list_root_folders(conn)?;
@@ -1740,6 +1809,7 @@ fn list_episode_file_names_for_anime(conn: &Connection, anime_id: i64) -> Result
             "SELECT file_name FROM episodes
              WHERE anime_id = ?1
                AND missing = 0
+               AND pending_delete = 0
              ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -1789,10 +1859,12 @@ fn list_anime_search_index(conn: &mut Connection) -> Result<Vec<AnimeSearchEntry
         .prepare(
             "SELECT a.id, a.title, a.anilist_title, e.file_name
              FROM anime a
-             JOIN episodes e ON e.anime_id = a.id AND e.missing = 0
-             WHERE EXISTS (
-                 SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0
-             )
+             JOIN episodes e ON e.anime_id = a.id AND e.missing = 0 AND e.pending_delete = 0
+             WHERE a.pending_delete = 0
+               AND EXISTS (
+                 SELECT 1 FROM episodes ae
+                 WHERE ae.anime_id = a.id AND ae.missing = 0 AND ae.pending_delete = 0
+               )
              ORDER BY a.id, e.file_name COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -1859,26 +1931,38 @@ fn list_anime(
                 a.created_at,
                 a.latest_episode_at,
                 (SELECT e2.path FROM episodes e2
-                 WHERE e2.anime_id = a.id AND e2.missing = 0
+                 WHERE e2.anime_id = a.id AND e2.missing = 0 AND e2.pending_delete = 0
                  ORDER BY e2.episode_number IS NULL, e2.episode_number, e2.relative_path COLLATE NOCASE
                  LIMIT 1) AS first_episode_path,
                 a.no_op_ed
          FROM anime a
-         LEFT JOIN episodes e ON e.anime_id = a.id AND e.missing = 0",
+         LEFT JOIN episodes e ON e.anime_id = a.id AND e.missing = 0 AND e.pending_delete = 0",
     );
     if category_id.is_some() {
         sql.push_str(
-            " WHERE a.category_id = ?1
-              AND EXISTS (SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0)",
+            " WHERE a.pending_delete = 0
+              AND a.category_id = ?1
+              AND EXISTS (
+                SELECT 1 FROM episodes ae
+                WHERE ae.anime_id = a.id AND ae.missing = 0 AND ae.pending_delete = 0
+              )",
         );
     } else if recent_only {
         sql.push_str(
-            " WHERE a.last_watched_at IS NOT NULL
-              AND EXISTS (SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0)",
+            " WHERE a.pending_delete = 0
+              AND a.last_watched_at IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM episodes ae
+                WHERE ae.anime_id = a.id AND ae.missing = 0 AND ae.pending_delete = 0
+              )",
         );
     } else {
         sql.push_str(
-            " WHERE EXISTS (SELECT 1 FROM episodes ae WHERE ae.anime_id = a.id AND ae.missing = 0)",
+            " WHERE a.pending_delete = 0
+              AND EXISTS (
+                SELECT 1 FROM episodes ae
+                WHERE ae.anime_id = a.id AND ae.missing = 0 AND ae.pending_delete = 0
+              )",
         );
     }
     sql.push_str(" GROUP BY a.id");
@@ -1949,21 +2033,22 @@ fn list_missing_anime(conn: &Connection) -> Result<Vec<MissingAnimeSummary>, Str
                     a.anilist_cover_path,
                     a.custom_thumbnail_path,
                     a.tracker_offset,
-                    SUM(CASE WHEN e.missing = 0 THEN 1 ELSE 0 END) AS available_count,
-                    SUM(CASE WHEN e.missing = 0 AND e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
-                    SUM(CASE WHEN e.missing != 0 THEN 1 ELSE 0 END) AS missing_count,
+                    SUM(CASE WHEN e.missing = 0 AND e.pending_delete = 0 THEN 1 ELSE 0 END) AS available_count,
+                    SUM(CASE WHEN e.missing = 0 AND e.pending_delete = 0 AND e.watched = 0 THEN 1 ELSE 0 END) AS unwatched_count,
+                    SUM(CASE WHEN e.missing != 0 AND e.pending_delete = 0 THEN 1 ELSE 0 END) AS missing_count,
                     COUNT(e.id) AS total_count,
                     a.last_watched_at,
                     a.created_at,
                     a.latest_episode_at,
                     (SELECT e2.path FROM episodes e2
-                     WHERE e2.anime_id = a.id
+                     WHERE e2.anime_id = a.id AND e2.pending_delete = 0
                      ORDER BY e2.missing, e2.episode_number IS NULL, e2.episode_number, e2.relative_path COLLATE NOCASE
                      LIMIT 1) AS first_episode_path
              FROM anime a
-             JOIN episodes e ON e.anime_id = a.id
+             JOIN episodes e ON e.anime_id = a.id AND e.pending_delete = 0
+             WHERE a.pending_delete = 0
              GROUP BY a.id
-             HAVING SUM(CASE WHEN e.missing != 0 THEN 1 ELSE 0 END) > 0
+             HAVING SUM(CASE WHEN e.missing != 0 AND e.pending_delete = 0 THEN 1 ELSE 0 END) > 0
              ORDER BY a.title COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -2002,6 +2087,7 @@ fn list_episodes_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<Episo
              FROM episodes
              WHERE anime_id = ?1
                AND missing = 0
+               AND pending_delete = 0
              ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -2018,6 +2104,7 @@ fn list_episodes_for_anime(conn: &Connection, anime_id: i64) -> Result<Vec<Episo
 fn list_deletable_episodes_for_anime(
     conn: &Connection,
     anime_id: i64,
+    include_pending_delete: bool,
 ) -> Result<Vec<DeletableEpisode>, String> {
     let mut stmt = conn
         .prepare(
@@ -2025,11 +2112,12 @@ fn list_deletable_episodes_for_anime(
              FROM episodes
              WHERE anime_id = ?1
                AND missing = 0
+               AND (pending_delete = 0 OR ?2 != 0)
              ORDER BY episode_number IS NULL, episode_number, relative_path COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![anime_id], |row| {
+        .query_map(params![anime_id, if include_pending_delete { 1 } else { 0 }], |row| {
             Ok(DeletableEpisode {
                 id: row.get(0)?,
                 path: row.get(1)?,
@@ -2049,7 +2137,8 @@ fn preferred_episode_folder_for_anime(
             "SELECT path
              FROM episodes
              WHERE anime_id = ?1
-               AND missing = 0",
+               AND missing = 0
+               AND pending_delete = 0",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -2526,6 +2615,35 @@ fn delete_unmatched_files_not_in_scan(
     Ok(removed)
 }
 
+fn cached_local_data_stats(db: &AppDatabase) -> Result<LocalDataStats, String> {
+    let database_bytes = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
+    let cached = db.with_conn(|conn| {
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![LOCAL_DATA_STATS_CACHE_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    })?;
+    let Some(cached) = cached else {
+        return Ok(LocalDataStats {
+            database_bytes,
+            thumbnails_bytes: 0,
+            scrub_sprites_bytes: 0,
+            op_ed_fingerprints_bytes: 0,
+            total_bytes: database_bytes,
+        });
+    };
+    let mut stats: LocalDataStats = serde_json::from_str(&cached).map_err(|e| e.to_string())?;
+    stats.database_bytes = database_bytes;
+    stats.total_bytes = stats.database_bytes
+        + stats.thumbnails_bytes
+        + stats.scrub_sprites_bytes
+        + stats.op_ed_fingerprints_bytes;
+    Ok(stats)
+}
+
 fn local_data_stats(db: &AppDatabase) -> Result<LocalDataStats, String> {
     let database_bytes = fs::metadata(db.path()).map(|m| m.len()).unwrap_or(0);
     let (thumbnails_bytes, scrub_sprites_bytes, op_ed_fingerprints_bytes) = match db.path().parent() {
@@ -2727,14 +2845,17 @@ fn upsert_episode(
             size = excluded.size,
             missing = 0,
             updated_at = CURRENT_TIMESTAMP
-         WHERE episodes.anime_id IS NOT excluded.anime_id
-            OR episodes.root_folder_id IS NOT excluded.root_folder_id
-            OR episodes.relative_path IS NOT excluded.relative_path
-            OR episodes.file_name IS NOT excluded.file_name
-            OR episodes.file_type IS NOT excluded.file_type
-            OR episodes.episode_number IS NOT excluded.episode_number
-            OR episodes.size IS NOT excluded.size
-            OR episodes.missing != 0",
+         WHERE episodes.pending_delete = 0
+           AND (
+              episodes.anime_id IS NOT excluded.anime_id
+              OR episodes.root_folder_id IS NOT excluded.root_folder_id
+              OR episodes.relative_path IS NOT excluded.relative_path
+              OR episodes.file_name IS NOT excluded.file_name
+              OR episodes.file_type IS NOT excluded.file_type
+              OR episodes.episode_number IS NOT excluded.episode_number
+              OR episodes.size IS NOT excluded.size
+              OR episodes.missing != 0
+           )",
         params![
             anime_id,
             root_folder_id,

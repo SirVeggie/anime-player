@@ -7,6 +7,7 @@ mod anilist;
 mod crash_log;
 mod db;
 mod library;
+mod library_ops;
 mod media_tools;
 mod scanner;
 
@@ -401,6 +402,9 @@ pub fn run() {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             crash_log::log("INFO", "database open ok");
             app.manage(db);
+            let db_ref = app.state::<db::AppDatabase>();
+            app.manage(library_ops::LibraryOpsState::new(db_ref.inner()));
+            library_ops::start_queued_operations(app.handle().clone());
 
             #[cfg(any(windows, target_os = "linux"))]
             let _ = app.deep_link().register_all();
@@ -487,6 +491,12 @@ pub fn run() {
         library::rescan_library,
         library::get_local_data_stats,
         library::clean_local_data,
+        library_ops::library_ops_get_snapshot,
+        library_ops::library_ops_request_delete_anime,
+        library_ops::library_ops_request_delete_episode,
+        library_ops::library_ops_request_clean_local_data,
+        library_ops::library_ops_request_rescan,
+        library_ops::library_ops_request_local_data_stats_refresh,
         library::set_skip_op_ed,
         library::set_auto_op_ed_detect,
         library::set_dont_skip_first_episode_op_ed,
@@ -594,6 +604,12 @@ pub fn run() {
         library::rescan_library,
         library::get_local_data_stats,
         library::clean_local_data,
+        library_ops::library_ops_get_snapshot,
+        library_ops::library_ops_request_delete_anime,
+        library_ops::library_ops_request_delete_episode,
+        library_ops::library_ops_request_clean_local_data,
+        library_ops::library_ops_request_rescan,
+        library_ops::library_ops_request_local_data_stats_refresh,
         library::set_skip_op_ed,
         library::set_auto_op_ed_detect,
         library::set_dont_skip_first_episode_op_ed,

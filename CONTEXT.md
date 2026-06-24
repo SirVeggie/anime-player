@@ -59,8 +59,10 @@ view components. Per-screen UI lives in `src/components/`:
   root folders, so malformed files that are not yet detected as episodes can be
   renamed and then imported by the follow-up rescan.
 - A **Jobs** sidebar page (between Settings and Rescan) lists queued/running
-  background work and job history (two tabs, like Bulk Edit). The nav icon shows
-  a badge with the count of queued + running jobs. **Max parallel jobs** (1–20,
+  background work and job history (two tabs, like Bulk Edit). It shows both
+  media jobs and durable library operations such as title deletion, cleanup,
+  rescan, and stats refresh. The nav icon shows a badge with queued + running
+  media jobs plus library operations. **Max parallel jobs** (1–20,
   default 12, stored in SQLite `settings` as `jobs_max_parallel`) caps how many
   jobs may run at once for scheduling low/medium work (high-priority jobs count
   toward that cap but are never blocked by it—e.g. six low jobs at the limit can
@@ -87,9 +89,12 @@ view components. Per-screen UI lives in `src/components/`:
   `jobs://finished`. The root layout only subscribes to the active job count for the
   sidebar badge; the episode and jobs screens subscribe to the full snapshot (cached from
   the last `jobs://updated` when opening Jobs — no extra IPC). The Jobs page collapses
-  large chroma queues into one summary row. Frontend
+  large chroma queues into one summary row. Episode-page scrub enqueue is
+  chunked in batches so one large title does not hold the `JobManager` mutex for
+  the full queue. Frontend
   helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
-  `onJobIdentityFinished`). Workers run on `spawn_blocking` (off the WebView
+  `onJobIdentityFinished`) and `src/libraryOps/libraryOpsClient.ts` for durable
+  library-operation subscriptions. Workers run on `spawn_blocking` (off the WebView
   thread), but **must not** hold `AppDatabase::with_conn` across ffmpeg/fpcalc
   or other slow I/O—only brief SQLite reads/writes—so UI commands like
   `list_episodes` and `get_anilist_cover_image` stay responsive.
@@ -99,15 +104,17 @@ view components. Per-screen UI lives in `src/components/`:
   `anime.latest_episode_at` descending. That field is stored on `anime` and
   recomputed after every library rescan as `MAX(episodes.updated_at)` per show
   (`db::refresh_anime_latest_episode_at`). On each app start, if at least one
-  root folder is configured, the app schedules `rescan_library` once after the
-  initial `get_library_state` / auth / stats load and the first paint (idle
+  root folder is configured, the app queues a durable `rescan_library`
+  operation once after the initial `get_library_state` / auth / cached stats load and the first paint (idle
   callback with timeout via `scheduleAfterAppReady`) so the library UI is
   interactive before background scan work and job enqueue begin.
 - `src/api.ts` contains the Tauri command bindings and `src/types.ts` mirrors
   the serialized Rust DTOs.
 - Settings talks to Rust via library commands such as `get_library_state`,
-  `add_root_folder`, `rescan_library`, `get_local_data_stats`,
-  `clean_local_data`, `list_episodes`, `list_root_video_files`, `delete_anime_files`,
+  `add_root_folder`, durable `library_ops_request_rescan`,
+  `get_local_data_stats`, durable `library_ops_request_clean_local_data`,
+  `list_episodes`, `list_root_video_files`, durable
+  `library_ops_request_delete_anime` / `library_ops_request_delete_episode`,
   `move_anime_to_category`, `set_default_category`, editable
   `*_regex_rule` commands, `rename_files`, `rename_anime`,
   `save_episode_progress`, and the Windows-only
@@ -457,8 +464,20 @@ view components. Per-screen UI lives in `src/components/`:
   `move_anime_to_category`, `list_episodes`, `get_matching_detection_rule_name`
   (re-runs filename matching against enabled rules for the episode list; the
   episode page shows the resulting rule name without persisting it),
-  `save_episode_progress`, `rename_anime`, `get_local_data_stats`, `clean_local_data`,
-  and `rescan_library`. On Windows, when a rescan imports at most 20 episodes
+  `save_episode_progress`, `rename_anime`, cached `get_local_data_stats`,
+  durable `library_ops_request_*` commands for delete / clean / rescan / stats refresh,
+  and the legacy synchronous `clean_local_data` / `rescan_library` commands.
+  `library_ops.rs` owns a SQLite-backed `library_operations` table with queued /
+  running / done / failed status, progress phase text, summaries, and startup
+  recovery: setup moves interrupted `running` rows back to `queued` and wakes the
+  worker. Library operations emit `library-ops://updated`,
+  `library-ops://finished`, and `library://updated`; the frontend refreshes
+  library/search/stats from those events instead of waiting in the click
+  handler. Delete requests mark `anime.pending_delete` /
+  `episodes.pending_delete` first so normal grids, search, and episode lists hide
+  the target immediately; the worker then deletes/trashes files and caches before
+  removing DB rows. If deletion fails, pending markers are cleared for surviving
+  rows and the operation is marked failed. On Windows, when a rescan imports at most 20 episodes
   (new or updated paths), scrub and OP/ED auto-enqueue run on a background
   thread after the command returns (one batched scheduler flush). `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
@@ -469,10 +488,12 @@ view components. Per-screen UI lives in `src/components/`:
   episode rows that are missing or no longer match the current detection rules
   stay in SQLite so a temporary rule mistake does not lose links, categories,
   or watch progress. Rescans mark those rows with `episodes.missing = 1`;
-  regular library summaries and `list_episodes` filter to `missing = 0`, while
+  regular library summaries and `list_episodes` filter to `missing = 0` and
+  `pending_delete = 0`, while
   `LibraryState.missing_anime` drives the Missing sidebar page with
-  `missing/total` counts. Settings shows database and saved AniList cover sizes via
-  `get_local_data_stats` (database, AniList covers, and scrub-sprite cache sizes);
+  `missing/total` counts. Settings shows database and saved cache sizes via
+  cached `get_local_data_stats`; expensive recursive size measurement runs as a
+  background library operation and refreshes the SQLite `settings` cache.
   the explicit `clean_local_data` action prunes stale episodes/unmatched rows,
   removes anime with no episodes, vacuums SQLite, and deletes unreferenced saved
   covers and scrub sprites (matched by episode path keys in sprite metadata).
@@ -542,6 +563,8 @@ view components. Per-screen UI lives in `src/components/`:
   `jobs_enqueue_episode_page_scrub_sprites`, `jobs_set_job_priority`,
   `jobs_set_scrub_sprite_priority_for_paths`, `jobs_cancel`,
   `jobs_cancel_all`, `jobs_set_max_parallel`.
+- `library_ops.rs` — durable SQLite-backed library-operation runner for
+  responsive delete, cleanup, rescan, and local-data stats refresh.
 - `lib.rs` hooks the main window's `WindowEvent`:
   - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
     and joins the event-loop thread) before the HWND becomes invalid.
