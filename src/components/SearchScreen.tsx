@@ -16,7 +16,7 @@ import {
   storeSearchUseRegex,
 } from "../search";
 import type { AnimeSearchEntry, AnimeSummary } from "../types";
-import { AnimeCardGrid } from "./AnimeGrid";
+import { AnimeCardGrid, type AnimeContextMenuHandlers } from "./AnimeGrid";
 import { CustomCheckbox } from "./CustomCheckbox";
 import { CustomDropdown } from "./CustomDropdown";
 import { ViewHeader } from "./ViewHeader";
@@ -29,8 +29,18 @@ export function SearchScreen(props: {
   focusToken: number;
   onQueryChange: (query: string) => void;
   onOpenAnime: (anime: AnimeSummary) => void;
+  contextMenu: AnimeContextMenuHandlers;
 }) {
-  const { anime, searchIndex, preferAnilistDisplayTitle, query, focusToken, onQueryChange, onOpenAnime } = props;
+  const {
+    anime,
+    searchIndex,
+    preferAnilistDisplayTitle,
+    query,
+    focusToken,
+    onQueryChange,
+    onOpenAnime,
+    contextMenu,
+  } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [includeFilenames, setIncludeFilenames] = useState(readStoredSearchIncludeFilenames);
   const [useRegex, setUseRegex] = useState(readStoredSearchUseRegex);
@@ -182,6 +192,7 @@ export function SearchScreen(props: {
           anime={sortedMatchingAnime}
           preferAnilistDisplayTitle={preferAnilistDisplayTitle}
           onOpenAnime={onOpenAnime}
+          contextMenu={contextMenu}
         />
       )}
     </>

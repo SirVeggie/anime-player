@@ -216,6 +216,12 @@ pub struct DeleteAnimeFilesSummary {
     pub permanent_delete_used: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ClearAnimeLocalDataSummary {
+    pub episodes_removed: i64,
+    pub bytes_removed: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RenameFileRequest {
     old_path: String,
@@ -1126,6 +1132,85 @@ fn delete_episode_files_impl(
         cover_deleted,
         cover_failed,
         permanent_delete_used,
+    })
+}
+
+#[tauri::command]
+pub fn clear_anime_local_data(
+    db: State<'_, AppDatabase>,
+    anime_id: i64,
+) -> Result<ClearAnimeLocalDataSummary, String> {
+    clear_anime_local_data_impl(&db, anime_id)
+}
+
+fn clear_anime_local_data_impl(
+    db: &AppDatabase,
+    anime_id: i64,
+) -> Result<ClearAnimeLocalDataSummary, String> {
+    let (episode_paths, cover_path, custom_thumbnail_path, episode_count) = db.with_conn(|conn| {
+        let (cover_path, custom_thumbnail_path) = conn
+            .query_row(
+                "SELECT anilist_cover_path, custom_thumbnail_path
+                 FROM anime
+                 WHERE id = ?1 AND pending_delete = 0",
+                params![anime_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Anime does not exist: {anime_id}"))?;
+
+        let mut stmt = conn
+            .prepare("SELECT path FROM episodes WHERE anime_id = ?1 AND pending_delete = 0")
+            .map_err(|e| e.to_string())?;
+        let paths = stmt
+            .query_map(params![anime_id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| e.to_string())?;
+        let episode_count = paths.len() as i64;
+
+        Ok((paths, cover_path, custom_thumbnail_path, episode_count))
+    })?;
+
+    let mut bytes_removed = 0_u64;
+    for path in &episode_paths {
+        bytes_removed += crate::scrub_preview::remove_scrub_sprite_cache(path).unwrap_or(0);
+    }
+
+    let _ = db.with_conn(|conn| op_ed::reset_anime_op_ed_analysis(conn, anime_id));
+
+    if let Some(cover_path) = cover_path {
+        let path = data_file_path(db, &cover_path);
+        if path.exists() {
+            bytes_removed += fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+            let _ = fs::remove_file(&path);
+        }
+    }
+
+    if let Some(custom_thumbnail_path) = custom_thumbnail_path {
+        let path = PathBuf::from(&custom_thumbnail_path);
+        if path.exists() {
+            bytes_removed += fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+            let _ = fs::remove_file(&path);
+        }
+    }
+
+    db.with_conn(|conn| {
+        conn.execute("DELETE FROM anime WHERE id = ?1", params![anime_id])
+            .map_err(|e| e.to_string())?;
+        refresh_anime_latest_episode_at(conn)?;
+        Ok(())
+    })?;
+
+    Ok(ClearAnimeLocalDataSummary {
+        episodes_removed: episode_count,
+        bytes_removed,
     })
 }
 

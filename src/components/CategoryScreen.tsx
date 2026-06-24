@@ -12,6 +12,7 @@ import { animeDisplayTitle } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { PromptModal } from "./PromptModal";
+import { useAnimeContextMenu, type AnimeContextMenuHandlers } from "./animeContextMenu";
 import { ViewHeader } from "./ViewHeader";
 
 export function CategoryScreen(props: {
@@ -23,6 +24,7 @@ export function CategoryScreen(props: {
   onDeleteCategory: (category: Category) => void;
   onMoveCategoryToPosition: (category: Category, position: number) => void;
   onSetDefaultCategory: (category: Category) => void;
+  animeContextMenu: AnimeContextMenuHandlers;
 }) {
   const {
     library,
@@ -33,10 +35,13 @@ export function CategoryScreen(props: {
     onDeleteCategory,
     onMoveCategoryToPosition,
     onSetDefaultCategory,
+    animeContextMenu,
   } = props;
   const getRovingItemProps = useRovingListNavigation(library.categories.length + library.recent_anime.length);
   const [recentCovers, setRecentCovers] = useState<ThumbnailUrlCache>({});
   const { menu, openMenu, closeMenu } = useContextMenu();
+  const { enabled: animeContextMenuEnabled, openAnimeMenu, menuUi: animeContextMenuUi } =
+    useAnimeContextMenu(animeContextMenu);
   const [addCategoryOpen, setAddCategoryOpen] = useState(false);
   const [addCategoryBusy, setAddCategoryBusy] = useState(false);
   const [addCategoryError, setAddCategoryError] = useState<string | null>(null);
@@ -195,6 +200,9 @@ export function CategoryScreen(props: {
                   className={`continue-card${cover ? " continue-card--with-cover" : ""}`}
                   key={anime.id}
                   onClick={() => onOpenAnime(anime)}
+                  onContextMenu={
+                    animeContextMenuEnabled ? (event) => openAnimeMenu(event, anime) : undefined
+                  }
                   {...getRovingItemProps(library.categories.length + index)}
                 >
                   {cover ? (
@@ -212,6 +220,7 @@ export function CategoryScreen(props: {
       ) : null}
 
       <ContextMenu menu={menu} onClose={closeMenu} />
+      {animeContextMenuUi}
 
       {deleteCategory ? (
         <ConfirmModal

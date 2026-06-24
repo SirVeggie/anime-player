@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   animePosterSourceKey,
   cachedThumbnailUrl,
@@ -9,14 +9,19 @@ import {
 import type { MissingAnimeSummary } from "../types";
 import { animeDisplayTitle, animeTooltipTitle } from "../utils";
 import { AnimeCardLabel } from "./AnimeCardLabel";
+import { ConfirmModal } from "./ConfirmModal";
+import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ViewHeader } from "./ViewHeader";
 
 export function MissingScreen(props: {
   anime: MissingAnimeSummary[];
   preferAnilistDisplayTitle: boolean;
+  onClearLocalData: (anime: MissingAnimeSummary) => void;
 }) {
-  const { anime, preferAnilistDisplayTitle } = props;
+  const { anime, preferAnilistDisplayTitle, onClearLocalData } = props;
   const [covers, setCovers] = useState<ThumbnailUrlCache>({});
+  const { menu, openMenu, closeMenu } = useContextMenu();
+  const [deleteAnime, setDeleteAnime] = useState<MissingAnimeSummary | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +41,26 @@ export function MissingScreen(props: {
     };
   }, [anime]);
 
+  const buildMenuItems = useCallback(
+    (item: MissingAnimeSummary): ContextMenuItem[] => [
+      {
+        type: "action",
+        id: "delete",
+        label: "Delete",
+        danger: true,
+        onSelect: () => setDeleteAnime(item),
+      },
+    ],
+    [],
+  );
+
+  const openAnimeMenu = useCallback(
+    (event: ReactMouseEvent, item: MissingAnimeSummary) => {
+      openMenu(event, buildMenuItems(item));
+    },
+    [buildMenuItems, openMenu],
+  );
+
   return (
     <>
       <ViewHeader
@@ -54,7 +79,11 @@ export function MissingScreen(props: {
             const displayTitle = animeDisplayTitle(item, preferAnilistDisplayTitle);
             const tooltipTitle = animeTooltipTitle(item);
             return (
-              <article className="anime-card missing-card" key={item.id}>
+              <article
+                className="anime-card missing-card"
+                key={item.id}
+                onContextMenu={(event) => openAnimeMenu(event, item)}
+              >
                 <div className={`poster-placeholder${cover ? " poster-placeholder--image" : ""}`}>
                   {cover ? <img src={cover} alt="" loading="lazy" /> : displayTitle.slice(0, 2).toUpperCase()}
                 </div>
@@ -68,6 +97,21 @@ export function MissingScreen(props: {
           })}
         </div>
       )}
+
+      <ContextMenu menu={menu} onClose={closeMenu} />
+
+      {deleteAnime ? (
+        <ConfirmModal
+          title="Clear local data?"
+          description={`Remove "${deleteAnime.title}" from the library database?`}
+          warning="Saved progress, cached covers, scrub thumbnails, and episode rows for this title will be removed. Video files on disk are not deleted."
+          onConfirm={() => {
+            onClearLocalData(deleteAnime);
+            setDeleteAnime(null);
+          }}
+          onClose={() => setDeleteAnime(null)}
+        />
+      ) : null}
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AnimeSummary, Category, Episode, LibraryState, RenameFileRequest, VideoFile } from "../types";
-import { AnimeCardGrid } from "./AnimeGrid";
+import { AnimeCardGrid, type AnimeContextMenuHandlers } from "./AnimeGrid";
 import { CustomDropdown } from "./CustomDropdown";
 
 const ALL_CATEGORIES_ID = 0;
@@ -29,6 +29,7 @@ export function BulkEditScreen(props: {
   onMoveAnime: (animeIds: number[], categoryId: number) => void;
   onValidateRenames: (renames: RenameFileRequest[]) => Promise<void>;
   onRenameFiles: (renames: RenameFileRequest[]) => void;
+  contextMenu: AnimeContextMenuHandlers;
 }) {
   const {
     library,
@@ -39,6 +40,7 @@ export function BulkEditScreen(props: {
     onMoveAnime,
     onValidateRenames,
     onRenameFiles,
+    contextMenu,
   } = props;
   const [activeTab, setActiveTab] = useState<BulkEditTab>("category");
   const [sourceCategoryId, setSourceCategoryId] = useState(ALL_CATEGORIES_ID);
@@ -412,6 +414,7 @@ export function BulkEditScreen(props: {
               anime={matchingAnime}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               onOpenAnime={onOpenAnime}
+              contextMenu={contextMenu}
             />
           )}
         </>

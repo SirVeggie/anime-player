@@ -204,6 +204,11 @@ export type DeleteAnimeFilesSummary = {
   permanent_delete_used: boolean;
 };
 
+export type ClearAnimeLocalDataSummary = {
+  episodes_removed: number;
+  bytes_removed: number;
+};
+
 export type LibraryOperationType =
   | "delete_anime"
   | "delete_episode"

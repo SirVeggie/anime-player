@@ -8,6 +8,7 @@ import type {
   AnimeSearchEntry,
   Category,
   DeleteAnimeFilesSummary,
+  ClearAnimeLocalDataSummary,
   Episode,
   LibraryState,
   LibraryOperationRecord,
@@ -166,6 +167,10 @@ export function deleteAnimeFiles(animeId: number): Promise<DeleteAnimeFilesSumma
 
 export function deleteEpisodeFiles(episodeId: number): Promise<DeleteAnimeFilesSummary> {
   return invoke("delete_episode_files", { episodeId });
+}
+
+export function clearAnimeLocalData(animeId: number): Promise<ClearAnimeLocalDataSummary> {
+  return invoke("clear_anime_local_data", { animeId });
 }
 
 export function validateFileRenames(renames: RenameFileRequest[]): Promise<void> {

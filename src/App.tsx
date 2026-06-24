@@ -9,6 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addRootFolder,
   applyAnilistProgressToLocal,
+  clearAnimeLocalData,
   completeAnilistLogin,
   createCategory,
   createRegexRule,
@@ -61,7 +62,7 @@ import {
   validateFileRenames,
 } from "./api";
 import { isLatestWatchedEpisode, maxWatchedDisplayEpisode } from "./episodeProgress";
-import { AnimeGrid } from "./components/AnimeGrid";
+import { AnimeGrid, type AnimeContextMenuHandlers } from "./components/AnimeGrid";
 import { BulkEditScreen } from "./components/BulkEditScreen";
 import { CategoryScreen } from "./components/CategoryScreen";
 import { EpisodeScreen } from "./components/EpisodeScreen";
@@ -100,6 +101,7 @@ import type {
   Episode,
   LibraryState,
   LocalDataStats,
+  MissingAnimeSummary,
   RegexRule,
   RegexRuleInput,
   RenameFileRequest,
@@ -963,6 +965,36 @@ function App() {
     ],
   );
 
+  const handleClearMissingAnimeLocalData = useCallback(
+    async (anime: MissingAnimeSummary) => {
+      try {
+        await clearAnimeLocalData(anime.id);
+        setLibrary((current) =>
+          current ?
+            {
+              ...current,
+              anime: current.anime.filter((item) => item.id !== anime.id),
+              recent_anime: current.recent_anime.filter((item) => item.id !== anime.id),
+              missing_anime: current.missing_anime.filter((item) => item.id !== anime.id),
+            }
+          : current,
+        );
+        setAnimeSearchIndex((current) => current.filter((item) => item.id !== anime.id));
+
+        if (selectedAnimeIdRef.current === anime.id) {
+          setEpisodes([]);
+          setSelectedAnime(null);
+          navigateToView("missing", "restore");
+        }
+
+        showToast("success", "Local data cleared.");
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      }
+    },
+    [navigateToView, showToast],
+  );
+
   const handleOpenAnimeFolderSummary = useCallback(
     async (anime: AnimeSummary) => {
       if (anime.episode_count === 0) {
@@ -1671,6 +1703,17 @@ function App() {
   const bulkEditViewActive = view === "bulkEdit" || (view === "episodes" && episodeReturnView === "bulkEdit");
   const missingViewActive = view === "missing";
 
+  const animeContextMenu: AnimeContextMenuHandlers = {
+    categories: library.categories,
+    onDeleteAnime: (anime) => void handleDeleteAnimeSummary(anime),
+    onMoveAnime: (anime, categoryId) => void handleMoveAnimeSummary(anime, categoryId),
+    onOpenAnimeFolder: (anime) => void handleOpenAnimeFolderSummary(anime),
+    onSetAnimeThumbnail: (anime) => void handleSetAnimeThumbnailSummary(anime),
+    anilistFeaturesEnabled: !library.hide_anilist_features,
+    onSearchAnilist: handleSearchAnilist,
+    onLinkAnilist: (animeId, anilistId) => void handleLinkAnilist(animeId, anilistId),
+  };
+
   return (
     <main
       className={`app${showPlayer ? " app--player-open" : ""}${
@@ -1805,6 +1848,7 @@ function App() {
               onDeleteCategory={(category) => handleDeleteCategory(category)}
               onMoveCategoryToPosition={(category, position) => void handleMoveCategoryToPosition(category, position)}
               onSetDefaultCategory={(category) => void handleSetDefaultCategory(category)}
+              animeContextMenu={animeContextMenu}
             />
           ) : null}
 
@@ -1836,6 +1880,7 @@ function App() {
               focusToken={searchFocusToken}
               onQueryChange={setSearchQuery}
               onOpenAnime={(anime) => void openAnime(anime, "search")}
+              contextMenu={animeContextMenu}
             />
           ) : null}
 
@@ -1850,6 +1895,7 @@ function App() {
                 onMoveAnime={(animeIds, categoryId) => void handleBulkMoveAnime(animeIds, categoryId)}
                 onValidateRenames={validateFileRenames}
                 onRenameFiles={(renames) => void handleRenameFiles(renames)}
+                contextMenu={animeContextMenu}
               />
             </div>
           ) : null}
@@ -1858,6 +1904,7 @@ function App() {
             <MissingScreen
               anime={library.missing_anime}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+              onClearLocalData={(anime) => void handleClearMissingAnimeLocalData(anime)}
             />
           ) : null}
 
