@@ -34,7 +34,7 @@ pub struct RescanScrubImport {
 }
 
 /// When a rescan imports at most this many episodes, queue scrub thumbnails and OP/ED detect for them.
-pub const RESCAN_AUTO_SCRUB_MAX: usize = 20;
+pub const RESCAN_AUTO_SCRUB_MAX: usize = 50;
 
 /// Title affected by a small rescan import batch (OP/ED detect is per anime, not per file).
 #[derive(Debug, Clone)]
