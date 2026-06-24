@@ -1,6 +1,6 @@
 //! Append-only diagnostic log beside the portable `data/` folder.
 //!
-//! Used for startup crashes, Rust panics, Windows native faults, and frontend
+//! Used for app lifecycle events, Rust panics, Windows native faults, and frontend
 //! errors reported over IPC. Friends can zip `data/diagnostic.log` when reporting bugs.
 
 use std::fs::{self, OpenOptions};
@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const LOG_FILE_NAME: &str = "diagnostic.log";
-const MAX_LOG_BYTES: u64 = 1_048_576;
+const OLD_LOG_FILE_NAME: &str = "diagnostic_old.log";
+const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 static LOG_MUTEX: Mutex<()> = Mutex::new(());
@@ -34,6 +35,7 @@ pub fn log(level: &str, message: &str) {
     let Ok(_guard) = LOG_MUTEX.lock() else {
         return;
     };
+    rotate_if_oversized(path);
     let timestamp = chrono_like_timestamp();
     let line = format!("[{timestamp}] [{level}] {message}\n");
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
@@ -56,9 +58,7 @@ fn chrono_like_timestamp() -> String {
     let seconds = day_secs % 60;
     // Approximate UTC date from unix epoch (good enough for diagnostics).
     let (year, month, day) = unix_days_to_ymd(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 fn unix_days_to_ymd(mut days: u64) -> (u64, u64, u64) {
@@ -101,9 +101,15 @@ fn rotate_if_oversized(path: &Path) {
     if meta.len() <= MAX_LOG_BYTES {
         return;
     }
-    let backup = path.with_extension("log.old");
+    let backup = old_log_path(path);
     let _ = fs::remove_file(&backup);
     let _ = fs::rename(path, backup);
+}
+
+fn old_log_path(path: &Path) -> PathBuf {
+    path.parent()
+        .map(|parent| parent.join(OLD_LOG_FILE_NAME))
+        .unwrap_or_else(|| PathBuf::from(OLD_LOG_FILE_NAME))
 }
 
 fn install_panic_hook() {
@@ -113,11 +119,7 @@ fn install_panic_hook() {
             .payload()
             .downcast_ref::<&str>()
             .map(|s| (*s).to_string())
-            .or_else(|| {
-                info.payload()
-                    .downcast_ref::<String>()
-                    .cloned()
-            })
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "Box<dyn Any>".to_string());
         let location = info
             .location()

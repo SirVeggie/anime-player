@@ -359,13 +359,13 @@ fn wake_worker(app: AppHandle, ops: State<'_, LibraryOpsState>) {
 
 fn run_worker_loop(app: AppHandle) {
     loop {
-        let Some(record) = (match app
-            .state::<AppDatabase>()
-            .with_conn(take_next_operation)
-        {
+        let Some(record) = (match app.state::<AppDatabase>().with_conn(take_next_operation) {
             Ok(record) => record,
             Err(error) => {
-                crate::crash_log::log("ERROR", &format!("library operation dequeue failed: {error}"));
+                crate::crash_log::log(
+                    "ERROR",
+                    &format!("library operation dequeue failed: {error}"),
+                );
                 None
             }
         }) else {
@@ -378,6 +378,14 @@ fn run_worker_loop(app: AppHandle) {
 }
 
 fn run_operation(app: &AppHandle, record: OperationRecord) {
+    crate::crash_log::log(
+        "INFO",
+        &format!(
+            "library operation started: id={} type={}",
+            record.id,
+            record.operation_type.as_str()
+        ),
+    );
     let result = match record.operation_type {
         LibraryOperationType::DeleteAnime => run_delete_anime(app, &record),
         LibraryOperationType::DeleteEpisode => run_delete_episode(app, &record),
@@ -386,6 +394,14 @@ fn run_operation(app: &AppHandle, record: OperationRecord) {
         LibraryOperationType::LocalDataStats => run_local_data_stats(app, &record),
     };
     if let Err(error) = result {
+        crate::crash_log::log(
+            "ERROR",
+            &format!(
+                "library operation error: id={} type={} error={error}",
+                record.id,
+                record.operation_type.as_str()
+            ),
+        );
         let db = app.state::<AppDatabase>();
         let _ = db.with_conn(|conn| fail_operation(conn, record.id, &error));
         emit_snapshot(app);
@@ -606,6 +622,16 @@ fn finish_operation(
         .map_err(|e| e.to_string())?;
         Ok(())
     })?;
+    let level = if status == "failed" { "ERROR" } else { "INFO" };
+    let err_suffix = error_text
+        .as_deref()
+        .filter(|text| !text.is_empty())
+        .map(|text| format!(" error={text}"))
+        .unwrap_or_default();
+    crate::crash_log::log(
+        level,
+        &format!("library operation finished: id={operation_id} status={status}{err_suffix}"),
+    );
     emit_snapshot(app);
     emit_finished(app, operation_id);
     if library_changed {
@@ -614,7 +640,11 @@ fn finish_operation(
     Ok(())
 }
 
-fn fail_operation(conn: &mut Connection, operation_id: i64, error_text: &str) -> Result<(), String> {
+fn fail_operation(
+    conn: &mut Connection,
+    operation_id: i64,
+    error_text: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE library_operations
          SET status = 'failed',
@@ -641,7 +671,8 @@ fn has_queued_operations(conn: &mut Connection) -> Result<bool, String> {
 
 fn load_snapshot(conn: &mut Connection) -> Result<LibraryOpsSnapshot, String> {
     let active = load_operations_by_status(conn, &["queued", "running"], None)?;
-    let history = load_operations_by_status(conn, &["done", "failed", "canceled"], Some(HISTORY_LIMIT))?;
+    let history =
+        load_operations_by_status(conn, &["done", "failed", "canceled"], Some(HISTORY_LIMIT))?;
     Ok(LibraryOpsSnapshot {
         active_count: active.len() as u32,
         active,

@@ -55,4 +55,4 @@ Episode selection page features
 
 ## Reliability
 
-- [x] Portable `data/diagnostic.log` for startup breadcrumbs, panics, and native/JS faults
+- [x] Portable `data/diagnostic.log` for app lifecycle, panics, and native/JS faults (5 MiB rotation)

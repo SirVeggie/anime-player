@@ -10,11 +10,12 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::db::AppDatabase;
 use crate::disk_volume;
 use crate::op_ed::{
-    self, op_ed_chroma_job_identity, op_ed_detect_batch_job_identity, op_ed_detect_job_identity_prefix,
-    OpEdDetectJobOptions, OpEdEpisode,
+    self, op_ed_chroma_job_identity, op_ed_detect_batch_job_identity,
+    op_ed_detect_job_identity_prefix, OpEdDetectJobOptions, OpEdEpisode,
 };
 use crate::scrub_preview::{
-    self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity, scrub_sprite_is_cached,
+    self, emit_scrub_sprite_status, run_scrub_sprite_job, scrub_sprite_identity,
+    scrub_sprite_is_cached,
 };
 
 use super::types::{
@@ -75,7 +76,9 @@ fn alloc_job_ids() -> (String, u32) {
 
 #[derive(Debug, Clone)]
 enum JobKind {
-    ScrubSprite { path: String },
+    ScrubSprite {
+        path: String,
+    },
     OpEdChroma {
         episode: OpEdEpisode,
         /// Fingerprint was already on disk at job start — do not stagger the next chroma.
@@ -431,10 +434,7 @@ impl JobManager {
         if !record.view.cancelable {
             return Err("job is not cancelable".to_string());
         }
-        if !matches!(
-            record.view.status,
-            JobStatus::Queued | JobStatus::Running
-        ) {
+        if !matches!(record.view.status, JobStatus::Queued | JobStatus::Running) {
             return Ok(());
         }
         record.cancel.store(true, Ordering::Relaxed);
@@ -458,8 +458,7 @@ impl JobManager {
             .records
             .iter()
             .filter(|(_, r)| {
-                r.view.cancelable
-                    && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
+                r.view.cancelable && matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -478,7 +477,11 @@ impl JobManager {
     }
 
     /// Like [`set_job_priority`] but never emits; batch callers emit once at the end.
-    fn set_job_priority_inner(&mut self, job_id: &str, priority: JobPriority) -> Result<bool, String> {
+    fn set_job_priority_inner(
+        &mut self,
+        job_id: &str,
+        priority: JobPriority,
+    ) -> Result<bool, String> {
         let Some(record) = self.records.get(job_id) else {
             return Err(format!("job not found: {job_id}"));
         };
@@ -567,9 +570,8 @@ impl JobManager {
             if !seen.insert(item.anime_id) {
                 continue;
             }
-            let allowed = db.with_conn(|conn| {
-                op_ed::auto_op_ed_enqueue_allowed(conn, item.anime_id)
-            })?;
+            let allowed =
+                db.with_conn(|conn| op_ed::auto_op_ed_enqueue_allowed(conn, item.anime_id))?;
             if !allowed {
                 continue;
             }
@@ -596,12 +598,14 @@ impl JobManager {
         db: &AppDatabase,
         request: EnqueueOpEdDetectJob,
     ) -> Result<(), String> {
-        if self.active_manual_op_ed_rematch_job_id(request.anime_id).is_some() {
+        if self
+            .active_manual_op_ed_rematch_job_id(request.anime_id)
+            .is_some()
+        {
             return Ok(());
         }
-        let allowed = db.with_conn(|conn| {
-            op_ed::auto_op_ed_enqueue_allowed(conn, request.anime_id)
-        })?;
+        let allowed =
+            db.with_conn(|conn| op_ed::auto_op_ed_enqueue_allowed(conn, request.anime_id))?;
         if !allowed {
             return Ok(());
         }
@@ -649,13 +653,12 @@ impl JobManager {
         anime_id: i64,
         priority: JobPriority,
     ) -> Result<(), String> {
-        let episode_ids: Vec<i64> = db
-            .with_conn(|conn| {
-                Ok(op_ed::list_anime_episodes(conn, anime_id)?
-                    .into_iter()
-                    .map(|ep| ep.id)
-                    .collect())
-            })?;
+        let episode_ids: Vec<i64> = db.with_conn(|conn| {
+            Ok(op_ed::list_anime_episodes(conn, anime_id)?
+                .into_iter()
+                .map(|ep| ep.id)
+                .collect())
+        })?;
         self.set_op_ed_chroma_priority_for_episodes(&episode_ids, priority)
     }
 
@@ -912,9 +915,11 @@ impl JobManager {
 
         let identity = op_ed_chroma_job_identity(ep.id);
         if let Some(existing_id) = self.identity_to_id.get(&identity).cloned() {
-            if self.records.get(&existing_id).is_some_and(|r| {
-                matches!(r.view.status, JobStatus::Queued | JobStatus::Running)
-            }) {
+            if self
+                .records
+                .get(&existing_id)
+                .is_some_and(|r| matches!(r.view.status, JobStatus::Queued | JobStatus::Running))
+            {
                 if self.records.get(&existing_id).is_some_and(|r| {
                     r.view.status == JobStatus::Queued
                         && priority_rank(priority) > priority_rank(r.view.priority)
@@ -998,7 +1003,8 @@ impl JobManager {
         let chroma_priority = request.priority;
 
         // Manual skip templates own matching — do not return a stale auto-detect job.
-        let has_manual = db.with_conn(|conn| op_ed::has_manual_templates(conn, request.anime_id))?;
+        let has_manual =
+            db.with_conn(|conn| op_ed::has_manual_templates(conn, request.anime_id))?;
         if has_manual {
             return self.enqueue_manual_op_ed_rematch_inner(
                 db,
@@ -1237,10 +1243,7 @@ impl JobManager {
         let summary_identity = op_ed::manual_op_ed_rematch_summary_job_identity(anime_id);
         if let Some(existing_id) = self.identity_to_id.get(&summary_identity) {
             if let Some(record) = self.records.get(existing_id) {
-                if matches!(
-                    record.view.status,
-                    JobStatus::Queued | JobStatus::Running
-                ) {
+                if matches!(record.view.status, JobStatus::Queued | JobStatus::Running) {
                     return Some(existing_id.clone());
                 }
             }
@@ -1248,10 +1251,7 @@ impl JobManager {
         let prefix = op_ed::manual_op_ed_rematch_job_identity_prefix(anime_id);
         for (id, record) in &self.records {
             if record.view.identity.starts_with(&prefix)
-                && matches!(
-                    record.view.status,
-                    JobStatus::Queued | JobStatus::Running
-                )
+                && matches!(record.view.status, JobStatus::Queued | JobStatus::Running)
             {
                 return Some(id.clone());
             }
@@ -1416,10 +1416,8 @@ impl JobManager {
         }
 
         let mut prerequisite_job_ids: Vec<String> = Vec::new();
-        if !op_ed::op_ed_chroma_cache_satisfied(
-            ep,
-            op_ed::OpEdChromaCacheRequirement::FullEpisode,
-        )? {
+        if !op_ed::op_ed_chroma_cache_satisfied(ep, op_ed::OpEdChromaCacheRequirement::FullEpisode)?
+        {
             let chroma = self.enqueue_op_ed_chroma_episode(
                 db,
                 ep,
@@ -1533,9 +1531,7 @@ impl JobManager {
         let key = resource_type.as_str();
         self.records
             .values()
-            .filter(|r| {
-                r.view.status == JobStatus::Running && r.view.resource_type.as_str() == key
-            })
+            .filter(|r| r.view.status == JobStatus::Running && r.view.resource_type.as_str() == key)
             .count() as u32
     }
 
@@ -1576,11 +1572,7 @@ impl JobManager {
         if !disk_volume::path_requires_chroma_stagger(path) {
             return false;
         }
-        disk_volume::chroma_start_deferred(
-            path,
-            self.last_chroma_start_ms_for_path(path),
-            now_ms(),
-        )
+        disk_volume::chroma_start_deferred(path, self.last_chroma_start_ms_for_path(path), now_ms())
     }
 
     fn record_chroma_volume_start(&mut self, path: &str) {
@@ -1588,8 +1580,7 @@ impl JobManager {
             return;
         }
         if let Some(volume) = disk_volume::volume_key_for_path(path) {
-            self.last_chroma_start_on_volume
-                .insert(volume, now_ms());
+            self.last_chroma_start_on_volume.insert(volume, now_ms());
         }
     }
 
@@ -1724,22 +1715,24 @@ impl JobManager {
     }
 
     fn pick_startable_queued_id(&self) -> Option<String> {
-        pick_startable_from_queue(&self.queued_ids, |id| {
-            self.records
-                .get(id)
-                .is_some_and(|r| r.view.status == JobStatus::Queued && self.can_start(id))
-        }, |id| {
-            self.records
-                .get(id)
-                .map(|r| r.view.priority)
-                .unwrap_or(JobPriority::Low)
-        })
+        pick_startable_from_queue(
+            &self.queued_ids,
+            |id| {
+                self.records
+                    .get(id)
+                    .is_some_and(|r| r.view.status == JobStatus::Queued && self.can_start(id))
+            },
+            |id| {
+                self.records
+                    .get(id)
+                    .map(|r| r.view.priority)
+                    .unwrap_or(JobPriority::Low)
+            },
+        )
     }
 
     fn start_job(&mut self, job_id: &str) {
-        let chroma_path = self
-            .chroma_episode_path(job_id)
-            .map(str::to_string);
+        let chroma_path = self.chroma_episode_path(job_id).map(str::to_string);
         let Some(record) = self.records.get_mut(job_id) else {
             return;
         };
@@ -1763,6 +1756,9 @@ impl JobManager {
         } else {
             "Starting".to_string()
         };
+        let job_identity = record.view.identity.clone();
+        let job_type = record.view.job_type.clone();
+        let job_short = record.view.short_id;
         self.queued_ids.retain(|id| id != job_id);
 
         let cancel = record.cancel.clone();
@@ -1782,6 +1778,13 @@ impl JobManager {
             self.record_chroma_volume_start(path);
         }
 
+        if !matches!(job_type.as_str(), "scrub_sprite" | "op_ed_chroma") {
+            crate::crash_log::log(
+                "INFO",
+                &format!("job started: #{job_short} {job_type} ({job_identity})"),
+            );
+        }
+
         match kind {
             JobKind::ScrubSprite { path } => {
                 super::spawn_scrub_worker(app, job_id_owned, path, cancel);
@@ -1794,7 +1797,14 @@ impl JobManager {
                 episode_ids,
                 options,
             } => {
-                super::spawn_op_ed_worker(app, job_id_owned, anime_id, episode_ids, options, cancel);
+                super::spawn_op_ed_worker(
+                    app,
+                    job_id_owned,
+                    anime_id,
+                    episode_ids,
+                    options,
+                    cancel,
+                );
             }
             JobKind::OpEdManualRematch {
                 anime_id,
@@ -1845,7 +1855,10 @@ impl JobManager {
         match outcome {
             WorkerOutcome::Done(message, scrub_ready) => {
                 if let Some(ready) = scrub_ready {
-                    emit_scrub_sprite_status(&self.app, scrub_preview::ScrubSpriteStatus::Ready(ready));
+                    emit_scrub_sprite_status(
+                        &self.app,
+                        scrub_preview::ScrubSpriteStatus::Ready(ready),
+                    );
                 }
                 let follow_ups = self
                     .records
@@ -1893,13 +1906,42 @@ impl JobManager {
         };
         self.identity_to_id.remove(&record.view.identity);
         let prereq_short = record.view.short_id;
+        let job_type = record.view.job_type.clone();
+        let job_identity = record.view.identity.clone();
 
         let mut view = record.view;
         view.status = status;
-        view.completion_message = completion_message;
+        view.completion_message = completion_message.clone();
         view.finished_at = Some(now_ms());
         if view.progress.total_steps > 0 && status == JobStatus::Done {
             view.progress.current_step = view.progress.total_steps;
+        }
+
+        let detail = completion_message
+            .as_deref()
+            .filter(|message| !message.is_empty())
+            .map(|message| format!(": {message}"))
+            .unwrap_or_default();
+        match status {
+            JobStatus::Failed => {
+                crate::crash_log::log(
+                    "ERROR",
+                    &format!("job failed: #{prereq_short} {job_type} ({job_identity}){detail}"),
+                );
+            }
+            JobStatus::Canceled => {
+                crate::crash_log::log(
+                    "WARN",
+                    &format!("job canceled: #{prereq_short} {job_type} ({job_identity}){detail}"),
+                );
+            }
+            JobStatus::Done if !matches!(job_type.as_str(), "scrub_sprite" | "op_ed_chroma") => {
+                crate::crash_log::log(
+                    "INFO",
+                    &format!("job finished: #{prereq_short} {job_type} ({job_identity}){detail}"),
+                );
+            }
+            _ => {}
         }
 
         let finished_event = super::types::JobFinishedEvent {
@@ -1943,7 +1985,9 @@ pub fn run_scrub_job_worker(
     if cancel.load(Ordering::Relaxed) {
         return WorkerOutcome::Canceled;
     }
-    match run_scrub_sprite_job(path, cancel, |step, total, label| on_step(step, total, label)) {
+    match run_scrub_sprite_job(path, cancel, |step, total, label| {
+        on_step(step, total, label)
+    }) {
         Ok(ready) => WorkerOutcome::Done("Sprite sheet ready".to_string(), Some(ready)),
         Err(e) if e.contains("cancelled") => WorkerOutcome::Canceled,
         Err(e) => WorkerOutcome::Failed(e),
@@ -2026,9 +2070,9 @@ fn pick_startable_from_queue<'a>(
     can_start: impl Fn(&'a str) -> bool,
     job_priority: impl Fn(&'a str) -> JobPriority,
 ) -> Option<String> {
-    let block_low = queued_ids.iter().any(|id| {
-        job_priority(id) == JobPriority::Medium && can_start(id)
-    });
+    let block_low = queued_ids
+        .iter()
+        .any(|id| job_priority(id) == JobPriority::Medium && can_start(id));
     for id in queued_ids {
         if block_low && job_priority(id) == JobPriority::Low {
             continue;

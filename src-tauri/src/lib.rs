@@ -12,16 +12,16 @@ mod media_tools;
 mod scanner;
 
 #[cfg(windows)]
-mod mpv;
-#[cfg(windows)]
-mod thumbnails;
-#[cfg(windows)]
-mod scrub_preview;
-mod op_ed;
-#[cfg(windows)]
 mod disk_volume;
 #[cfg(windows)]
 mod jobs;
+#[cfg(windows)]
+mod mpv;
+mod op_ed;
+#[cfg(windows)]
+mod scrub_preview;
+#[cfg(windows)]
+mod thumbnails;
 
 #[cfg(windows)]
 use mpv::MpvHandle;
@@ -99,7 +99,11 @@ fn apply_preview_rect_to_mpv(mpv: &MpvHandle, rect: MpvPreviewRect) -> Result<()
 }
 
 #[cfg(windows)]
-fn apply_mpv_layout_from_state(state: &AppState, m: &MpvHandle, window_width: f64) -> Result<(), String> {
+fn apply_mpv_layout_from_state(
+    state: &AppState,
+    m: &MpvHandle,
+    window_width: f64,
+) -> Result<(), String> {
     if let Ok(preview_guard) = state.preview_rect.lock() {
         if let Some(rect) = *preview_guard {
             let mut updated = rect;
@@ -134,19 +138,28 @@ fn mpv_init(
         return Ok(());
     }
 
+    crash_log::log("INFO", "mpv initializing");
     let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as usize;
-    let handle = MpvHandle::new(hwnd, app)?;
+    let handle = MpvHandle::new(hwnd, app).map_err(|e| {
+        crash_log::log("ERROR", &format!("mpv init failed: {e}"));
+        e
+    })?;
     apply_layout_to_mpv(&handle, window_width, sidebar_px)?;
     *guard = Some(handle);
+    crash_log::log("INFO", "mpv initialized");
     Ok(())
 }
 
 #[cfg(windows)]
 #[tauri::command]
 fn mpv_load(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    crash_log::log("INFO", &format!("mpv load: {path}"));
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     let m = guard.as_ref().ok_or("mpv has not been initialized yet")?;
-    m.load(&path)
+    m.load(&path).map_err(|e| {
+        crash_log::log("ERROR", &format!("mpv load failed: {path}: {e}"));
+        e
+    })
 }
 
 #[cfg(windows)]
@@ -365,6 +378,7 @@ fn mpv_set_volume(state: State<'_, AppState>, volume: f64) -> Result<(), String>
 #[cfg(windows)]
 #[tauri::command]
 fn mpv_stop(state: State<'_, AppState>) -> Result<(), String> {
+    crash_log::log("INFO", "mpv stop");
     let guard = state.mpv.lock().map_err(|e| e.to_string())?;
     if let Some(m) = guard.as_ref() {
         m.stop()?;
@@ -392,10 +406,7 @@ pub fn run() {
         .setup(|app| {
             crash_log::log(
                 "INFO",
-                &format!(
-                    "tauri setup (version {})",
-                    app.package_info().version
-                ),
+                &format!("tauri setup (version {})", app.package_info().version),
             );
             crash_log::log("INFO", "opening portable database");
             let db = db::AppDatabase::open_portable()
@@ -414,10 +425,7 @@ pub fn run() {
                 app.manage(AppState::default());
                 let db_ref = app.state::<db::AppDatabase>();
                 crash_log::log("INFO", "initializing job manager");
-                app.manage(jobs::JobsState::new(
-                    app.handle().clone(),
-                    db_ref.inner(),
-                ));
+                app.manage(jobs::JobsState::new(app.handle().clone(), db_ref.inner()));
                 crash_log::log("INFO", "job manager ok");
 
                 // Tear libmpv down before the main window's HWND becomes
@@ -429,6 +437,7 @@ pub fn run() {
                     let window_for_handler = window.clone();
                     window.on_window_event(move |event| match event {
                         tauri::WindowEvent::CloseRequested { .. } => {
+                            crash_log::log("INFO", "window close requested");
                             if let Some(state) = app_handle.try_state::<AppState>() {
                                 if let Ok(mut guard) = state.mpv.lock() {
                                     guard.take();

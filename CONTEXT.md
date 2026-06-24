@@ -664,13 +664,14 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
 
 ## Diagnostics
 
-Startup issues, Rust panics, Windows native faults (e.g. libmpv / ffmpeg),
-and frontend `window.onerror` / unhandled rejections append to a portable log
-at **`data/diagnostic.log`** next to the executable (rotates to
-`diagnostic.log.old` when it exceeds 1 MiB). Ask users to attach that file
-when reporting crashes. The frontend writes breadcrumbs such as
-`startup: rescan_library begin` so the last line often pinpoints how far boot
-got. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
+Startup issues, app lifecycle events, Rust panics, Windows native faults (e.g.
+libmpv / ffmpeg), and frontend `window.onerror` / unhandled rejections append to
+a portable log at **`data/diagnostic.log`** next to the executable (rotates to
+**`data/diagnostic_old.log`** when the current file exceeds 5 MiB; at most two
+files are kept). Ask users to attach both files when reporting bugs. The
+frontend writes breadcrumbs such as player open/close and toast
+errors; the backend logs library operations, significant background jobs, and
+mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 
 ## Files to know
 

@@ -211,6 +211,9 @@ function App() {
   const pendingStartupRescanRef = useRef(false);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
+    if (kind === "error") {
+      diagnosticLog(`toast error: ${message}`, "ERROR");
+    }
     const id = Date.now() + Math.random();
     setToasts((current) => [...current, { id, kind, message }]);
   }, []);
@@ -1479,6 +1482,7 @@ function App() {
   const openEpisode = useCallback(
     (episode: Episode) => {
       void (async () => {
+        diagnosticLog(`player open: episode ${episode.id} ${episode.path}`);
         await captureFullscreenAtPlayerEntry();
         await runScreenTransition(() => {
           setSelectedEpisode(episode);
@@ -1492,6 +1496,7 @@ function App() {
   const closePlayer = useCallback(
     (options?: { unload?: boolean }) => {
       const unload = options?.unload === true;
+      diagnosticLog(`player close${unload ? " (unload)" : ""}`);
       void (async () => {
         await restoreFullscreenAfterPlayerIfNeeded();
         await runScreenTransition(
