@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -2254,7 +2256,33 @@ mod episode_folder_tests {
     }
 }
 
+/// Retries help when Windows briefly holds a file (mpv, indexer, antivirus).
+const FILE_DELETE_MAX_ATTEMPTS: usize = 3;
+const FILE_DELETE_RETRY_DELAY_MS: u64 = 1500;
+
 fn move_path_to_trash_or_delete(path: &Path) -> Result<bool, String> {
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    let mut last_error: Option<String> = None;
+    for attempt in 0..FILE_DELETE_MAX_ATTEMPTS {
+        if attempt > 0 {
+            thread::sleep(Duration::from_millis(FILE_DELETE_RETRY_DELAY_MS));
+            if !path.exists() {
+                return Ok(false);
+            }
+        }
+        match move_path_to_trash_or_delete_once(path) {
+            Ok(permanent) => return Ok(permanent),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| format!("failed to delete {}", path.display())))
+}
+
+fn move_path_to_trash_or_delete_once(path: &Path) -> Result<bool, String> {
     match trash::delete(path) {
         Ok(()) => Ok(false),
         Err(trash_error) => {
