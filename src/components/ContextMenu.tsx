@@ -16,6 +16,8 @@ export type ContextMenuAction = {
   label: string;
   danger?: boolean;
   disabled?: boolean;
+  /** Shown on hover when the item is enabled. */
+  title?: string;
   disabledTitle?: string;
   onSelect: () => void;
 };
@@ -132,6 +134,7 @@ function ContextMenuItemButton(props: {
   label: string;
   danger?: boolean;
   disabled?: boolean;
+  title?: string;
   disabledTitle?: string;
   itemIndex: number;
   className?: string;
@@ -147,6 +150,7 @@ function ContextMenuItemButton(props: {
     label,
     danger = false,
     disabled = false,
+    title,
     disabledTitle,
     itemIndex,
     className = "",
@@ -159,9 +163,10 @@ function ContextMenuItemButton(props: {
     onClick,
   } = props;
 
-  const revealDisabledTooltip = useCallback(
+  const revealItemTooltip = useCallback(
     (target: HTMLButtonElement) => {
-      if (!disabled || !disabledTitle) {
+      const tooltipText = disabled ? disabledTitle : title;
+      if (!tooltipText) {
         onShowDisabledTooltip(null);
         return;
       }
@@ -170,20 +175,20 @@ function ContextMenuItemButton(props: {
       const maxWidth = 240;
       const x = Math.min(rect.right + 10, window.innerWidth - maxWidth - margin);
       onShowDisabledTooltip({
-        text: disabledTitle,
+        text: tooltipText,
         x,
         y: rect.top + rect.height / 2,
       });
     },
-    [disabled, disabledTitle, onShowDisabledTooltip],
+    [disabled, disabledTitle, onShowDisabledTooltip, title],
   );
 
   const handleMouseEnter = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       onHover?.();
-      revealDisabledTooltip(event.currentTarget);
+      revealItemTooltip(event.currentTarget);
     },
-    [onHover, revealDisabledTooltip],
+    [onHover, revealItemTooltip],
   );
 
   return (
@@ -198,7 +203,7 @@ function ContextMenuItemButton(props: {
       aria-expanded={ariaExpanded}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => onShowDisabledTooltip(null)}
-      onFocus={(event) => revealDisabledTooltip(event.currentTarget)}
+      onFocus={(event) => revealItemTooltip(event.currentTarget)}
       onBlur={() => onShowDisabledTooltip(null)}
       onClick={onClick}
     >
@@ -386,6 +391,7 @@ function ContextMenuPanel(props: {
               label={item.label}
               danger={item.danger}
               disabled={item.disabled}
+              title={item.title}
               disabledTitle={item.disabledTitle}
               itemIndex={index}
               onHover={() => setOpenSubmenuId(null)}

@@ -84,26 +84,53 @@ function parentFolderPath(filePath: string): string | null {
   return normalized.slice(0, sep);
 }
 
+function normalizePathKey(filePath: string): string {
+  return filePath.replace(/\//g, "\\").toLowerCase();
+}
+
+function pathIsUnderFolder(filePath: string, folderPath: string): boolean {
+  const fileKey = normalizePathKey(filePath);
+  const folderKey = normalizePathKey(folderPath);
+  return fileKey.startsWith(`${folderKey}\\`);
+}
+
+function countEpisodesUnderFolder(episodePaths: string[], folderPath: string): number {
+  return episodePaths.filter((path) => pathIsUnderFolder(path, folderPath)).length;
+}
+
+function isShorterPath(a: string, b: string): boolean {
+  return a.length < b.length || (a.length === b.length && a.localeCompare(b) < 0);
+}
+
 /**
- * Matches `shortest_episode_folder_for_anime` in the Rust backend: choose the
- * shortest common episode parent path so Browse opens the same folder as
- * "Open episode folder".
+ * Matches `preferred_episode_folder_for_anime` in the Rust backend: among each
+ * episode's parent directory, pick the one that contains the most episode files
+ * recursively; break ties by shortest path. Used so Browse opens the same
+ * folder as "Open episode folder".
  */
-function shortestEpisodeParentFolder(episodes: Episode[], firstEpisodePath: string | null): string | undefined {
-  if (episodes.length > 0) {
-    let shortest: string | null = null;
-    for (const episode of episodes) {
-      const parent = parentFolderPath(episode.path);
-      if (!parent) continue;
-      if (
-        shortest === null ||
-        parent.length < shortest.length ||
-        (parent.length === shortest.length && parent.localeCompare(shortest) < 0)
-      ) {
-        shortest = parent;
+function preferredEpisodeParentFolder(episodes: Episode[], firstEpisodePath: string | null): string | undefined {
+  const episodePaths = episodes.map((episode) => episode.path);
+  if (episodePaths.length > 0) {
+    const candidates = new Set<string>();
+    for (const path of episodePaths) {
+      const parent = parentFolderPath(path);
+      if (parent) candidates.add(parent);
+    }
+
+    let best: string | null = null;
+    let bestCount = 0;
+    for (const candidate of candidates) {
+      const count = countEpisodesUnderFolder(episodePaths, candidate);
+      const replace =
+        best === null ||
+        count > bestCount ||
+        (count === bestCount && isShorterPath(candidate, best));
+      if (replace) {
+        best = candidate;
+        bestCount = count;
       }
     }
-    if (shortest) return shortest;
+    if (best) return best;
   }
   if (firstEpisodePath) {
     return parentFolderPath(firstEpisodePath) ?? undefined;
@@ -120,6 +147,7 @@ export function EpisodeScreen(props: {
   onPlay: (episode: Episode) => void;
   onMoveAnime: (categoryId: number) => void;
   onOpenEpisodeFolder: () => void;
+  onOpenEpisodeFileFolder: (episode: Episode) => void;
   onDeleteAnime: () => void;
   onSearchAnilist: (query: string) => Promise<AnilistSearchResult[]>;
   onGetAnilistStatus: (animeId: number) => Promise<AnilistMediaStatus | null>;
@@ -157,6 +185,7 @@ export function EpisodeScreen(props: {
     onPlay,
     onMoveAnime,
     onOpenEpisodeFolder,
+    onOpenEpisodeFileFolder,
     onDeleteAnime,
     onSearchAnilist,
     onGetAnilistStatus,
@@ -181,7 +210,7 @@ export function EpisodeScreen(props: {
   // pill always points at the same target as the keybind.
   const quickPlayEpisodeId = useMemo(() => pickQuickPlayEpisode(episodes)?.id ?? null, [episodes]);
   const thumbnailBrowseDefaultPath = useMemo(
-    () => shortestEpisodeParentFolder(episodes, anime.first_episode_path),
+    () => preferredEpisodeParentFolder(episodes, anime.first_episode_path),
     [anime.first_episode_path, episodes],
   );
   const [episodeThumbnails, setEpisodeThumbnails] = useState<Record<number, string>>({});
@@ -263,6 +292,13 @@ export function EpisodeScreen(props: {
       },
       {
         type: "action",
+        id: "open-folder",
+        label: "Open folder",
+        title: parentFolderPath(episode.path) ?? undefined,
+        onSelect: () => onOpenEpisodeFileFolder(episode),
+      },
+      {
+        type: "action",
         id: "rename-episode",
         label: "Rename",
         onSelect: () => {
@@ -279,7 +315,7 @@ export function EpisodeScreen(props: {
         onSelect: () => setDeleteEpisode(episode),
       },
     ],
-    [onMarkEpisodeWatched, onResetEpisodeProgress],
+    [onMarkEpisodeWatched, onOpenEpisodeFileFolder, onResetEpisodeProgress],
   );
 
   const submitEpisodeRename = useCallback(

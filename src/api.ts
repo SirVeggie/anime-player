@@ -158,6 +158,10 @@ export function openAnimeEpisodeFolder(animeId: number): Promise<void> {
   return invoke("open_anime_episode_folder", { animeId });
 }
 
+export function openEpisodeFolder(episodeId: number): Promise<void> {
+  return invoke("open_episode_folder", { episodeId });
+}
+
 /** Which enabled detection rule matches this anime's files (same logic as rescan; not persisted). */
 export function getMatchingDetectionRuleName(animeId: number): Promise<string | null> {
   return invoke("get_matching_detection_rule_name", { animeId });

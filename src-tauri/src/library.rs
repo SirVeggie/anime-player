@@ -1168,10 +1168,39 @@ pub fn open_anime_episode_folder(
     db: State<'_, AppDatabase>,
     anime_id: i64,
 ) -> Result<(), String> {
-    let folder = db.with_conn(|conn| shortest_episode_folder_for_anime(conn, anime_id))?;
+    let folder = db.with_conn(|conn| preferred_episode_folder_for_anime(conn, anime_id))?;
     let Some(folder) = folder else {
         return Err("No episode folder is available.".to_string());
     };
+    open_folder_in_shell(&app, &folder)
+}
+
+#[tauri::command]
+pub fn open_episode_folder(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    episode_id: i64,
+) -> Result<(), String> {
+    let path = db.with_conn(|conn| {
+        conn.query_row(
+            "SELECT path FROM episodes WHERE id = ?1 AND missing = 0",
+            params![episode_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    })?;
+    let Some(path) = path else {
+        return Err("Episode not found.".to_string());
+    };
+    let path_buf = PathBuf::from(path);
+    let Some(folder) = path_buf.parent() else {
+        return Err("No episode folder is available.".to_string());
+    };
+    open_folder_in_shell(&app, folder)
+}
+
+fn open_folder_in_shell(app: &AppHandle, folder: &Path) -> Result<(), String> {
     app.opener()
         .open_path(folder.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| e.to_string())
@@ -2011,7 +2040,7 @@ fn list_deletable_episodes_for_anime(
     collect_rows(rows)
 }
 
-fn shortest_episode_folder_for_anime(
+fn preferred_episode_folder_for_anime(
     conn: &Connection,
     anime_id: i64,
 ) -> Result<Option<PathBuf>, String> {
@@ -2027,26 +2056,113 @@ fn shortest_episode_folder_for_anime(
         .query_map(params![anime_id], |row| row.get::<_, String>(0))
         .map_err(|e| e.to_string())?;
 
-    let mut shortest: Option<PathBuf> = None;
-    for row in rows {
-        let path = PathBuf::from(row.map_err(|e| e.to_string())?);
-        let Some(parent) = path.parent() else {
-            continue;
-        };
-        let parent = parent.to_path_buf();
-        let replace = shortest.as_ref().is_none_or(|current| {
-            let parent_len = parent.as_os_str().len();
-            let current_len = current.as_os_str().len();
-            parent_len < current_len
-                || (parent_len == current_len
-                    && parent.to_string_lossy() < current.to_string_lossy())
-        });
-        if replace {
-            shortest = Some(parent);
+    let episode_paths: Vec<PathBuf> = collect_rows(rows)?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+
+    Ok(pick_preferred_episode_folder(&episode_paths))
+}
+
+/// Among each episode's parent directory, pick the one that contains the most
+/// episode files recursively; break ties by shortest path, then lexicographic.
+fn pick_preferred_episode_folder(episode_paths: &[PathBuf]) -> Option<PathBuf> {
+    if episode_paths.is_empty() {
+        return None;
+    }
+
+    let mut candidates = HashSet::new();
+    for path in episode_paths {
+        if let Some(parent) = path.parent() {
+            candidates.insert(parent.to_path_buf());
         }
     }
 
-    Ok(shortest)
+    let mut best: Option<PathBuf> = None;
+    let mut best_count = 0usize;
+    for candidate in candidates {
+        let count = count_episodes_under_folder(&candidate, episode_paths);
+        let replace = best.as_ref().is_none_or(|current| {
+            count > best_count || (count == best_count && is_shorter_path(&candidate, current))
+        });
+        if replace {
+            best = Some(candidate);
+            best_count = count;
+        }
+    }
+
+    best
+}
+
+fn count_episodes_under_folder(folder: &Path, episode_paths: &[PathBuf]) -> usize {
+    episode_paths
+        .iter()
+        .filter(|path| path.starts_with(folder))
+        .count()
+}
+
+fn is_shorter_path(a: &Path, b: &Path) -> bool {
+    let a_len = a.as_os_str().len();
+    let b_len = b.as_os_str().len();
+    a_len < b_len || (a_len == b_len && a.to_string_lossy() < b.to_string_lossy())
+}
+
+#[cfg(test)]
+mod episode_folder_tests {
+    use super::*;
+
+    fn frieren_example_paths() -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        for i in 1..=8 {
+            paths.push(PathBuf::from(format!(
+                r"C:\anime\ongoing\frieren\watched\{i:02}.mkv"
+            )));
+        }
+        for i in 9..=10 {
+            paths.push(PathBuf::from(format!(
+                r"C:\anime\ongoing\frieren\{i:02}.mkv"
+            )));
+        }
+        for i in 1..=3 {
+            paths.push(PathBuf::from(format!(r"V:\frieren-special\{i}.mkv")));
+        }
+        paths
+    }
+
+    #[test]
+    fn pick_preferred_episode_folder_prefers_most_episodes_recursively() {
+        let picked = pick_preferred_episode_folder(&frieren_example_paths()).expect("folder");
+        assert!(paths_equal(
+            &picked,
+            Path::new(r"C:\anime\ongoing\frieren"),
+        ));
+    }
+
+    #[test]
+    fn pick_preferred_episode_folder_breaks_ties_by_shortest_path() {
+        let paths = vec![
+            PathBuf::from(r"D:\show\season 1\01.mkv"),
+            PathBuf::from(r"D:\show\season 1\02.mkv"),
+            PathBuf::from(r"D:\show\season 2\01.mkv"),
+            PathBuf::from(r"D:\show\season 2\02.mkv"),
+        ];
+        let picked = pick_preferred_episode_folder(&paths).expect("folder");
+        assert!(paths_equal(&picked, Path::new(r"D:\show\season 1")));
+        assert_eq!(count_episodes_under_folder(&picked, &paths), 2);
+    }
+
+    #[test]
+    fn pick_preferred_episode_folder_does_not_match_similar_prefix() {
+        let paths = vec![PathBuf::from(
+            r"C:\anime\ongoing\frieren-extra\01.mkv",
+        )];
+        let picked = pick_preferred_episode_folder(&paths).expect("folder");
+        assert!(paths_equal(
+            &picked,
+            Path::new(r"C:\anime\ongoing\frieren-extra"),
+        ));
+        assert_eq!(count_episodes_under_folder(&picked, &paths), 1);
+    }
 }
 
 fn move_path_to_trash_or_delete(path: &Path) -> Result<bool, String> {

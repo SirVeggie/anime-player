@@ -31,6 +31,7 @@ import {
   logoutAnilist,
   moveAnimeToCategory,
   openAnimeEpisodeFolder,
+  openEpisodeFolder,
   overrideAnimeProgress,
   reorderCategories,
   renameAnime,
@@ -977,6 +978,17 @@ function App() {
     }
   }, [episodes.length, selectedAnime, showToast]);
 
+  const handleOpenEpisodeFileFolder = useCallback(
+    async (episode: Episode) => {
+      try {
+        await openEpisodeFolder(episode.id);
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      }
+    },
+    [showToast],
+  );
+
   const openManualSkip = useCallback(() => {
     if (!selectedAnime) return;
     setManualSkipAnimeId(selectedAnime.id);
@@ -1830,6 +1842,7 @@ function App() {
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
               onOpenEpisodeFolder={() => void handleOpenEpisodeFolder()}
+              onOpenEpisodeFileFolder={(episode) => void handleOpenEpisodeFileFolder(episode)}
               onDeleteAnime={() => void handleDeleteSelectedAnimeFiles()}
               onSearchAnilist={handleSearchAnilist}
               onGetAnilistStatus={handleGetAnilistStatus}

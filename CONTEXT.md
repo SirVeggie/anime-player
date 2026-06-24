@@ -580,7 +580,12 @@ view components. Per-screen UI lives in `src/components/`:
   `deep-link:default`. The opener plugin opens AniList URLs from the
   frontend and episode folders from the Rust `open_anime_episode_folder`
   command, which derives the folder from database episode paths instead of
-  requiring a broad frontend filesystem scope. The dialog plugin is used for
+  requiring a broad frontend filesystem scope. For an anime whose episodes
+  span multiple folders, the header **Open episode folder** button picks the
+  parent directory of some episode that contains the most episode files under
+  it recursively (shortest path, then lexicographic on ties). Per-episode
+  **Open folder** in the context menu always opens that file's parent. The
+  dialog plugin is used for
   the native folder picker; the deep-link and single-instance plugins support
   the AniList `anime-player://anilist-auth` OAuth callback.
 - Window: `productName = "Anime Player"`, 1280x800 default, min 800x600.
