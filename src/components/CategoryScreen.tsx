@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadAnimePosterUrls } from "../animePoster";
+import {
+  animePosterSourceKey,
+  cachedThumbnailUrl,
+  loadAnimePosterUrls,
+  pruneThumbnailUrlCache,
+  type ThumbnailUrlCache,
+} from "../animePoster";
 import type { AnimeSummary, Category, LibraryState } from "../types";
 import { useRovingListNavigation } from "../useRovingListNavigation";
 import { animeDisplayTitle } from "../utils";
@@ -29,7 +35,7 @@ export function CategoryScreen(props: {
     onSetDefaultCategory,
   } = props;
   const getRovingItemProps = useRovingListNavigation(library.categories.length + library.recent_anime.length);
-  const [recentCovers, setRecentCovers] = useState<Record<number, string>>({});
+  const [recentCovers, setRecentCovers] = useState<ThumbnailUrlCache>({});
   const { menu, openMenu, closeMenu } = useContextMenu();
   const [addCategoryOpen, setAddCategoryOpen] = useState(false);
   const [addCategoryBusy, setAddCategoryBusy] = useState(false);
@@ -45,11 +51,18 @@ export function CategoryScreen(props: {
 
   useEffect(() => {
     let cancelled = false;
-    setRecentCovers({});
+    const sourceKeys = new Map(library.recent_anime.map((item) => [item.id, animePosterSourceKey(item)]));
+    setRecentCovers((current) =>
+      pruneThumbnailUrlCache(current, library.recent_anime, animePosterSourceKey),
+    );
     void loadAnimePosterUrls(
       library.recent_anime,
       (animeId, url) => {
-        setRecentCovers((current) => (cancelled ? current : { ...current, [animeId]: url }));
+        const sourceKey = sourceKeys.get(animeId);
+        if (!sourceKey) return;
+        setRecentCovers((current) =>
+          cancelled ? current : { ...current, [animeId]: { sourceKey, url } },
+        );
       },
       () => !cancelled,
     );
@@ -175,7 +188,7 @@ export function CategoryScreen(props: {
           </div>
           <div className="continue-grid">
             {library.recent_anime.map((anime, index) => {
-              const cover = recentCovers[anime.id];
+              const cover = cachedThumbnailUrl(recentCovers, anime, animePosterSourceKey);
               return (
                 <button
                   type="button"

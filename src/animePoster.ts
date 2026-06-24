@@ -6,6 +6,52 @@ const POSTER_THUMB_PX = 184;
 const ANILIST_COVER_CONCURRENCY = 12;
 const FILE_THUMBNAIL_CONCURRENCY = 4;
 
+export type ThumbnailUrlCache = Record<number, { sourceKey: string; url: string }>;
+
+export function animePosterSourceKey(
+  anime: Pick<AnimeSummary, "anilist_cover_path" | "anilist_id" | "custom_thumbnail_path" | "first_episode_path">,
+): string {
+  return JSON.stringify([
+    anime.custom_thumbnail_path,
+    anime.anilist_cover_path,
+    anime.anilist_id,
+    anime.first_episode_path,
+  ]);
+}
+
+export function episodeThumbnailSourceKey(episode: { path: string }): string {
+  return episode.path;
+}
+
+export function cachedThumbnailUrl<T extends { id: number }>(
+  cache: ThumbnailUrlCache,
+  item: T,
+  getSourceKey: (item: T) => string,
+): string | undefined {
+  const cached = cache[item.id];
+  if (!cached || cached.sourceKey !== getSourceKey(item)) return undefined;
+  return cached.url;
+}
+
+export function pruneThumbnailUrlCache<T extends { id: number }>(
+  cache: ThumbnailUrlCache,
+  items: T[],
+  getSourceKey: (item: T) => string,
+): ThumbnailUrlCache {
+  const sourceKeys = new Map(items.map((item) => [item.id, getSourceKey(item)]));
+  let keptCount = 0;
+  const next: ThumbnailUrlCache = {};
+
+  for (const [idText, cached] of Object.entries(cache)) {
+    const id = Number(idText);
+    if (sourceKeys.get(id) !== cached.sourceKey) continue;
+    next[id] = cached;
+    keptCount += 1;
+  }
+
+  return keptCount === Object.keys(cache).length ? cache : next;
+}
+
 async function runLimited<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
   let nextIndex = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {

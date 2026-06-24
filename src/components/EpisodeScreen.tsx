@@ -11,7 +11,13 @@ import {
   jobsSetScrubSpritePriorityForPaths,
   resetAnimeOpEdAnalysis,
 } from "../api";
-import { loadEpisodeThumbnailUrls } from "../animePoster";
+import {
+  cachedThumbnailUrl,
+  episodeThumbnailSourceKey,
+  loadEpisodeThumbnailUrls,
+  pruneThumbnailUrlCache,
+  type ThumbnailUrlCache,
+} from "../animePoster";
 import { pickQuickPlayEpisode } from "../quickPlay";
 import { opEdSegmentLabel } from "../opEd";
 import type {
@@ -213,7 +219,7 @@ export function EpisodeScreen(props: {
     () => preferredEpisodeParentFolder(episodes, anime.first_episode_path),
     [anime.first_episode_path, episodes],
   );
-  const [episodeThumbnails, setEpisodeThumbnails] = useState<Record<number, string>>({});
+  const [episodeThumbnails, setEpisodeThumbnails] = useState<ThumbnailUrlCache>({});
   const [animeCover, setAnimeCover] = useState<string | null>(null);
   const [linkQuery, setLinkQuery] = useState(anime.title);
   const [linkResults, setLinkResults] = useState<AnilistSearchResult[]>([]);
@@ -491,19 +497,26 @@ export function EpisodeScreen(props: {
 
   useEffect(() => {
     if (episodesLoading || episodes.length === 0) {
-      setEpisodeThumbnails({});
+      if (episodes.length === 0) {
+        setEpisodeThumbnails({});
+      }
       return;
     }
 
     let cancelled = false;
-    setEpisodeThumbnails({});
+    const sourceKeys = new Map(episodes.map((episode) => [episode.id, episodeThumbnailSourceKey(episode)]));
+    setEpisodeThumbnails((current) =>
+      pruneThumbnailUrlCache(current, episodes, episodeThumbnailSourceKey),
+    );
 
     void loadEpisodeThumbnailUrls(
       episodes,
       184,
       (episodeId, url) => {
+        const sourceKey = sourceKeys.get(episodeId);
+        if (!sourceKey) return;
         setEpisodeThumbnails((current) =>
-          cancelled ? current : { ...current, [episodeId]: url },
+          cancelled ? current : { ...current, [episodeId]: { sourceKey, url } },
         );
       },
       () => !cancelled,
@@ -1294,7 +1307,7 @@ export function EpisodeScreen(props: {
           }
           const { episode, episodeIndex } = item;
           const percent = episode.watched ? 100 : progressPercent(episode.position_seconds, episode.duration_seconds);
-          const thumbnail = episodeThumbnails[episode.id];
+          const thumbnail = cachedThumbnailUrl(episodeThumbnails, episode, episodeThumbnailSourceKey);
           const episodeTitle = isEpisodeNumberKnown(episode.episode_number)
             ? formatEpisodeNumber(episode.episode_number - anime.tracker_offset)
             : episode.file_name;

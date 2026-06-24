@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { loadAnimePosterUrls } from "../animePoster";
+import {
+  animePosterSourceKey,
+  cachedThumbnailUrl,
+  loadAnimePosterUrls,
+  pruneThumbnailUrlCache,
+  type ThumbnailUrlCache,
+} from "../animePoster";
 import type { MissingAnimeSummary } from "../types";
 import { animeDisplayTitle, animeTooltipTitle } from "../utils";
 import { AnimeCardLabel } from "./AnimeCardLabel";
@@ -10,15 +16,18 @@ export function MissingScreen(props: {
   preferAnilistDisplayTitle: boolean;
 }) {
   const { anime, preferAnilistDisplayTitle } = props;
-  const [covers, setCovers] = useState<Record<number, string>>({});
+  const [covers, setCovers] = useState<ThumbnailUrlCache>({});
 
   useEffect(() => {
     let cancelled = false;
-    setCovers({});
+    const sourceKeys = new Map(anime.map((item) => [item.id, animePosterSourceKey(item)]));
+    setCovers((current) => pruneThumbnailUrlCache(current, anime, animePosterSourceKey));
     void loadAnimePosterUrls(
       anime,
       (animeId, url) => {
-        setCovers((current) => (cancelled ? current : { ...current, [animeId]: url }));
+        const sourceKey = sourceKeys.get(animeId);
+        if (!sourceKey) return;
+        setCovers((current) => (cancelled ? current : { ...current, [animeId]: { sourceKey, url } }));
       },
       () => !cancelled,
     );
@@ -41,7 +50,7 @@ export function MissingScreen(props: {
       ) : (
         <div className="anime-grid">
           {anime.map((item) => {
-            const cover = covers[item.id];
+            const cover = cachedThumbnailUrl(covers, item, animePosterSourceKey);
             const displayTitle = animeDisplayTitle(item, preferAnilistDisplayTitle);
             const tooltipTitle = animeTooltipTitle(item);
             return (
