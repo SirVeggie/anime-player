@@ -17,7 +17,11 @@ use crate::media_tools::{
     portable_data_dir, probe_duration, probe_video_fps,
 };
 
+/// Fingerprint cache key version. Bump when Chromaprint extract format/params change.
 pub const ANALYSIS_VERSION: i32 = 2;
+/// Discovery/expand algorithm version stored on `anime.op_ed_analysis_version`.
+/// Bump when template-start logic changes so titles re-detect without re-fingerprinting.
+const DETECT_LOGIC_VERSION: i32 = 4;
 pub const SKIP_OP_ED_SETTING_KEY: &str = "skip_op_ed";
 pub const AUTO_OP_ED_DETECT_SETTING_KEY: &str = "auto_op_ed_detect";
 pub const DONT_SKIP_FIRST_EPISODE_OP_ED_SETTING_KEY: &str = "dont_skip_first_episode_op_ed";
@@ -33,12 +37,15 @@ pub const MANUAL_TEMPLATE_MAX_SEC: f64 = 180.0;
 
 pub const SAMPLE_RATE: u32 = 11025;
 const CHROMAPRINT_FRAME_SEC: f64 = 0.1238;
-/// Discovery/template window length in seconds (each window gets its own ffmpeg + fpcalc pass).
-const SEED_WINDOW_SEC: f64 = 15.0;
-/// Frame equivalents for tests and in-memory trim/slice helpers only — not for discovery extraction.
-const SEED_WINDOW_FRAMES: usize = 120;
-/// Minimum search region before discovery skips an episode (~15s window + 5s margin).
+/// Mid-segment discovery window length (matched across seed episodes, then expanded).
+const SEED_WINDOW_SEC: f64 = 50.0;
+/// Hop between discovery window starts inside the OP/ED search band.
+const SEED_WINDOW_HOP_SEC: f64 = 30.0;
+/// Minimum search region before discovery skips an episode.
 const SEED_MIN_REGION_SEC: f64 = SEED_WINDOW_SEC + 5.0;
+/// Episodes per discovery seed batch (retry with the next batch on failure).
+const SEED_BATCH_SIZE: usize = 3;
+/// Typical fixed length used as a duration prior center / extract floor.
 const SEGMENT_DURATION_SEC: f64 = 90.0;
 const OP_SEARCH_SEC: f64 = 180.0;
 const ED_TAIL_SEC: f64 = 180.0;
@@ -46,13 +53,21 @@ const MATCH_AVERAGE_THRESHOLD: f32 = 0.84;
 const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
 const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
 const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
-const SEED_MATCH_THRESHOLD: f32 = 0.82;
-/// After coarse discovery, slide the 90s template ± this many seconds in unison.
-const SEED_REFINE_OFFSET_SEC: i32 = 8;
-const SEED_REFINE_OFFSET_STEP_SEC: f64 = 0.5;
-/// Minimum sliding score when anchoring the 90s template on a seed episode for refinement.
-const SEED_REFINE_ANCHOR_THRESHOLD: f32 = 0.82;
-const MAX_SEED_EPISODES: usize = 10;
+/// Minimum average score when accepting a 50s cross-seed core match.
+const SEED_CORE_MATCH_THRESHOLD: f32 = 0.84;
+/// Short probe length for consensus edge expansion (not the walk step).
+const EXPAND_PROBE_SEC: f64 = 2.5;
+/// Average pairwise probe score required when expanding the leading edge.
+const EXPAND_PROBE_THRESHOLD: f32 = 0.82;
+/// Looser trailing-edge threshold (OP/ED fades / credit beds degrade gradually).
+const EXPAND_PROBE_THRESHOLD_END: f32 = 0.76;
+/// Consecutive weak probes before declaring a boundary (hysteresis).
+const EXPAND_HYSTERESIS_STEPS: usize = 3;
+/// Extra seconds kept past the last strong trailing probe (fade compensation).
+const EXPAND_END_PAD_SEC: f64 = 1.75;
+/// Reject expanded templates shorter/longer than these priors.
+const EXPAND_MIN_DURATION_SEC: f64 = 50.0;
+const EXPAND_MAX_DURATION_SEC: f64 = 120.0;
 const MIN_EPISODES_FOR_NO_OP_ED: usize = 3;
 /// Consecutive per-kind match misses that indicate a new OP/ED block (e.g. season change).
 const FULL_PASS_FAIL_STREAK_FOR_NO_OP_ED: usize = 3;
@@ -335,7 +350,7 @@ pub fn anime_redetect_full_pass_only(conn: &Connection, anime_id: i64) -> Result
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| e.to_string())?;
-    if version != ANALYSIS_VERSION {
+    if version != DETECT_LOGIC_VERSION {
         return Ok(false);
     }
     Ok(analyzed_at
@@ -511,7 +526,7 @@ pub fn anime_needs_op_ed_detect(conn: &Connection, anime_id: i64) -> Result<bool
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| e.to_string())?;
-    if version != ANALYSIS_VERSION {
+    if version != DETECT_LOGIC_VERSION {
         return Ok(true);
     }
     let analyzed = analyzed_at
@@ -894,14 +909,15 @@ struct TemplateMatch {
 }
 
 fn template_match_from_offset(
-    _template: &Fingerprint,
+    template: &Fingerprint,
     offset_frames: usize,
     quality: MatchQuality,
 ) -> TemplateMatch {
     let start_sec = seconds_for_frames(offset_frames);
+    let duration_sec = seconds_for_frames(template.frame_count());
     TemplateMatch {
         start_sec,
-        end_sec: start_sec + SEGMENT_DURATION_SEC,
+        end_sec: start_sec + duration_sec,
         confidence: quality.average,
     }
 }
@@ -1057,7 +1073,7 @@ fn discovery_window_starts(region_start_sec: f64, region_len_sec: f64) -> Vec<f6
     let mut offset = 0.0f64;
     while offset + SEED_WINDOW_SEC <= region_len_sec {
         starts.push(region_start_sec + offset);
-        offset += SEED_WINDOW_SEC / 2.0;
+        offset += SEED_WINDOW_HOP_SEC;
     }
     starts
 }
@@ -1219,13 +1235,6 @@ fn ensure_custom_template_fingerprint(
     Ok((key, fp))
 }
 
-#[derive(Debug, Clone)]
-struct SeedCandidate {
-    start_sec: f64,
-    episode_id: i64,
-    fingerprint: Fingerprint,
-}
-
 fn kind_optimistic_search_range(kind: SegmentKind, duration: f64) -> (usize, usize) {
     match kind {
         SegmentKind::Op => {
@@ -1240,43 +1249,13 @@ fn kind_optimistic_search_range(kind: SegmentKind, duration: f64) -> (usize, usi
     }
 }
 
-/// Best template offset in a search region (no consistency gates — used for seed refinement).
-fn find_anchor_offset(
-    template: &Fingerprint,
-    candidate: &Fingerprint,
-    search_start_frame: usize,
-    search_end_frame: usize,
-) -> Option<usize> {
-    let template_frames = template.frame_count();
-    if template_frames == 0 || candidate.frame_count() < template_frames {
-        return None;
-    }
-    let end = search_end_frame.min(candidate.frame_count().saturating_sub(template_frames));
-    if search_start_frame > end {
-        return None;
-    }
-    let mut best_score = 0.0f32;
-    let mut best_offset = search_start_frame;
-    for offset in search_start_frame..=end {
-        let score = sliding_match_score(template, candidate, offset);
-        if score > best_score {
-            best_score = score;
-            best_offset = offset;
-        }
-    }
-    if best_score >= SEED_REFINE_ANCHOR_THRESHOLD {
-        Some(best_offset)
-    } else {
-        None
-    }
-}
-
-/// Steps reserved per segment kind: scan each seed episode, compare, refine, then build or bail.
+/// Steps reserved per segment kind: seed batches + expand/build + bail labels.
 fn discovery_steps_per_kind(episode_count: usize) -> u32 {
     if episode_count < 2 {
         return 0;
     }
-    episode_count.min(MAX_SEED_EPISODES) as u32 + 4
+    let batches = episode_count.div_ceil(SEED_BATCH_SIZE) as u32;
+    batches.saturating_mul(2).saturating_add(4)
 }
 
 fn max_detection_blocks(episode_count: usize) -> u32 {
@@ -1298,105 +1277,6 @@ fn op_ed_detect_total_steps(episode_count: usize) -> u32 {
     let per_kind = per_kind_block * blocks;
     // Starting + (discovery + per-episode match) × 2 kinds + Done
     1 + per_kind * 2 + 1
-}
-
-fn discover_repeated_seed(
-    episodes: &[EpisodeRow],
-    kind: SegmentKind,
-    cancel: &AtomicBool,
-    report: &mut dyn FnMut(&str),
-) -> Result<Option<(SeedCandidate, Vec<i64>)>, String> {
-    let pool: Vec<_> = episodes.iter().take(MAX_SEED_EPISODES).collect();
-    if pool.len() < 2 {
-        return Ok(None);
-    }
-
-    let mut seeds: Vec<SeedCandidate> = Vec::new();
-    for (index, ep) in pool.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
-            return Err("OP/ED detection cancelled".to_string());
-        }
-        report(&format!(
-            "{} discovery: scanning episode {}/{}",
-            kind.display_name(),
-            index + 1,
-            pool.len()
-        ));
-        let duration = if ep.duration_seconds > 0.0 {
-            ep.duration_seconds
-        } else {
-            let path = normalized_video_path(&ep.path)?;
-            probe_duration(&path)?
-        };
-        let (region_start_sec, region_len_sec) = match kind {
-            SegmentKind::Op => (0.0, OP_SEARCH_SEC.min(duration)),
-            SegmentKind::Ed => {
-                let tail = ED_TAIL_SEC.min(duration);
-                ((duration - tail).max(0.0), tail)
-            }
-        };
-        if region_len_sec < SEED_MIN_REGION_SEC {
-            continue;
-        }
-
-        let mut offset = 0.0f64;
-        while offset + SEED_WINDOW_SEC <= region_len_sec {
-            if cancel.load(Ordering::Relaxed) {
-                return Err("OP/ED detection cancelled".to_string());
-            }
-            let window_start = region_start_sec + offset;
-            let (_, fp) =
-                ensure_episode_fingerprint(&ep.path, window_start, SEED_WINDOW_SEC)?;
-            seeds.push(SeedCandidate {
-                start_sec: window_start,
-                episode_id: ep.id,
-                fingerprint: fp,
-            });
-            offset += SEED_WINDOW_SEC / 2.0;
-        }
-    }
-
-    report(&format!(
-        "{} discovery: comparing fingerprints",
-        kind.display_name()
-    ));
-
-    Ok(cluster_seed_candidates(&seeds))
-}
-
-fn cluster_seed_candidates(seeds: &[SeedCandidate]) -> Option<(SeedCandidate, Vec<i64>)> {
-    let mut best_cluster: Option<(SeedCandidate, Vec<i64>, usize)> = None;
-    for (i, seed_a) in seeds.iter().enumerate() {
-        let mut matching_eps = vec![seed_a.episode_id];
-        for (j, seed_b) in seeds.iter().enumerate() {
-            if i == j || seed_a.episode_id == seed_b.episode_id {
-                continue;
-            }
-            let sim = segment_fingerprint_similarity(&seed_a.fingerprint, &seed_b.fingerprint);
-            if sim >= SEED_MATCH_THRESHOLD {
-                if !matching_eps.contains(&seed_b.episode_id) {
-                    matching_eps.push(seed_b.episode_id);
-                }
-            }
-        }
-        if best_cluster
-            .as_ref()
-            .is_none_or(|(_, _, count)| matching_eps.len() > *count)
-        {
-            let count = matching_eps.len();
-            best_cluster = Some((seed_a.clone(), matching_eps, count));
-        }
-    }
-    let (seed, episode_ids, count) = best_cluster?;
-    if count < 2 {
-        return None;
-    }
-    Some((seed, episode_ids))
-}
-
-/// Refined template must match at least as many episodes as coarse, and coarse must already work.
-fn refinement_beats_coarse(coarse_hits: usize, refined_hits: usize) -> bool {
-    coarse_hits >= 2 && refined_hits >= coarse_hits
 }
 
 fn count_episode_template_matches(
@@ -1435,157 +1315,389 @@ fn count_episode_template_matches(
     Ok(hits)
 }
 
-struct AnchoredSeedEpisode {
+#[derive(Debug, Clone)]
+struct AlignedSeedEpisode {
     episode_id: i64,
-    anchor_frame: usize,
+    /// Frame on this episode aligned with the reference core start.
+    core_start_frame: usize,
     full: Fingerprint,
 }
 
-/// Second discovery pass: anchor the coarse 90s template on each phase-1 seed episode and
-/// drop failures, then slide the template in unison ±`SEED_REFINE_OFFSET_SEC` at
-/// `SEED_REFINE_OFFSET_STEP_SEC` steps by re-slicing the reference fingerprint (drop left /
-/// add right). Pick the shift with the highest average sliding score across survivors.
-fn refine_discovered_seed(
-    initial_seed: &SeedCandidate,
-    source_ids: &[i64],
-    episodes: &[EpisodeRow],
-    template_fp: &Fingerprint,
+#[derive(Debug, Clone)]
+struct ExpandedSeed {
+    episode_id: i64,
+    start_sec: f64,
+    duration_sec: f64,
+    source_ids: Vec<i64>,
+}
+
+fn episode_row_duration(ep: &EpisodeRow) -> Result<f64, String> {
+    if ep.duration_seconds > 0.0 {
+        return Ok(ep.duration_seconds);
+    }
+    let path = normalized_video_path(&ep.path)?;
+    probe_duration(&path)
+}
+
+fn kind_search_region(kind: SegmentKind, duration: f64) -> (f64, f64) {
+    match kind {
+        SegmentKind::Op => (0.0, OP_SEARCH_SEC.min(duration)),
+        SegmentKind::Ed => {
+            let tail = ED_TAIL_SEC.min(duration);
+            ((duration - tail).max(0.0), tail)
+        }
+    }
+}
+
+/// Best offset for a mid-segment window on a candidate episode (optimistic band).
+fn find_core_window_offset(
+    window_fp: &Fingerprint,
+    candidate: &Fingerprint,
+    kind: SegmentKind,
+    duration: f64,
+) -> Option<(usize, f32)> {
+    let (search_start, search_end) = kind_optimistic_search_range(kind, duration);
+    let (offset, quality) =
+        find_best_offset_and_quality(window_fp, candidate, search_start, search_end)?;
+    if quality.average < SEED_CORE_MATCH_THRESHOLD {
+        return None;
+    }
+    Some((offset, quality.average))
+}
+
+fn aligned_probe_start(ep: &AlignedSeedEpisode, ref_core_start: usize, probe_start_ref: usize) -> Option<usize> {
+    let start = ep.core_start_frame as i64 + (probe_start_ref as i64 - ref_core_start as i64);
+    if start < 0 {
+        return None;
+    }
+    Some(start as usize)
+}
+
+/// Average pairwise similarity of a short probe at the same aligned time on all seed episodes.
+fn consensus_probe_score(
+    aligned: &[AlignedSeedEpisode],
+    ref_core_start: usize,
+    probe_start_ref: usize,
+    probe_frames: usize,
+) -> Option<f32> {
+    if aligned.len() < 2 || probe_frames == 0 {
+        return None;
+    }
+    let mut probes = Vec::with_capacity(aligned.len());
+    for ep in aligned {
+        let start = aligned_probe_start(ep, ref_core_start, probe_start_ref)?;
+        probes.push(slice_fingerprint(&ep.full, start, probe_frames)?);
+    }
+    let mut sum = 0.0f32;
+    let mut pairs = 0usize;
+    for i in 0..probes.len() {
+        for j in (i + 1)..probes.len() {
+            sum += segment_fingerprint_similarity(&probes[i], &probes[j]);
+            pairs += 1;
+        }
+    }
+    if pairs == 0 {
+        return None;
+    }
+    Some(sum / pairs as f32)
+}
+
+fn consensus_probe_strong(
+    aligned: &[AlignedSeedEpisode],
+    ref_core_start: usize,
+    probe_start_ref: usize,
+    probe_frames: usize,
+    threshold: f32,
+) -> bool {
+    consensus_probe_score(aligned, ref_core_start, probe_start_ref, probe_frames)
+        .is_some_and(|score| score >= threshold)
+}
+
+/// Grow a matched mid-segment core left/right until cross-episode probe consensus fails.
+fn expand_aligned_core(
+    ref_core_start: usize,
+    core_frames: usize,
+    aligned: &[AlignedSeedEpisode],
+    cancel: &AtomicBool,
+) -> Option<(usize, usize)> {
+    if aligned.len() < 2 || core_frames == 0 {
+        return None;
+    }
+    let probe_frames = frames_for_seconds(EXPAND_PROBE_SEC).max(1);
+    let end_pad_frames = frames_for_seconds(EXPAND_END_PAD_SEC);
+    let min_frames = frames_for_seconds(EXPAND_MIN_DURATION_SEC);
+    let max_frames = frames_for_seconds(EXPAND_MAX_DURATION_SEC);
+    let core_end = ref_core_start + core_frames;
+
+    let mut start = ref_core_start;
+    let mut weak_run = 0usize;
+    let mut cursor = ref_core_start;
+    while cursor > 0 {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        let candidate = cursor - 1;
+        if core_end.saturating_sub(candidate) > max_frames {
+            break;
+        }
+        if !aligned.iter().all(|ep| {
+            aligned_probe_start(ep, ref_core_start, candidate)
+                .and_then(|s| slice_fingerprint(&ep.full, s, probe_frames))
+                .is_some()
+        }) {
+            break;
+        }
+        if consensus_probe_strong(
+            aligned,
+            ref_core_start,
+            candidate,
+            probe_frames,
+            EXPAND_PROBE_THRESHOLD,
+        ) {
+            start = candidate;
+            cursor = candidate;
+            weak_run = 0;
+        } else {
+            weak_run += 1;
+            if weak_run >= EXPAND_HYSTERESIS_STEPS {
+                break;
+            }
+            cursor = candidate;
+        }
+    }
+
+    let mut last_strong_probe_start: Option<usize> = None;
+    weak_run = 0;
+    let mut cursor = core_end;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        if cursor < start {
+            break;
+        }
+        let duration_if_end = cursor
+            .saturating_add(probe_frames)
+            .saturating_add(end_pad_frames)
+            .saturating_sub(start);
+        if duration_if_end > max_frames && last_strong_probe_start.is_some() {
+            break;
+        }
+        if !aligned.iter().all(|ep| {
+            aligned_probe_start(ep, ref_core_start, cursor)
+                .and_then(|s| slice_fingerprint(&ep.full, s, probe_frames))
+                .is_some()
+        }) {
+            break;
+        }
+        if consensus_probe_strong(
+            aligned,
+            ref_core_start,
+            cursor,
+            probe_frames,
+            EXPAND_PROBE_THRESHOLD_END,
+        ) {
+            last_strong_probe_start = Some(cursor);
+            cursor += 1;
+            weak_run = 0;
+        } else {
+            weak_run += 1;
+            if weak_run >= EXPAND_HYSTERESIS_STEPS {
+                break;
+            }
+            cursor += 1;
+        }
+    }
+
+    let mut end = match last_strong_probe_start {
+        Some(t) => t + probe_frames + end_pad_frames,
+        None => core_end + end_pad_frames,
+    };
+    // Keep the known-good core; clamp to max length from start.
+    end = end.max(core_end);
+    if end.saturating_sub(start) > max_frames {
+        end = start + max_frames;
+    }
+
+    if end <= start || end.saturating_sub(start) < min_frames {
+        return None;
+    }
+    if start > ref_core_start || end < core_end {
+        return None;
+    }
+    Some((start, end))
+}
+
+fn discover_core_in_batch(
+    batch: &[EpisodeRow],
     kind: SegmentKind,
     cancel: &AtomicBool,
     report: &mut dyn FnMut(&str),
-) -> Result<(SeedCandidate, Vec<i64>), String> {
-    report(&format!(
-        "{} discovery: refining seed alignment",
-        kind.display_name()
-    ));
+) -> Result<Option<(i64, usize, usize, Vec<AlignedSeedEpisode>)>, String> {
+    if batch.len() < 2 {
+        return Ok(None);
+    }
 
-    let Some(ref_ep) = episodes.iter().find(|e| e.id == initial_seed.episode_id) else {
-        return Ok((initial_seed.clone(), source_ids.to_vec()));
-    };
-    let ref_duration = if ref_ep.duration_seconds > 0.0 {
-        ref_ep.duration_seconds
-    } else {
-        let path = normalized_video_path(&ref_ep.path)?;
-        probe_duration(&path)?
-    };
-    let ref_extract_len = full_episode_extract_len(ref_duration);
-    let (_, ref_full) = ensure_episode_fingerprint(&ref_ep.path, 0.0, ref_extract_len)?;
-
-    let template_frames = template_fp.frame_count();
-    let coarse_start_sec = initial_seed.start_sec;
-
-    let mut anchored: Vec<AnchoredSeedEpisode> = Vec::new();
-    for ep_id in source_ids {
+    let mut loaded: Vec<(EpisodeRow, f64, Fingerprint)> = Vec::with_capacity(batch.len());
+    for (index, ep) in batch.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
         }
-        let Some(ep) = episodes.iter().find(|e| e.id == *ep_id) else {
-            continue;
-        };
-        let duration = if ep.duration_seconds > 0.0 {
-            ep.duration_seconds
-        } else {
-            let path = normalized_video_path(&ep.path)?;
-            probe_duration(&path)?
-        };
-        let full_extract_len = full_episode_extract_len(duration);
-        let (_, full) = ensure_episode_fingerprint(&ep.path, 0.0, full_extract_len)?;
-        let (search_start, search_end) = kind_optimistic_search_range(kind, duration);
-        let Some(anchor_frame) =
-            find_anchor_offset(template_fp, &full, search_start, search_end)
-        else {
-            continue;
-        };
-        anchored.push(AnchoredSeedEpisode {
-            episode_id: ep.id,
-            anchor_frame,
-            full,
-        });
+        report(&format!(
+            "{} discovery: loading seed {}/{}",
+            kind.display_name(),
+            index + 1,
+            batch.len()
+        ));
+        let duration = episode_row_duration(ep)?;
+        let extract_len = full_episode_extract_len(duration);
+        let (_, full) = ensure_episode_fingerprint(&ep.path, 0.0, extract_len)?;
+        loaded.push((ep.clone(), duration, full));
     }
 
-    let refined_ids: Vec<i64> = anchored.iter().map(|a| a.episode_id).collect();
-    if anchored.len() < 2 {
-        return Ok((initial_seed.clone(), refined_ids));
-    }
+    let core_frames = frames_for_seconds(SEED_WINDOW_SEC);
+    let mut best: Option<(f32, i64, usize, usize, Vec<AlignedSeedEpisode>)> = None;
 
-    report(&format!(
-        "{} discovery: sliding template over {} episodes",
-        kind.display_name(),
-        anchored.len()
-    ));
-
-    let mut best_delta_sec = 0.0f64;
-    let mut best_avg_score = f32::NEG_INFINITY;
-
-    let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
-    while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 + f64::EPSILON {
+    for (ref_index, (ref_ep, ref_duration, ref_full)) in loaded.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err("OP/ED detection cancelled".to_string());
         }
-        let shifted_start_sec = coarse_start_sec + offset_sec;
-        if shifted_start_sec < 0.0 {
-            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
+        let (region_start, region_len) = kind_search_region(kind, *ref_duration);
+        if region_len < SEED_MIN_REGION_SEC {
             continue;
         }
-        let shifted_start_frame = frames_for_seconds(shifted_start_sec);
-        let Some(shifted_template) =
-            slice_fingerprint(&ref_full, shifted_start_frame, template_frames)
-        else {
-            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-            continue;
-        };
+        for window_start_sec in discovery_window_starts(region_start, region_len) {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("OP/ED detection cancelled".to_string());
+            }
+            let ref_core_start = frames_for_seconds(window_start_sec);
+            let Some(window_fp) = slice_fingerprint(ref_full, ref_core_start, core_frames) else {
+                continue;
+            };
 
-        let mut score_sum = 0.0f32;
-        let mut valid = true;
-        for ep in &anchored {
-            let match_sec = seconds_for_frames(ep.anchor_frame) + offset_sec;
-            if match_sec < 0.0 {
-                valid = false;
-                break;
+            let mut aligned = vec![AlignedSeedEpisode {
+                episode_id: ref_ep.id,
+                core_start_frame: ref_core_start,
+                full: ref_full.clone(),
+            }];
+            let mut score_sum = 0.0f32;
+            // Accept 2-of-3 (or 2-of-2): one odd episode must not kill the whole batch.
+            for (other_index, (other_ep, other_duration, other_full)) in loaded.iter().enumerate() {
+                if other_index == ref_index {
+                    continue;
+                }
+                let Some((offset, score)) =
+                    find_core_window_offset(&window_fp, other_full, kind, *other_duration)
+                else {
+                    continue;
+                };
+                aligned.push(AlignedSeedEpisode {
+                    episode_id: other_ep.id,
+                    core_start_frame: offset,
+                    full: other_full.clone(),
+                });
+                score_sum += score;
             }
-            let match_frame = frames_for_seconds(match_sec);
-            if match_frame + template_frames > ep.full.frame_count() {
-                valid = false;
-                break;
+            if aligned.len() < 2 {
+                continue;
             }
-            score_sum += sliding_match_score(&shifted_template, &ep.full, match_frame);
-        }
-        if valid {
-            let avg = score_sum / anchored.len() as f32;
-            if avg > best_avg_score
-                || (avg == best_avg_score && offset_sec.abs() < best_delta_sec.abs())
+            let avg = score_sum / (aligned.len() - 1) as f32;
+            if best
+                .as_ref()
+                .is_none_or(|(best_avg, _, _, _, _)| avg > *best_avg)
             {
-                best_avg_score = avg;
-                best_delta_sec = offset_sec;
+                best = Some((avg, ref_ep.id, ref_core_start, core_frames, aligned));
             }
         }
-        offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
     }
 
-    if !best_avg_score.is_finite() {
-        return Ok((initial_seed.clone(), refined_ids));
+    Ok(best.map(|(_, ref_id, core_start, core_frames, aligned)| {
+        (ref_id, core_start, core_frames, aligned)
+    }))
+}
+
+/// Discover a shared mid-segment on seed batches of 3, then expand to start/end by consensus.
+fn discover_expanded_seed(
+    episodes: &[EpisodeRow],
+    kind: SegmentKind,
+    cancel: &AtomicBool,
+    report: &mut dyn FnMut(&str),
+) -> Result<Option<ExpandedSeed>, String> {
+    if episodes.len() < 2 {
+        return Ok(None);
     }
 
-    Ok((
-        SeedCandidate {
-            start_sec: coarse_start_sec + best_delta_sec,
-            episode_id: initial_seed.episode_id,
-            fingerprint: initial_seed.fingerprint.clone(),
-        },
-        refined_ids,
-    ))
+    let mut batch_index = 0usize;
+    while batch_index * SEED_BATCH_SIZE < episodes.len() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("OP/ED detection cancelled".to_string());
+        }
+        let start = batch_index * SEED_BATCH_SIZE;
+        let end = (start + SEED_BATCH_SIZE).min(episodes.len());
+        let batch = &episodes[start..end];
+        batch_index += 1;
+        if batch.len() < 2 {
+            continue;
+        }
+
+        report(&format!(
+            "{} discovery: seed batch {} ({} episodes)",
+            kind.display_name(),
+            batch_index,
+            batch.len()
+        ));
+
+        let Some((ref_ep_id, ref_core_start, core_frames, aligned)) =
+            discover_core_in_batch(batch, kind, cancel, report)?
+        else {
+            report(&format!(
+                "{} discovery: no mid-segment match in seed batch {}",
+                kind.display_name(),
+                batch_index
+            ));
+            continue;
+        };
+
+        report(&format!(
+            "{} discovery: expanding matched core to boundaries",
+            kind.display_name()
+        ));
+        let Some((start_frame, end_frame)) =
+            expand_aligned_core(ref_core_start, core_frames, &aligned, cancel)
+        else {
+            report(&format!(
+                "{} discovery: expand failed for seed batch {}",
+                kind.display_name(),
+                batch_index
+            ));
+            continue;
+        };
+
+        let source_ids: Vec<i64> = aligned.iter().map(|a| a.episode_id).collect();
+        let start_sec = seconds_for_frames(start_frame);
+        let duration_sec = seconds_for_frames(end_frame.saturating_sub(start_frame));
+        return Ok(Some(ExpandedSeed {
+            episode_id: ref_ep_id,
+            start_sec,
+            duration_sec,
+            source_ids,
+        }));
+    }
+
+    Ok(None)
 }
 
 fn build_template_fingerprint(
     episode_path: &str,
     start_sec: f64,
+    duration_sec: f64,
     cancel: &AtomicBool,
 ) -> Result<(Fingerprint, String), String> {
     if cancel.load(Ordering::Relaxed) {
         return Err("OP/ED detection cancelled".to_string());
     }
-    // Isolated segment fpcalc — must match discovery windows; do not slice from full-episode cache.
-    let (key, fp) = ensure_episode_fingerprint(episode_path, start_sec, SEGMENT_DURATION_SEC)?;
+    // Isolated segment fpcalc — do not slice from full-episode cache.
+    let (key, fp) = ensure_episode_fingerprint(episode_path, start_sec, duration_sec)?;
     Ok((fp, key))
 }
 
@@ -2137,8 +2249,8 @@ fn run_kind_detection(
             }
 
             let seed_result =
-                discover_repeated_seed(&seed_pool, kind, ctx.cancel, &mut |label| tick(label))?;
-            let Some((seed, source_ids)) = seed_result else {
+                discover_expanded_seed(&seed_pool, kind, ctx.cancel, &mut |label| tick(label))?;
+            let Some(seed) = seed_result else {
                 tick(&format!(
                     "{} block {}: no repeated segment in remaining episodes",
                     kind.display_name(),
@@ -2167,96 +2279,68 @@ fn run_kind_detection(
             };
 
             tick(&format!(
-                "{} block {}: building template",
+                "{} block {}: building template ({:.1}s)",
                 kind.display_name(),
-                block_index + 1
+                block_index + 1,
+                seed.duration_sec
             ));
 
-            let coarse_path = episodes
+            let seed_path = episodes
                 .iter()
                 .find(|e| e.id == seed.episode_id)
                 .map(|e| e.path.as_str())
                 .ok_or("seed episode not found")?;
-            let (coarse_template_fp, coarse_template_key) = build_template_fingerprint(
-                coarse_path,
+            let (template_fp, template_key) = build_template_fingerprint(
+                seed_path,
                 seed.start_sec,
+                seed.duration_sec,
                 ctx.cancel,
             )?;
             let validate_ids: Vec<i64> = episodes.iter().map(|e| e.id).collect();
-            let coarse_hits = count_episode_template_matches(
-                &coarse_template_fp,
+            let hits = count_episode_template_matches(
+                &template_fp,
                 &validate_ids,
                 episodes,
                 kind,
             )?;
-            let (refined_seed, refined_source_ids) = refine_discovered_seed(
-                &seed,
-                &source_ids,
-                episodes,
-                &coarse_template_fp,
-                kind,
-                ctx.cancel,
-                &mut |label| tick(label),
-            )?;
-
-            let refinement_changed = (refined_seed.start_sec - seed.start_sec).abs() > 0.05
-                || refined_seed.episode_id != seed.episode_id
-                || refined_source_ids != source_ids;
-
-            let (final_seed, final_source_ids, template_fp, template_key) =
-                if refinement_changed {
-                    let (refined_template_fp, refined_template_key) = build_template_fingerprint(
-                        coarse_path,
-                        refined_seed.start_sec,
-                        ctx.cancel,
-                    )?;
-                    let refined_hits = count_episode_template_matches(
-                        &refined_template_fp,
-                        &validate_ids,
-                        episodes,
-                        kind,
-                    )?;
-                    if refinement_beats_coarse(coarse_hits, refined_hits) {
-                        (
-                            refined_seed,
-                            refined_source_ids,
-                            refined_template_fp,
-                            refined_template_key,
-                        )
-                    } else {
-                        tick(&format!(
-                            "{} block {}: keeping coarse seed (refined {}/{} vs coarse {}/{})",
-                            kind.display_name(),
-                            block_index + 1,
-                            refined_hits,
-                            validate_ids.len(),
-                            coarse_hits,
-                            validate_ids.len(),
-                        ));
-                        (
-                            seed.clone(),
-                            source_ids.clone(),
-                            coarse_template_fp,
-                            coarse_template_key,
-                        )
+            if hits < 2 {
+                tick(&format!(
+                    "{} block {}: expanded template matched only {}/{} episodes",
+                    kind.display_name(),
+                    block_index + 1,
+                    hits,
+                    validate_ids.len()
+                ));
+                if block_index == 0 && episodes.len() >= MIN_EPISODES_FOR_NO_OP_ED {
+                    ctx.mark_no_op_ed()?;
+                }
+                for ep in &seed_pool {
+                    if !ctx.segment_is_matched(ep.id, kind)? {
+                        ctx.upsert_segment_status(
+                            ep.id,
+                            kind,
+                            OpEdSegmentStatus::NotFound,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "seed",
+                            None,
+                            None,
+                        )?;
                     }
-                } else {
-                    (
-                        seed.clone(),
-                        source_ids.clone(),
-                        coarse_template_fp,
-                        coarse_template_key,
-                    )
-                };
+                }
+                break 'template None;
+            }
 
             let template_id = ctx.insert_template(
                 kind,
                 block_index,
-                final_seed.start_sec,
-                SEGMENT_DURATION_SEC,
+                seed.start_sec,
+                seed.duration_sec,
                 1.0,
                 &template_key,
-                &final_source_ids,
+                &seed.source_ids,
             )?;
             break 'template Some((template_fp, template_id));
         };
@@ -2453,7 +2537,7 @@ pub fn run_op_ed_detect_job(
         db.with_conn(|conn| {
             conn.execute(
                 "UPDATE anime SET no_op_ed = 0, op_ed_analysis_version = ?2 WHERE id = ?1",
-                params![anime_id, ANALYSIS_VERSION],
+                params![anime_id, DETECT_LOGIC_VERSION],
             )
             .map_err(|e| e.to_string())?;
             ensure_pending_segments_for_anime(conn, anime_id)
@@ -3558,150 +3642,120 @@ mod tests {
     #[test]
     fn discovery_window_starts_cover_op_search_band() {
         let starts = discovery_window_starts(0.0, 180.0);
-        assert_eq!(starts.len(), 23);
+        // 50s windows every 30s while start+50 <= 180: 0, 30, 60, 90, 120
+        assert_eq!(starts.len(), 5);
         assert!((starts[0] - 0.0).abs() < f64::EPSILON);
-        assert!((starts[1] - 7.5).abs() < f64::EPSILON);
-        assert!((starts.last().copied().unwrap() - 165.0).abs() < f64::EPSILON);
+        assert!((starts[1] - 30.0).abs() < f64::EPSILON);
+        assert!((starts.last().copied().unwrap() - 120.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn discovery_slice_extracts_window_from_full() {
-        let values: Vec<i32> = (0..200).collect();
+        let window_frames = frames_for_seconds(SEED_WINDOW_SEC);
+        let values: Vec<i32> = (0..(window_frames + 80) as i32).collect();
         let full = fingerprint_from_values(&values);
-        let slice = slice_fingerprint(&full, 60, SEED_WINDOW_FRAMES).expect("in range");
-        assert_eq!(slice.frame_count(), SEED_WINDOW_FRAMES);
+        let slice = slice_fingerprint(&full, 60, window_frames).expect("in range");
+        assert_eq!(slice.frame_count(), window_frames);
         assert_eq!(slice.values[0], 60);
-        assert_eq!(slice.values[SEED_WINDOW_FRAMES - 1], (60 + SEED_WINDOW_FRAMES - 1) as i32);
+        assert_eq!(
+            slice.values[window_frames - 1],
+            (60 + window_frames - 1) as i32
+        );
     }
 
     #[test]
-    fn cluster_seed_candidates_requires_cross_episode_agreement() {
+    fn consensus_probe_score_is_high_inside_shared_region() {
         let near = value_with_bit_diffs(2);
-        let window = fingerprint_from_values(&[near; SEED_WINDOW_FRAMES]);
-        let seeds = vec![
-            SeedCandidate {
-                start_sec: 0.0,
+        // Distinct prefixes with many differing bits (not value_with_bit_diffs neighbors).
+        let far_a = 0_i32;
+        let far_b = !0_i32;
+        let shared_start = 40usize;
+        let shared_len = 200usize;
+        let make = |prefix: i32| {
+            let mut vals = vec![prefix; shared_start];
+            vals.extend(vec![near; shared_len]);
+            vals.extend(vec![prefix; 40]);
+            fingerprint_from_values(&vals)
+        };
+        let aligned = vec![
+            AlignedSeedEpisode {
                 episode_id: 1,
-                fingerprint: window.clone(),
+                core_start_frame: shared_start + 20,
+                full: make(far_a),
             },
-            SeedCandidate {
-                start_sec: 1.0,
+            AlignedSeedEpisode {
                 episode_id: 2,
-                fingerprint: window.clone(),
-            },
-            SeedCandidate {
-                start_sec: 90.0,
-                episode_id: 3,
-                fingerprint: fingerprint_from_values(&[value_with_bit_diffs(16); SEED_WINDOW_FRAMES]),
+                core_start_frame: shared_start + 20,
+                full: make(far_b),
             },
         ];
-        let (seed, ids) = cluster_seed_candidates(&seeds).expect("cluster");
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&1) && ids.contains(&2));
-        assert!(seed.episode_id == 1 || seed.episode_id == 2);
+        let probe_frames = frames_for_seconds(EXPAND_PROBE_SEC).max(1);
+        let inside = consensus_probe_score(
+            &aligned,
+            shared_start + 20,
+            shared_start + 20,
+            probe_frames,
+        )
+        .expect("inside");
+        let outside = consensus_probe_score(
+            &aligned,
+            shared_start + 20,
+            shared_start.saturating_sub(probe_frames),
+            probe_frames,
+        )
+        .expect("outside");
+        assert!(inside >= EXPAND_PROBE_THRESHOLD, "inside={inside}");
+        assert!(outside < EXPAND_PROBE_THRESHOLD, "outside={outside}");
     }
 
     #[test]
-    fn refine_slide_offset_step_count_covers_plus_minus_eight() {
-        let mut count = 0usize;
-        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
-        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 + f64::EPSILON {
-            count += 1;
-            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-        }
-        assert_eq!(count, 33);
-    }
-
-    #[test]
-    fn unison_slide_finds_strong_average_match() {
+    fn expand_aligned_core_finds_shared_boundaries() {
         let near = value_with_bit_diffs(2);
-        let far = value_with_bit_diffs(16);
-        let template_frames = 40usize;
-        let coarse_start_frame = 10usize;
-        let ref_vals: Vec<i32> = (0..200)
-            .map(|i| if (coarse_start_frame..coarse_start_frame + template_frames).contains(&i) {
-                near
-            } else {
-                far
-            })
-            .collect();
-        let ref_full = fingerprint_from_values(&ref_vals);
-        let coarse_template =
-            slice_fingerprint(&ref_full, coarse_start_frame, template_frames).expect("template");
-
-        let mut ep_a = vec![far; 8];
-        ep_a.extend(vec![near; 80]);
-        let full_a = fingerprint_from_values(&ep_a);
-        let anchor_a =
-            find_anchor_offset(&coarse_template, &full_a, 0, 20).expect("anchor a");
-
-        let mut ep_b = vec![far; 13];
-        ep_b.extend(vec![near; 80]);
-        let full_b = fingerprint_from_values(&ep_b);
-        let anchor_b =
-            find_anchor_offset(&coarse_template, &full_b, 0, 25).expect("anchor b");
-
-        let coarse_start_sec = seconds_for_frames(coarse_start_frame);
-        let mut best_avg = f32::NEG_INFINITY;
-        let mut offset_sec = -(SEED_REFINE_OFFSET_SEC as f64);
-        while offset_sec <= SEED_REFINE_OFFSET_SEC as f64 + f64::EPSILON {
-            let shifted_start_sec = coarse_start_sec + offset_sec;
-            if shifted_start_sec < 0.0 {
-                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-                continue;
-            }
-            let shifted_start_frame = frames_for_seconds(shifted_start_sec);
-            let Some(shifted_template) =
-                slice_fingerprint(&ref_full, shifted_start_frame, template_frames)
-            else {
-                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-                continue;
-            };
-            let match_a_sec = seconds_for_frames(anchor_a) + offset_sec;
-            let match_b_sec = seconds_for_frames(anchor_b) + offset_sec;
-            if match_a_sec < 0.0 || match_b_sec < 0.0 {
-                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-                continue;
-            }
-            let match_a = frames_for_seconds(match_a_sec);
-            let match_b = frames_for_seconds(match_b_sec);
-            if match_a + template_frames > full_a.frame_count()
-                || match_b + template_frames > full_b.frame_count()
-            {
-                offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-                continue;
-            }
-            let score_a = sliding_match_score(&shifted_template, &full_a, match_a);
-            let score_b = sliding_match_score(&shifted_template, &full_b, match_b);
-            let avg = (score_a + score_b) / 2.0;
-            if avg > best_avg {
-                best_avg = avg;
-            }
-            offset_sec += SEED_REFINE_OFFSET_STEP_SEC;
-        }
-        assert!(best_avg.is_finite());
-        assert!(best_avg > 0.9);
-    }
-
-    #[test]
-    fn refinement_beats_coarse_requires_minimum_and_improvement() {
-        assert!(refinement_beats_coarse(5, 5));
-        assert!(refinement_beats_coarse(5, 6));
-        assert!(!refinement_beats_coarse(5, 4));
-        assert!(!refinement_beats_coarse(0, 2));
-        assert!(!refinement_beats_coarse(3, 2));
-    }
-
-    #[test]
-    fn find_anchor_offset_picks_best_sliding_match() {
-        let near = value_with_bit_diffs(2);
-        let far = value_with_bit_diffs(16);
-        let template = fingerprint_from_values(&[near; 40]);
-        let mut candidate_vals = vec![far; 8];
-        candidate_vals.extend(vec![near; 40]);
-        let candidate = fingerprint_from_values(&candidate_vals);
-        let offset = find_anchor_offset(&template, &candidate, 0, 12).expect("anchor");
-        assert_eq!(offset, 8);
+        let far_a = 0_i32;
+        let far_b = !0_i32;
+        let far_c = 0x5555_5555_i32;
+        let true_start = 30usize;
+        let true_len = frames_for_seconds(90.0);
+        let core_start = true_start + frames_for_seconds(20.0);
+        let core_frames = frames_for_seconds(SEED_WINDOW_SEC);
+        let make = |prefix: i32| {
+            let mut vals = vec![prefix; true_start];
+            vals.extend(vec![near; true_len]);
+            vals.extend(vec![prefix; 80]);
+            fingerprint_from_values(&vals)
+        };
+        let aligned = vec![
+            AlignedSeedEpisode {
+                episode_id: 1,
+                core_start_frame: core_start,
+                full: make(far_a),
+            },
+            AlignedSeedEpisode {
+                episode_id: 2,
+                core_start_frame: core_start,
+                full: make(far_b),
+            },
+            AlignedSeedEpisode {
+                episode_id: 3,
+                core_start_frame: core_start,
+                full: make(far_c),
+            },
+        ];
+        let cancel = AtomicBool::new(false);
+        let (start, end) =
+            expand_aligned_core(core_start, core_frames, &aligned, &cancel).expect("expand");
+        let probe_frames = frames_for_seconds(EXPAND_PROBE_SEC).max(1);
+        assert!(
+            start <= true_start + probe_frames,
+            "start={start} true_start={true_start}"
+        );
+        assert!(
+            end + probe_frames >= true_start + true_len,
+            "end={end} true_end={}",
+            true_start + true_len
+        );
+        assert!(end > start);
+        assert!(end - start >= frames_for_seconds(EXPAND_MIN_DURATION_SEC));
     }
 
     #[test]
@@ -3712,8 +3766,23 @@ mod tests {
             duration_seconds: 1200.0,
         }];
         let cancel = AtomicBool::new(false);
-        let result = discover_repeated_seed(&eps, SegmentKind::Op, &cancel, &mut |_| {}).unwrap();
+        let result = discover_expanded_seed(&eps, SegmentKind::Op, &cancel, &mut |_| {}).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn template_match_duration_follows_fingerprint_length() {
+        let near = value_with_bit_diffs(2);
+        let frames = frames_for_seconds(75.0);
+        let template = fingerprint_from_values(&vec![near; frames]);
+        let quality = MatchQuality {
+            average: 0.9,
+            strong_frame_ratio: 0.9,
+            lower_quartile: 0.9,
+        };
+        let matched = template_match_from_offset(&template, 10, quality);
+        assert!((matched.start_sec - seconds_for_frames(10)).abs() < 1e-9);
+        assert!((matched.end_sec - matched.start_sec - seconds_for_frames(frames)).abs() < 1e-9);
     }
 
     #[test]

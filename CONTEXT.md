@@ -320,19 +320,20 @@ view components. Per-screen UI lives in `src/components/`:
   enqueue one full all-episode pass only. `op-ed://analysis-updated` fires after OP/ED
   detect or manual rematch jobs finish, coalesced to at most ~2 per second per title so
   parallel per-episode rematch work does not flood the WebView message queue. Auto-enqueue is skipped when analysis is already current
-  (`op_ed_analyzed_at`, `ANALYSIS_VERSION`, segment rows for every episode).
+  (`op_ed_analyzed_at`, `DETECT_LOGIC_VERSION`, segment rows for every episode).
   Chroma jobs that
   find an on-disk fingerprint at start finish immediately and release the HDD stagger
   gap (enqueue skips chroma when the cache file exists, using the same canonical path key as
   fingerprinting)
-  gap so the next chroma can start without a 500ms wait. Chroma jobs fingerprint the full episode plus phase-1
-  discovery windows (one ffmpeg decode per OP/ED search band, then isolated fpcalc per 15s window on that PCM). Detect
-  loads cached windows for discovery; 90s templates use isolated segment fpcalc. Match candidates use the cached
-  full-episode fingerprint. Phase-1 discovery must not slice from full Chromaprint (segment-boundary fpcalc differs);
-  phase-2 refinement re-slices the 90s template from the cached reference fingerprint while sliding in unison. After coarse discovery, a **refinement pass**
-  anchors the coarse template on phase-1 seed episodes (dropping failures), then slides ±8s at 0.5s steps and picks the shift with the highest average per-episode score; the refined start is
-  kept only when its template matches at least as many batch episodes as the coarse template (and coarse already
-  matches ≥2). Optimistic search windows run before a full-episode pass for
+  gap so the next chroma can start without a 500ms wait. Chroma jobs fingerprint the full episode plus discovery
+  windows (one ffmpeg decode per OP/ED search band, then isolated fpcalc per 50s window every 30s on that PCM).
+  Auto discovery uses seed batches of 3 episodes: slide 50s cores across the OP/ED band on full-episode
+  fingerprints, accept a high-quality match on ≥1 other seed (2-of-3), then **expand** left/right by
+  Chromaprint-frame steps with a ~2.5s consensus probe until cross-episode agreement fails (stricter lead
+  threshold, looser trail threshold + ~1.75s end pad for fades; 50–120s length priors). The expanded range
+  becomes a variable-duration isolated template (`fpcalc`, not a full-FP slice). Fingerprint cache keys still
+  use `ANALYSIS_VERSION`; analyze staleness uses `DETECT_LOGIC_VERSION` so discovery-logic bumps re-detect
+  without wiping Chromaprint caches. Kept only when the template matches ≥2 batch episodes. Optimistic search windows run before a full-episode pass for
   failed episodes. Titles with multiple OP/ED sets in one folder (e.g. two seasons
   merged) use **block detection**: after three consecutive per-kind match failures,
   discovery re-runs on episodes not yet `matched` for that kind (`op_ed_templates.block_index`
