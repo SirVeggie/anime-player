@@ -4,12 +4,14 @@ use tauri::{Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 mod anilist;
+mod app_lifecycle;
 mod crash_log;
 mod db;
 mod library;
 mod library_ops;
 mod media_tools;
 mod scanner;
+mod watcher;
 
 #[cfg(windows)]
 mod disk_volume;
@@ -398,11 +400,13 @@ pub fn run() {
     crash_log::init();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            app_lifecycle::show_main_window(app);
             app.deep_link().handle_cli_arguments(argv.into_iter());
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
             crash_log::log(
                 "INFO",
@@ -412,10 +416,25 @@ pub fn run() {
             let db = db::AppDatabase::open_portable()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             crash_log::log("INFO", "database open ok");
+            let close_into_tray = db
+                .with_conn(|conn| library::read_close_into_tray(conn))
+                .unwrap_or(false);
             app.manage(db);
             let db_ref = app.state::<db::AppDatabase>();
             app.manage(library_ops::LibraryOpsState::new(db_ref.inner()));
             library_ops::start_queued_operations(app.handle().clone());
+
+            app.manage(app_lifecycle::AppLifecycleState::new(close_into_tray));
+            app.manage(watcher::LibraryWatcherState::new());
+            if let Err(error) = watcher::start(app.handle()) {
+                crash_log::log("ERROR", &format!("library watcher start failed: {error}"));
+            }
+            if close_into_tray {
+                if let Err(error) = app_lifecycle::set_close_into_tray(app.handle(), true) {
+                    crash_log::log("ERROR", &format!("tray setup failed: {error}"));
+                }
+            }
+            app_lifecycle::reconcile_launch_at_startup_from_db(app.handle());
 
             #[cfg(any(windows, target_os = "linux"))]
             let _ = app.deep_link().register_all();
@@ -427,37 +446,36 @@ pub fn run() {
                 crash_log::log("INFO", "initializing job manager");
                 app.manage(jobs::JobsState::new(app.handle().clone(), db_ref.inner()));
                 crash_log::log("INFO", "job manager ok");
+            }
 
-                // Tear libmpv down before the main window's HWND becomes
-                // invalid, and re-issue the video margin natively on every
-                // resize so the modal resize loop doesn't have to wait on
-                // a JS -> invoke() round-trip per frame.
-                if let Some(window) = app.get_webview_window("main") {
-                    let app_handle = app.handle().clone();
-                    let window_for_handler = window.clone();
-                    window.on_window_event(move |event| match event {
-                        tauri::WindowEvent::CloseRequested { .. } => {
-                            crash_log::log("INFO", "window close requested");
-                            if let Some(state) = app_handle.try_state::<AppState>() {
-                                if let Ok(mut guard) = state.mpv.lock() {
-                                    guard.take();
-                                }
-                            }
-                        }
-                        tauri::WindowEvent::Resized(size) => {
-                            let scale = window_for_handler.scale_factor().unwrap_or(1.0);
-                            handle_native_resize(&app_handle, size.width, scale);
-                        }
-                        tauri::WindowEvent::ScaleFactorChanged {
-                            scale_factor,
-                            new_inner_size,
-                            ..
-                        } => {
-                            handle_native_resize(&app_handle, new_inner_size.width, *scale_factor);
-                        }
-                        _ => {}
-                    });
-                }
+            // Close-into-tray + mpv teardown (Windows) / native resize (Windows).
+            if let Some(window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                let window_for_handler = window.clone();
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        crash_log::log("INFO", "window close requested");
+                        app_lifecycle::handle_close_requested(
+                            &app_handle,
+                            api,
+                            &window_for_handler,
+                        );
+                    }
+                    #[cfg(windows)]
+                    tauri::WindowEvent::Resized(size) => {
+                        let scale = window_for_handler.scale_factor().unwrap_or(1.0);
+                        handle_native_resize(&app_handle, size.width, scale);
+                    }
+                    #[cfg(windows)]
+                    tauri::WindowEvent::ScaleFactorChanged {
+                        scale_factor,
+                        new_inner_size,
+                        ..
+                    } => {
+                        handle_native_resize(&app_handle, new_inner_size.width, *scale_factor);
+                    }
+                    _ => {}
+                });
             }
 
             Ok(())
@@ -471,6 +489,11 @@ pub fn run() {
         library::get_anime_search_index,
         library::set_prefer_anilist_display_title,
         library::set_hide_anilist_features,
+        library::set_automatic_file_discovery,
+        library::set_launch_at_startup,
+        library::set_close_into_tray,
+        app_lifecycle::confirm_quit,
+        app_lifecycle::hide_to_tray,
         library::add_root_folder,
         library::remove_root_folder,
         library::create_category,
@@ -585,6 +608,11 @@ pub fn run() {
         library::get_anime_search_index,
         library::set_prefer_anilist_display_title,
         library::set_hide_anilist_features,
+        library::set_automatic_file_discovery,
+        library::set_launch_at_startup,
+        library::set_close_into_tray,
+        app_lifecycle::confirm_quit,
+        app_lifecycle::hide_to_tray,
         library::add_root_folder,
         library::remove_root_folder,
         library::create_category,

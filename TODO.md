@@ -27,7 +27,8 @@ Episode selection page features
 
 ## Library / scanning
 
-- [ ] Automatically detect new files via filesystem events (instead of manual rescan only)
+- [x] Automatically detect new files via filesystem events (instead of manual rescan only)
+    - Settings **Automatic file discovery** (default on); close-into-tray + launch-at-startup also added
 - [ ] Group seasons of the same show (subfolders? or fuzzy title match — low relative edit distance vs title length)
 - [x] Auto-detect OP/ED by finding common audio signatures across episodes (manual **Detect OP/ED** per title)
     - [x] Skip detected regions automatically (global **Skip OP/ED** setting + player toggle)

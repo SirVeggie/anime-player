@@ -161,6 +161,12 @@ export type LibraryState = {
   auto_op_ed_detect: boolean;
   dont_skip_first_episode_op_ed: boolean;
   clean_unused_scrub_sprites: boolean;
+  /** Watch root folders and rescan when video files appear or change. Default on. */
+  automatic_file_discovery: boolean;
+  /** Register the app to launch when the user signs in. Default off. */
+  launch_at_startup: boolean;
+  /** Close hides to the system tray instead of quitting. Default off. */
+  close_into_tray: boolean;
 };
 
 export type ScanSummary = {

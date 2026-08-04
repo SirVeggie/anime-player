@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -11,6 +12,8 @@ const HISTORY_LIMIT: i64 = 100;
 
 pub struct LibraryOpsState {
     worker_running: Mutex<bool>,
+    /// Set when a rescan is requested while one is already queued/running.
+    rescan_dirty: AtomicBool,
 }
 
 impl LibraryOpsState {
@@ -30,6 +33,7 @@ impl LibraryOpsState {
         });
         Self {
             worker_running: Mutex::new(false),
+            rescan_dirty: AtomicBool::new(false),
         }
     }
 }
@@ -289,10 +293,64 @@ pub fn library_ops_request_clean_local_data(
 #[tauri::command]
 pub fn library_ops_request_rescan(
     app: AppHandle,
-    db: State<'_, AppDatabase>,
-    ops: State<'_, LibraryOpsState>,
+    _db: State<'_, AppDatabase>,
+    _ops: State<'_, LibraryOpsState>,
 ) -> Result<LibraryOperationView, String> {
-    enqueue_simple_operation(app, db, ops, LibraryOperationType::RescanLibrary, None)
+    request_rescan_coalesced(&app)
+}
+
+/// Enqueue at most one `rescan_library` operation. Further requests while a
+/// rescan is queued or running mark `rescan_dirty` so one follow-up runs after.
+pub fn request_rescan_coalesced(app: &AppHandle) -> Result<LibraryOperationView, String> {
+    let db = app.state::<AppDatabase>();
+    let ops = app.state::<LibraryOpsState>();
+    if let Some(existing) = db.with_conn(|conn| find_active_rescan(conn))? {
+        ops.rescan_dirty.store(true, Ordering::SeqCst);
+        return Ok(existing);
+    }
+    let operation = db.with_conn(|conn| {
+        let operation_id =
+            insert_operation(conn, LibraryOperationType::RescanLibrary, None, None, "{}", 1)?;
+        load_operation(conn, operation_id)
+    })?;
+    wake_worker(app.clone(), ops);
+    Ok(operation)
+}
+
+fn find_active_rescan(conn: &Connection) -> Result<Option<LibraryOperationView>, String> {
+    let id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM library_operations
+             WHERE operation_type = 'rescan_library'
+               AND status IN ('queued', 'running')
+             ORDER BY id ASC
+             LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match id {
+        Some(operation_id) => load_operation(conn, operation_id).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn maybe_enqueue_dirty_rescan(app: &AppHandle) {
+    let Some(ops) = app.try_state::<LibraryOpsState>() else {
+        return;
+    };
+    if !ops.rescan_dirty.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if let Err(error) = request_rescan_coalesced(app) {
+        crate::crash_log::log(
+            "ERROR",
+            &format!("failed to enqueue dirty library rescan: {error}"),
+        );
+        // Keep the dirty bit so a later request can still pick it up.
+        ops.rescan_dirty.store(true, Ordering::SeqCst);
+    }
 }
 
 #[tauri::command]
@@ -406,6 +464,9 @@ fn run_operation(app: &AppHandle, record: OperationRecord) {
         let _ = db.with_conn(|conn| fail_operation(conn, record.id, &error));
         emit_snapshot(app);
         emit_finished(app, record.id);
+        if record.operation_type == LibraryOperationType::RescanLibrary {
+            maybe_enqueue_dirty_rescan(app);
+        }
     }
 }
 
@@ -492,6 +553,7 @@ fn run_rescan(app: &AppHandle, record: &OperationRecord) -> Result<(), String> {
     let summary_json = serde_json::to_string(&summary).map_err(|e| e.to_string())?;
     finish_operation(app, record.id, "done", Some(summary_json), None, false)?;
     emit_library_updated(app, "done", Some(record.id), true);
+    maybe_enqueue_dirty_rescan(app);
     Ok(())
 }
 

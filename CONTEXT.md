@@ -215,11 +215,27 @@ view components. Per-screen UI lives in `src/components/`:
   When the user closes the window while an episode session is loaded,
   `App.tsx` listens with `getCurrentWindow().onCloseRequested`, calls
   `PlayerView`'s `persistProgress` through `playbackProgressFlushRef`, then
+  either hides to the tray (`hide_to_tray` when `close_into_tray` is on) or
   `destroy()` after that promise settles (SQLite plus any awaited watched
   AniList sync—the same as Q/back except pause is skipped on exit so mpv may
   already be torn down in Rust). Abrupt process death still skips this. That path needs
-  **`core:window:allow-destroy`** in the default capability file in addition
-  to `allow-close`.
+  **`core:window:allow-destroy`**, and tray mode also needs
+  **`allow-hide` / `allow-show` / `allow-unminimize` / `allow-set-focus`**,
+  in the default capability file in addition to `allow-close`.
+- Settings **Application** panel exposes three SQLite-backed booleans on
+  `LibraryState`: **Automatic file discovery** (`automatic_file_discovery`,
+  default on), **Launch at startup** (`launch_at_startup`, default off), and
+  **Close into tray** (`close_into_tray`, default off). Discovery uses
+  `watcher.rs` (`notify`) on every root folder: path-deduped events, ~2s quiet
+  debounce, then size-stability settle (~1.5s unchanged, 60s cap) before
+  `library_ops::request_rescan_coalesced` (at most one queued/running rescan;
+  further requests set `rescan_dirty` for a single follow-up). Close-into-tray
+  builds a system tray (Show / Quit; left-click shows the window); Rust
+  `CloseRequested` hides instead of exiting when enabled, drops mpv on hide,
+  and tray Quit emits `app://quit-requested` so the frontend can flush progress
+  then `confirm_quit`. Launch-at-startup syncs via `tauri-plugin-autostart`
+  from Rust (`autostart:default` capability). Second-instance activation shows
+  and focuses the main window (works while tray-hidden).
 - `html` / `body` / `#root` use **`var(--app-bg)`** by default (and a matching
   inline color in `index.html`) so the transparent Tauri window does not flash
   the desktop on startup. **`PlayerView`** toggles **`html.compositor-active`**
@@ -566,10 +582,17 @@ view components. Per-screen UI lives in `src/components/`:
   `jobs_cancel_all`, `jobs_set_max_parallel`.
 - `library_ops.rs` — durable SQLite-backed library-operation runner for
   responsive delete, cleanup, rescan, and local-data stats refresh.
+  Rescan requests coalesce via `request_rescan_coalesced` / `rescan_dirty`.
+- `watcher.rs` — optional recursive root-folder watchers for automatic
+  discovery (debounced + size-settled → coalesced rescan).
+- `app_lifecycle.rs` — close-into-tray, tray menu, quit coordination, and
+  launch-at-startup sync (`tauri-plugin-autostart`).
 - `lib.rs` hooks the main window's `WindowEvent`:
-  - `CloseRequested` drops `MpvHandle` (terminates the libmpv context
-    and joins the event-loop thread) before the HWND becomes invalid.
-  - `Resized` and `ScaleFactorChanged` re-issue
+  - `CloseRequested` drops `MpvHandle` on Windows (terminates the libmpv
+    context and joins the event-loop thread) before the HWND becomes
+    invalid; when `close_into_tray` is on and the app is not quitting,
+    it `prevent_close`s and hides the window instead.
+  - `Resized` and `ScaleFactorChanged` (Windows) re-issue
     `video-margin-ratio-left` based on the new logical width and the
     last sidebar-width the frontend registered (`AppState::sidebar_px`).
 
@@ -600,18 +623,20 @@ view components. Per-screen UI lives in `src/components/`:
 - The main window also has **`decorations: false`** so Windows does not
   draw the native title bar or 1px frame; the frontend supplies the
   custom title bar and window controls.
-- Permissions: `core:default`, `opener:default`, `dialog:default`, and
-  `deep-link:default`. The opener plugin opens AniList URLs from the
-  frontend and episode folders from the Rust `open_anime_episode_folder`
-  command, which derives the folder from database episode paths instead of
-  requiring a broad frontend filesystem scope. For an anime whose episodes
-  span multiple folders, the header **Open episode folder** button picks the
-  parent directory of some episode that contains the most episode files under
-  it recursively (shortest path, then lexicographic on ties). Per-episode
-  **Open folder** in the context menu always opens that file's parent. The
-  dialog plugin is used for
-  the native folder picker; the deep-link and single-instance plugins support
-  the AniList `anime-player://anilist-auth` OAuth callback.
+- Permissions: `core:default`, `opener:default`, `dialog:default`,
+  `deep-link:default`, and `autostart:default`, plus explicit window
+  hide/show/focus permissions for tray mode. The opener plugin opens AniList
+  URLs from the frontend and episode folders from the Rust
+  `open_anime_episode_folder` command, which derives the folder from database
+  episode paths instead of requiring a broad frontend filesystem scope. For an
+  anime whose episodes span multiple folders, the header **Open episode folder**
+  button picks the parent directory of some episode that contains the most
+  episode files under it recursively (shortest path, then lexicographic on
+  ties). Per-episode **Open folder** in the context menu always opens that
+  file's parent. The dialog plugin is used for the native folder picker; the
+  deep-link and single-instance plugins support the AniList
+  `anime-player://anilist-auth` OAuth callback (single-instance also restores a
+  tray-hidden window).
 - Window: `productName = "Anime Player"`, 1280x800 default, min 800x600.
 
 ## Video architecture: in-process libmpv via FFI
@@ -692,6 +717,8 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
   regex scanner.
+- `src-tauri/src/watcher.rs`, `src-tauri/src/app_lifecycle.rs` — automatic
+  file discovery watchers; tray / close-into-tray / launch-at-startup.
 - `src-tauri/src/op_ed.rs`, `src-tauri/src/media_tools.rs` — OP/ED detection
   and shared ffmpeg/ffprobe helpers.
 - `src/opEd.ts` — OP/ED job identity and episode-page progress helpers.

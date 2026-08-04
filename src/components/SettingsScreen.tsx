@@ -51,6 +51,9 @@ export function SettingsScreen(props: {
   onSkipOpEd: (enabled: boolean) => void;
   onDontSkipFirstEpisodeOpEd: (enabled: boolean) => void;
   onCleanUnusedScrubSprites: (enabled: boolean) => void;
+  onAutomaticFileDiscovery: (enabled: boolean) => void;
+  onLaunchAtStartup: (enabled: boolean) => void;
+  onCloseIntoTray: (enabled: boolean) => void;
   onCleanLocalData: () => void;
 }) {
   const {
@@ -85,6 +88,9 @@ export function SettingsScreen(props: {
     onSkipOpEd,
     onDontSkipFirstEpisodeOpEd,
     onCleanUnusedScrubSprites,
+    onAutomaticFileDiscovery,
+    onLaunchAtStartup,
+    onCloseIntoTray,
     onCleanLocalData,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
@@ -96,6 +102,40 @@ export function SettingsScreen(props: {
   return (
     <>
       <ViewHeader title="Settings" subtitle={`Portable database: ${library.db_path}`} onBack={onBack} />
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Application</h2>
+          <span className="muted">Background behavior</span>
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.automatic_file_discovery}
+            disabled={busy}
+            onChange={onAutomaticFileDiscovery}
+            label="Automatic file discovery"
+            tooltip="Watch your root folders and import new or changed video files without a manual rescan. Waits until downloads finish writing before scanning."
+          />
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.launch_at_startup}
+            disabled={busy}
+            onChange={onLaunchAtStartup}
+            label="Launch at startup"
+            tooltip="Start Anime Player when you sign in to Windows (or the equivalent on other desktops)."
+          />
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.close_into_tray}
+            disabled={busy}
+            onChange={onCloseIntoTray}
+            label="Close into tray"
+            tooltip="Closing the window hides the app to the system tray so file discovery and background jobs keep running. Use Quit from the tray menu to exit fully."
+          />
+        </div>
+      </section>
 
       <section className="panel">
         <div className="panel-heading">

@@ -44,11 +44,16 @@ import {
   syncAnilistEpisodeProgress,
   searchAnilistAnime,
   setAutoOpEdDetect,
+  setAutomaticFileDiscovery,
   setCleanUnusedScrubSprites,
+  setCloseIntoTray,
   setDontSkipFirstEpisodeOpEd,
   setPreferAnilistDisplayTitle,
   setHideAnilistFeatures,
+  setLaunchAtStartup,
   setSkipOpEd,
+  confirmQuit,
+  hideToTray,
   setAnimeCustomThumbnailPath,
   setAnimeTrackerOffset,
   setDefaultCategory,
@@ -202,6 +207,8 @@ function App() {
   const fullscreenAtPlayerEntryRef = useRef(false);
   const [playerPaused, setPlayerPaused] = useState(true);
   const contentRef = useRef<HTMLElement | null>(null);
+  const libraryRef = useRef<LibraryState | null>(null);
+  libraryRef.current = library;
   const selectedAnimeIdRef = useRef<number | null>(null);
   const opEdRefreshTimerRef = useRef<number | null>(null);
   const currentPageKeyRef = useRef("categories");
@@ -384,19 +391,51 @@ function App() {
     let unlisten: UnlistenFn | undefined;
     void (async () => {
       unlisten = await appWindow.onCloseRequested(async (event) => {
+        const closeIntoTray = libraryRef.current?.close_into_tray ?? false;
         const flush = playbackProgressFlushRef.current;
-        if (!flush) return;
+        if (!flush && !closeIntoTray) {
+          return;
+        }
         event.preventDefault();
-        try {
-          await flush();
-        } catch (e) {
-          showToast("error", errorMessage(e));
-        } finally {
+        if (flush) {
           try {
-            await appWindow.destroy();
+            await flush();
           } catch (e) {
             showToast("error", errorMessage(e));
           }
+        }
+        try {
+          if (closeIntoTray) {
+            await hideToTray();
+          } else {
+            await appWindow.destroy();
+          }
+        } catch (e) {
+          showToast("error", errorMessage(e));
+        }
+      });
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    void (async () => {
+      unlisten = await listen("app://quit-requested", async () => {
+        const flush = playbackProgressFlushRef.current;
+        if (flush) {
+          try {
+            await flush();
+          } catch (e) {
+            showToast("error", errorMessage(e));
+          }
+        }
+        try {
+          await confirmQuit();
+        } catch (e) {
+          showToast("error", errorMessage(e));
         }
       });
     })();
@@ -1284,6 +1323,21 @@ function App() {
     setLibrary(state);
   }, []);
 
+  const handleAutomaticFileDiscovery = useCallback(async (enabled: boolean) => {
+    const state = await setAutomaticFileDiscovery(enabled);
+    setLibrary(state);
+  }, []);
+
+  const handleLaunchAtStartup = useCallback(async (enabled: boolean) => {
+    const state = await setLaunchAtStartup(enabled);
+    setLibrary(state);
+  }, []);
+
+  const handleCloseIntoTray = useCallback(async (enabled: boolean) => {
+    const state = await setCloseIntoTray(enabled);
+    setLibrary(state);
+  }, []);
+
   const handleSearchAnilist = useCallback((query: string): Promise<AnilistSearchResult[]> => {
     return searchAnilistAnime(query);
   }, []);
@@ -1984,6 +2038,9 @@ function App() {
               onSkipOpEd={(enabled) => void handleSkipOpEd(enabled)}
               onDontSkipFirstEpisodeOpEd={(enabled) => void handleDontSkipFirstEpisodeOpEd(enabled)}
               onCleanUnusedScrubSprites={(enabled) => void handleCleanUnusedScrubSprites(enabled)}
+              onAutomaticFileDiscovery={(enabled) => void handleAutomaticFileDiscovery(enabled)}
+              onLaunchAtStartup={(enabled) => void handleLaunchAtStartup(enabled)}
+              onCloseIntoTray={(enabled) => void handleCloseIntoTray(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
             />
           ) : null}

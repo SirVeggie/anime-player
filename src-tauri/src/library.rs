@@ -23,6 +23,9 @@ const MIN_POSITION_SECONDS_TO_PERSIST: f64 = 60.0;
 const PREFER_ANILIST_DISPLAY_TITLE_KEY: &str = "prefer_anilist_display_title";
 const HIDE_ANILIST_FEATURES_KEY: &str = "hide_anilist_features";
 const CLEAN_UNUSED_SCRUB_SPRITES_KEY: &str = "clean_unused_scrub_sprites";
+const AUTOMATIC_FILE_DISCOVERY_KEY: &str = "automatic_file_discovery";
+const LAUNCH_AT_STARTUP_KEY: &str = "launch_at_startup";
+const CLOSE_INTO_TRAY_KEY: &str = "close_into_tray";
 const LOCAL_DATA_STATS_CACHE_KEY: &str = "local_data_stats_cache";
 
 /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
@@ -168,6 +171,9 @@ pub struct LibraryState {
     auto_op_ed_detect: bool,
     dont_skip_first_episode_op_ed: bool,
     clean_unused_scrub_sprites: bool,
+    automatic_file_discovery: bool,
+    launch_at_startup: bool,
+    close_into_tray: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -403,6 +409,64 @@ fn write_clean_unused_scrub_sprites(conn: &Connection, enabled: bool) -> Result<
     Ok(())
 }
 
+fn read_bool_setting(conn: &Connection, key: &str, default: bool) -> Result<bool, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(match value.as_deref() {
+        None => default,
+        Some("1" | "true" | "yes") => true,
+        Some("0" | "false" | "no") => false,
+        _ => default,
+    })
+}
+
+fn write_bool_setting(conn: &Connection, key: &str, enabled: bool) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, if enabled { "1" } else { "0" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn read_automatic_file_discovery(conn: &Connection) -> Result<bool, String> {
+    read_bool_setting(conn, AUTOMATIC_FILE_DISCOVERY_KEY, true)
+}
+
+fn write_automatic_file_discovery(conn: &Connection, enabled: bool) -> Result<(), String> {
+    write_bool_setting(conn, AUTOMATIC_FILE_DISCOVERY_KEY, enabled)
+}
+
+pub(crate) fn read_launch_at_startup(conn: &Connection) -> Result<bool, String> {
+    read_bool_setting(conn, LAUNCH_AT_STARTUP_KEY, false)
+}
+
+fn write_launch_at_startup(conn: &Connection, enabled: bool) -> Result<(), String> {
+    write_bool_setting(conn, LAUNCH_AT_STARTUP_KEY, enabled)
+}
+
+pub(crate) fn read_close_into_tray(conn: &Connection) -> Result<bool, String> {
+    read_bool_setting(conn, CLOSE_INTO_TRAY_KEY, false)
+}
+
+fn write_close_into_tray(conn: &Connection, enabled: bool) -> Result<(), String> {
+    write_bool_setting(conn, CLOSE_INTO_TRAY_KEY, enabled)
+}
+
+pub(crate) fn root_folder_paths(conn: &Connection) -> Result<Vec<PathBuf>, String> {
+    Ok(list_root_folders(conn)?
+        .into_iter()
+        .map(|root| PathBuf::from(root.path))
+        .collect())
+}
+
 #[tauri::command]
 pub fn get_library_state(db: State<'_, AppDatabase>) -> Result<LibraryState, String> {
     db.with_conn(|conn| build_library_state(conn, &db))
@@ -429,6 +493,9 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         auto_op_ed_detect: op_ed::read_auto_op_ed_detect(conn)?,
         dont_skip_first_episode_op_ed: op_ed::read_dont_skip_first_episode_op_ed(conn)?,
         clean_unused_scrub_sprites: read_clean_unused_scrub_sprites(conn)?,
+        automatic_file_discovery: read_automatic_file_discovery(conn)?,
+        launch_at_startup: read_launch_at_startup(conn)?,
+        close_into_tray: read_close_into_tray(conn)?,
     })
 }
 
@@ -493,7 +560,53 @@ pub fn set_clean_unused_scrub_sprites(
 }
 
 #[tauri::command]
-pub fn add_root_folder(db: State<'_, AppDatabase>, path: String) -> Result<RootFolder, String> {
+pub fn set_automatic_file_discovery(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    let state = db.with_conn(|conn| {
+        write_automatic_file_discovery(conn, enabled)?;
+        build_library_state(conn, &db)
+    })?;
+    crate::watcher::reconfigure_from_db(&app)?;
+    Ok(state)
+}
+
+#[tauri::command]
+pub fn set_launch_at_startup(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    let state = db.with_conn(|conn| {
+        write_launch_at_startup(conn, enabled)?;
+        build_library_state(conn, &db)
+    })?;
+    crate::app_lifecycle::sync_launch_at_startup(&app, enabled);
+    Ok(state)
+}
+
+#[tauri::command]
+pub fn set_close_into_tray(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    let state = db.with_conn(|conn| {
+        write_close_into_tray(conn, enabled)?;
+        build_library_state(conn, &db)
+    })?;
+    crate::app_lifecycle::set_close_into_tray(&app, enabled)?;
+    Ok(state)
+}
+
+#[tauri::command]
+pub fn add_root_folder(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    path: String,
+) -> Result<RootFolder, String> {
     let root = Path::new(&path);
     if !root.exists() {
         return Err(format!("Folder does not exist: {path}"));
@@ -502,18 +615,24 @@ pub fn add_root_folder(db: State<'_, AppDatabase>, path: String) -> Result<RootF
         return Err(format!("Path is not a directory: {path}"));
     }
 
-    db.with_conn(|conn| {
+    let folder = db.with_conn(|conn| {
         conn.execute(
             "INSERT OR IGNORE INTO root_folders (path) VALUES (?1)",
             params![path],
         )
         .map_err(|e| e.to_string())?;
         get_root_folder_by_path(conn, &path)
-    })
+    })?;
+    let _ = crate::watcher::reconfigure_from_db(&app);
+    Ok(folder)
 }
 
 #[tauri::command]
-pub fn remove_root_folder(db: State<'_, AppDatabase>, id: i64) -> Result<(), String> {
+pub fn remove_root_folder(
+    app: AppHandle,
+    db: State<'_, AppDatabase>,
+    id: i64,
+) -> Result<(), String> {
     db.with_conn(|conn| {
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         // Episodes FK uses ON DELETE SET NULL; deleting the root would orphan rows that
@@ -529,7 +648,9 @@ pub fn remove_root_folder(db: State<'_, AppDatabase>, id: i64) -> Result<(), Str
         tx.commit().map_err(|e| e.to_string())?;
         refresh_anime_latest_episode_at(conn)?;
         Ok(())
-    })
+    })?;
+    let _ = crate::watcher::reconfigure_from_db(&app);
+    Ok(())
 }
 
 fn delete_anime_with_no_episodes(conn: &Connection) -> Result<usize, String> {

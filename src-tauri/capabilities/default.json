@@ -8,6 +8,7 @@
     "opener:default",
     "dialog:default",
     "deep-link:default",
+    "autostart:default",
     "core:window:allow-start-dragging",
     "core:window:allow-set-size",
     "core:window:allow-set-fullscreen",
@@ -16,6 +17,10 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-destroy",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
     "core:window:allow-set-title"
   ]
 }

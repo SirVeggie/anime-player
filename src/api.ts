@@ -73,6 +73,26 @@ export function setCleanUnusedScrubSprites(enabled: boolean): Promise<LibrarySta
   return invoke("set_clean_unused_scrub_sprites", { enabled });
 }
 
+export function setAutomaticFileDiscovery(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_automatic_file_discovery", { enabled });
+}
+
+export function setLaunchAtStartup(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_launch_at_startup", { enabled });
+}
+
+export function setCloseIntoTray(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_close_into_tray", { enabled });
+}
+
+export function confirmQuit(): Promise<void> {
+  return invoke("confirm_quit");
+}
+
+export function hideToTray(): Promise<void> {
+  return invoke("hide_to_tray");
+}
+
 export function addRootFolder(path: string): Promise<RootFolder> {
   return invoke("add_root_folder", { path });
 }
