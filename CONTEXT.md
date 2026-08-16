@@ -185,10 +185,12 @@ view components. Per-screen UI lives in `src/components/`:
 - Transient toast notifications are rendered by `src/App.tsx` for operation
   status and errors.
 - The app window is frameless (`decorations: false`) and draws its own
-  React title bar in `src/App.tsx`. The title bar owns dragging,
-  double-click maximize, and minimize / maximize / close controls. While
-  the window is **fullscreen** (F11 or the player control), that title bar
-  is not rendered so those controls stay hidden. On
+  React title bar in `src/App.tsx`. On Windows the title bar uses WebView2's
+  native `app-region: drag` non-client region (with `no-drag` controls), which
+  owns dragging and double-click maximize without an asynchronous
+  `startDragging` IPC race. React owns the minimize / maximize / close
+  controls. While the window is **fullscreen** (F11 or the player control),
+  that title bar is not rendered so those controls stay hidden. On
   library/settings views it stays visible when not fullscreen; **in the video player** it
   shows and hides with the player chrome (see `onControlsVisibilityChange`
   in `PlayerView`), uses no extra top gradient (the player UI already

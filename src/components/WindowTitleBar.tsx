@@ -1,4 +1,4 @@
-import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import appIconUrl from "../../src-tauri/icons/icon.png?url";
 
@@ -29,31 +29,17 @@ export function WindowTitleBar(props: { playerOpen: boolean; playerControlsChrom
     }
   }, [refreshMaximized]);
 
-  const startDragOrMaximize = useCallback(
-    (e: ReactMouseEvent<HTMLElement>) => {
-      if (e.button !== 0) return;
-      if (e.detail === 2) {
-        e.preventDefault();
-        void toggleMaximized();
-        return;
-      }
-      void appWindow.startDragging().catch(() => undefined);
-    },
-    [toggleMaximized],
-  );
-
   return (
     <header
       className={`window-titlebar${playerOpen ? " window-titlebar--player" : ""}${
         playerOpen && playerControlsChromeVisible ? " window-titlebar--player-visible" : ""
       }`}
-      onMouseDown={startDragOrMaximize}
     >
       <div className="window-titlebar-title">
         <img className="window-titlebar-icon" src={appIconUrl} alt="" aria-hidden />
         <span>Anime Player</span>
       </div>
-      <div className="window-controls" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="window-controls">
         <button type="button" className="window-control" onClick={() => void appWindow.minimize()} aria-label="Minimize" tabIndex={-1}>
           <svg viewBox="0 0 12 12" aria-hidden>
             <path d="M2 6.5h8v1H2z" />

@@ -50,6 +50,8 @@
      content's rounded top-left corner reads as a clean curve cut from the
      shared shell color. */
   background: transparent;
+  -webkit-app-region: drag;
+  app-region: drag;
   user-select: none;
   transition:
     opacity 180ms ease,
@@ -100,6 +102,8 @@
 .window-controls {
   display: flex;
   height: 100%;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .window-controls button.window-control {
