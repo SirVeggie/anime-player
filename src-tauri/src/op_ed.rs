@@ -49,10 +49,13 @@ const SEED_BATCH_SIZE: usize = 3;
 const SEGMENT_DURATION_SEC: f64 = 90.0;
 const OP_SEARCH_SEC: f64 = 180.0;
 const ED_TAIL_SEC: f64 = 180.0;
-const MATCH_AVERAGE_THRESHOLD: f32 = 0.84;
+/// Per-episode match gates. Kept high to avoid false skips; a hair under
+/// discovery-era 0.84 / 0.60 / 0.78 so a good template can still hit a couple
+/// outlier encodes (Q1 0.75 is the next Chromaprint Hamming bucket below 0.78).
+const MATCH_AVERAGE_THRESHOLD: f32 = 0.83;
 const MATCH_STRONG_FRAME_THRESHOLD: f32 = 0.84;
-const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.60;
-const MATCH_MIN_LOWER_QUARTILE: f32 = 0.78;
+const MATCH_MIN_STRONG_FRAME_RATIO: f32 = 0.56;
+const MATCH_MIN_LOWER_QUARTILE: f32 = 0.75;
 /// Minimum average score when accepting a 50s cross-seed core match.
 const SEED_CORE_MATCH_THRESHOLD: f32 = 0.84;
 /// Short probe length for consensus edge expansion (not the walk step).
@@ -922,18 +925,21 @@ fn template_match_from_offset(
     }
 }
 
+#[cfg(test)]
 fn find_best_match_in_candidate(
     template: &Fingerprint,
     candidate: &Fingerprint,
     search_start_frame: usize,
     search_end_frame: usize,
 ) -> Option<TemplateMatch> {
-    let (offset, quality) =
-        find_best_offset_and_quality(template, candidate, search_start_frame, search_end_frame)?;
-    if !match_quality_is_accepted(quality) {
-        return None;
-    }
-    Some(template_match_from_offset(template, offset, quality))
+    find_accepted_match_in_candidate(
+        template,
+        candidate,
+        search_start_frame,
+        search_end_frame,
+        None,
+        false,
+    )
 }
 
 fn bridge_search_pass_label(pass: &str) -> &'static str {
@@ -949,13 +955,51 @@ fn bridge_search_pass_label(pass: &str) -> &'static str {
     }
 }
 
+fn template_match_at_offset(
+    template: &Fingerprint,
+    offset_frames: usize,
+    quality: MatchQuality,
+    untrimmed_duration_sec: Option<f64>,
+    trimmed: bool,
+) -> TemplateMatch {
+    if !trimmed {
+        if let Some(duration_sec) = untrimmed_duration_sec {
+            return template_match_from_offset_variable(duration_sec, offset_frames, quality);
+        }
+    }
+    template_match_from_offset(template, offset_frames, quality)
+}
+
+fn find_accepted_match_in_candidate(
+    template: &Fingerprint,
+    candidate: &Fingerprint,
+    search_start_frame: usize,
+    search_end_frame: usize,
+    untrimmed_duration_sec: Option<f64>,
+    trimmed: bool,
+) -> Option<TemplateMatch> {
+    let (offset, quality) =
+        find_best_offset_and_quality(template, candidate, search_start_frame, search_end_frame)?;
+    if !match_quality_is_accepted(quality) {
+        return None;
+    }
+    Some(template_match_at_offset(
+        template,
+        offset,
+        quality,
+        untrimmed_duration_sec,
+        trimmed,
+    ))
+}
+
 /// Optimistic then full match; lead-trim retry; ED bidirectional trim; OP edge near-miss.
-fn match_episode_against_template(
+fn match_template_with_fallbacks(
     template_fp: &Fingerprint,
     candidate_fp: &Fingerprint,
     kind: SegmentKind,
     optimistic_range: (usize, usize),
     full_range: (usize, usize),
+    untrimmed_duration_sec: Option<f64>,
 ) -> Option<(&'static str, TemplateMatch)> {
     let lead_trim = frames_for_seconds(MATCH_FALLBACK_LEAD_TRIM_SEC);
     let attempts: [(&str, (usize, usize), usize); 4] = [
@@ -966,8 +1010,16 @@ fn match_episode_against_template(
     ];
 
     for (pass, (search_start, search_end), trim_frames) in attempts {
+        let trimmed = trim_frames > 0;
         if let Some(matched) = with_trimmed_template(template_fp, trim_frames, |work_template| {
-            find_best_match_in_candidate(work_template, candidate_fp, search_start, search_end)
+            find_accepted_match_in_candidate(
+                work_template,
+                candidate_fp,
+                search_start,
+                search_end,
+                untrimmed_duration_sec,
+                trimmed,
+            )
         }) {
             return Some((pass, matched));
         }
@@ -982,11 +1034,13 @@ fn match_episode_against_template(
         for (pass, (search_start, search_end)) in both_attempts {
             if let Some(matched) =
                 with_center_trimmed_template(template_fp, lead_trim, tail_trim, |work_template| {
-                    find_best_match_in_candidate(
+                    find_accepted_match_in_candidate(
                         work_template,
                         candidate_fp,
                         search_start,
                         search_end,
+                        untrimmed_duration_sec,
+                        true,
                     )
                 })
             {
@@ -1020,9 +1074,26 @@ fn match_episode_against_template(
 
         Some((
             "edge_near",
-            template_match_from_offset(work_template, offset, quality),
+            template_match_at_offset(work_template, offset, quality, untrimmed_duration_sec, true),
         ))
     })
+}
+
+fn match_episode_against_template(
+    template_fp: &Fingerprint,
+    candidate_fp: &Fingerprint,
+    kind: SegmentKind,
+    optimistic_range: (usize, usize),
+    full_range: (usize, usize),
+) -> Option<(&'static str, TemplateMatch)> {
+    match_template_with_fallbacks(
+        template_fp,
+        candidate_fp,
+        kind,
+        optimistic_range,
+        full_range,
+        None,
+    )
 }
 
 fn frames_for_seconds(sec: f64) -> usize {
@@ -3349,29 +3420,6 @@ fn template_match_from_offset_variable(
     }
 }
 
-fn find_best_match_variable_in_range(
-    template: &Fingerprint,
-    candidate: &Fingerprint,
-    template_duration_sec: f64,
-    search_start_frame: usize,
-    search_end_frame: usize,
-) -> Option<TemplateMatch> {
-    let (offset, quality) = find_best_offset_and_quality(
-        template,
-        candidate,
-        search_start_frame,
-        search_end_frame,
-    )?;
-    if !match_quality_is_accepted(quality) {
-        return None;
-    }
-    Some(template_match_from_offset_variable(
-        template_duration_sec,
-        offset,
-        quality,
-    ))
-}
-
 /// Band-hinted full-episode search for a variable-length manual template.
 fn match_template_variable_duration(
     template_fp: &Fingerprint,
@@ -3381,39 +3429,16 @@ fn match_template_variable_duration(
     episode_duration: f64,
 ) -> Option<TemplateMatch> {
     let optimistic = kind_optimistic_search_range(kind, episode_duration);
-    let full_end = frames_for_seconds(episode_duration);
-    if let Some(matched) = find_best_match_variable_in_range(
+    let full = (0, frames_for_seconds(episode_duration));
+    match_template_with_fallbacks(
         template_fp,
         candidate_fp,
-        template_duration_sec,
-        optimistic.0,
-        optimistic.1,
-    ) {
-        return Some(matched);
-    }
-    let before = (0, optimistic.0.saturating_sub(1));
-    if before.0 <= before.1 {
-        if let Some(matched) = find_best_match_variable_in_range(
-            template_fp,
-            candidate_fp,
-            template_duration_sec,
-            before.0,
-            before.1,
-        ) {
-            return Some(matched);
-        }
-    }
-    let after = (optimistic.1.saturating_add(1), full_end);
-    if after.0 <= after.1 {
-        return find_best_match_variable_in_range(
-            template_fp,
-            candidate_fp,
-            template_duration_sec,
-            after.0,
-            after.1,
-        );
-    }
-    None
+        kind,
+        optimistic,
+        full,
+        Some(template_duration_sec),
+    )
+    .map(|(_, matched)| matched)
 }
 
 pub fn run_manual_op_ed_rematch_episode(
@@ -3823,6 +3848,86 @@ mod tests {
         assert!(
             find_best_match_in_candidate(&trimmed, &candidate, 0, trimmed_end).is_some(),
             "trimmed template should match aligned candidate body"
+        );
+    }
+
+    #[test]
+    fn match_accepts_slightly_weaker_but_still_consistent_segment() {
+        let template = fingerprint_from_values(&[0; 12]);
+        let mid = value_with_bit_diffs(6);
+        let candidate = fingerprint_from_values(&[
+            0, 0, 0, 0, 0, 0, 0, mid, mid, mid, mid, mid,
+        ]);
+
+        let quality = match_quality_at_offset(&template, &candidate, 0).expect("quality");
+        assert!(
+            quality.strong_frame_ratio < 0.60,
+            "ratio={} should be below the previous 0.60 gate",
+            quality.strong_frame_ratio
+        );
+        assert!(
+            find_best_match_in_candidate(&template, &candidate, 0, 0).is_some(),
+            "slightly weaker consistency should now match"
+        );
+    }
+
+    #[test]
+    fn match_accepts_next_hamming_bucket_lower_quartile() {
+        let template = fingerprint_from_values(&[0; 12]);
+        let q1 = value_with_bit_diffs(8);
+        let candidate = fingerprint_from_values(&[
+            0, 0, 0, 0, 0, 0, 0, 0, q1, q1, q1, q1,
+        ]);
+
+        let quality = match_quality_at_offset(&template, &candidate, 0).expect("quality");
+        assert!(
+            (quality.lower_quartile - 0.75).abs() < f32::EPSILON,
+            "q1={}",
+            quality.lower_quartile
+        );
+        assert!(quality.lower_quartile < 0.78);
+        assert!(
+            find_best_match_in_candidate(&template, &candidate, 0, 0).is_some(),
+            "Q1 at the next Chromaprint Hamming bucket should now match"
+        );
+    }
+
+    #[test]
+    fn variable_duration_match_uses_lead_trim_fallback() {
+        let near = value_with_bit_diffs(2);
+        let far = value_with_bit_diffs(16);
+        let lead_frames = frames_for_seconds(MATCH_FALLBACK_LEAD_TRIM_SEC);
+        let body_len = frames_for_seconds(SEGMENT_DURATION_SEC) + 40;
+        let mut template_vals = vec![far; lead_frames];
+        template_vals.extend(vec![near; body_len]);
+        let template = fingerprint_from_values(&template_vals);
+
+        let mut candidate_vals = vec![far; 8];
+        candidate_vals.extend(vec![near; body_len + 8]);
+        let candidate = fingerprint_from_values(&candidate_vals);
+        let episode_duration = seconds_for_frames(candidate.frame_count()) + 60.0;
+        let template_duration = seconds_for_frames(template.frame_count());
+
+        assert!(
+            find_best_match_in_candidate(
+                &template,
+                &candidate,
+                0,
+                candidate.frame_count().saturating_sub(template.frame_count()),
+            )
+            .is_none(),
+            "untrimmed template should still fail"
+        );
+        assert!(
+            match_template_variable_duration(
+                &template,
+                &candidate,
+                SegmentKind::Op,
+                template_duration,
+                episode_duration,
+            )
+            .is_some(),
+            "manual matcher should recover via lead-trim fallback"
         );
     }
 
