@@ -91,7 +91,10 @@ view components. Per-screen UI lives in `src/components/`:
   the last `jobs://updated` when opening Jobs — no extra IPC). The Jobs page collapses
   large chroma queues into one summary row. Episode-page scrub enqueue is
   chunked in batches so one large title does not hold the `JobManager` mutex for
-  the full queue. Frontend
+  the full queue. Preprocessing created by a startup rescan is delayed 3 seconds
+  after the scan completes, then temporarily caps low-priority starts at two
+  for 30 seconds; configured caps still apply and medium/high user-driven work
+  is unaffected. Frontend
   helpers live in `src/jobs/jobClient.ts` (`subscribeJobsSnapshot`, `waitForJob`,
   `onJobIdentityFinished`) and `src/libraryOps/libraryOpsClient.ts` for durable
   library-operation subscriptions. Workers run on `spawn_blocking` (off the WebView
@@ -293,9 +296,10 @@ view components. Per-screen UI lives in `src/components/`:
 - Scrubber hover shows a floating thumbnail plus timestamp. Sprite sheets live
   under `data/scrub-sprites/` (bundled ffmpeg/ffprobe, 160×90 cells, ~one frame
   every five seconds capped at 120). **Scrub thumbnail** work runs as background
-  jobs (`jobs_enqueue_scrub_sprite`): a rescan that imports ≤20 episodes
-  auto-queues scrub jobs (low priority) on a background thread after the scan
-  IPC returns (batched scheduler flush, same as episode-page scrub); opening an anime’s episode list uses one
+  jobs (`jobs_enqueue_scrub_sprite`): a rescan that imports ≤50 episodes
+  auto-queues scrub jobs (low priority) on a delayed background thread after
+  the scan IPC returns (batched scheduler flush, same as episode-page scrub);
+  opening an anime’s episode list uses one
   batched command (`jobs_enqueue_episode_page_scrub_sprites`, medium priority for
   uncached episodes) and downgrades them to **low** when leaving that page
   (`jobs_set_scrub_sprite_priority_for_paths`, one emit); opening
@@ -315,7 +319,7 @@ view components. Per-screen UI lives in `src/components/`:
   rows (new imports) or custom templates changed without a follow-up rematch.
   Detect jobs (`op_ed_detect:{anime_id}`, resource type `none`) always enqueue at
   **high** priority so they start as soon as chroma prerequisites finish (including
-  small-rescan auto-enqueue). A rescan that imports at most **20** new episodes
+  small-rescan auto-enqueue). A rescan that imports at most **50** new episodes
   (`RESCAN_AUTO_SCRUB_MAX`, shared with scrub) also enqueues detect per affected
   anime (detect high, chroma low). The worker (`jobs_enqueue_op_ed_detect`) scans
   cached Chromaprint fingerprints and writes templates plus per-episode OP/ED rows
@@ -358,15 +362,16 @@ view components. Per-screen UI lives in `src/components/`:
   increments). `not_found` rows from an earlier block are retried; only `matched`/`skipped`
   episodes are excluded from seeds. At a season boundary, an episode with exactly one of
   OP/ED matched may get a **bridge** retro match for the other kind (search_pass `bridge` /
-  `bridge_full`) without overriding an existing match. Matching
+  `bridge_full`) without overriding an existing match.   Matching
   is intentionally conservative: the best audio offset must clear both an
-  average-score threshold and consistency checks (enough strong frames plus a
-  lower-quartile floor) before it can mark an episode segment as matched, which
-  reduces false-positive skips on episodes without OP/ED. Per-episode match
+  average-score threshold (0.83) and consistency checks (enough strong frames
+  plus a lower-quartile floor of 0.75) before it can mark an episode segment as
+  matched, which reduces false-positive skips on episodes without OP/ED. Per-episode match
   fallbacks (after optimistic + full fail): trim ~3s from the template lead and
   retry (`trim_*` passes); for ED also trim ~3s from the tail and retry
   (`trim_both_*` passes); then for OP only a near-miss at offset ≤ ~2.5s with
-  slightly relaxed gates (`edge_near`). The worker commits
+  slightly relaxed gates (`edge_near`). Manual rematch uses the same
+  fallbacks as auto matching. The worker commits
   progress through many short `with_conn` calls while ffmpeg/fpcalc run unlocked.
   On completion coalesced `op-ed://analysis-updated` events reload that title
   via `list_episodes` plus `get_anime_op_ed_summary` only (not a full `get_library_state`).
@@ -496,9 +501,10 @@ view components. Per-screen UI lives in `src/components/`:
   `episodes.pending_delete` first so normal grids, search, and episode lists hide
   the target immediately; the worker then deletes/trashes files and caches before
   removing DB rows. If deletion fails, pending markers are cleared for surviving
-  rows and the operation is marked failed. On Windows, when a rescan imports at most 20 episodes
+  rows and the operation is marked failed. On Windows, when a rescan imports at most 50 episodes
   (new or updated paths), scrub and OP/ED auto-enqueue run on a background
-  thread after the command returns (one batched scheduler flush). `rescan_library` commits one SQLite transaction per
+  thread 3 seconds after the command returns (one batched scheduler flush), with
+  low-priority starts capped at two for the next 30 seconds. `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each
   series is upserted once per scan instead of once per file. The upserts are
   idempotent: unchanged anime, episode, and unmatched-file rows are not
@@ -693,7 +699,8 @@ explicit request) lives in `.cursor/rules/commit-checkpoints.mdc`.
 ## Diagnostics
 
 Startup issues, app lifecycle events, Rust panics, Windows native faults (e.g.
-libmpv / ffmpeg), and frontend `window.onerror` / unhandled rejections append to
+libmpv / ffmpeg), native WebView2 process-failure events (kind, reason, and exit
+code), and frontend `window.onerror` / unhandled rejections append to
 a portable log at **`data/diagnostic.log`** next to the executable (rotates to
 **`data/diagnostic_old.log`** when the current file exceeds 5 MiB; at most two
 files are kept). Ask users to attach both files when reporting bugs. The

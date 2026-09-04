@@ -56,6 +56,10 @@ const SNAPSHOT_EMIT_MIN_INTERVAL_MS: u64 = 250;
 const OP_ED_ANALYSIS_UPDATED_EMIT_MIN_INTERVAL_MS: u64 = 500;
 /// Cap prerequisite pills in emitted snapshots (`prerequisite_pending` stays accurate).
 const SNAPSHOT_WAITING_FOR_CAP: usize = 8;
+/// Keep startup rescan preprocessing from launching the configured maximum
+/// number of media processes while WebView2 is still settling.
+const RESCAN_LOW_PRIORITY_CAP: u32 = 2;
+const RESCAN_LOW_PRIORITY_THROTTLE_MS: u64 = 30_000;
 
 const MANAGED_RESOURCE_TYPES: &[JobResourceType] =
     &[JobResourceType::Ffmpeg, JobResourceType::Chroma];
@@ -67,6 +71,17 @@ pub(crate) fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn rescan_throttle_blocks_low_priority(
+    priority: JobPriority,
+    now: u64,
+    throttle_until: u64,
+    running_low_priority: u32,
+) -> bool {
+    priority == JobPriority::Low
+        && now < throttle_until
+        && running_low_priority >= RESCAN_LOW_PRIORITY_CAP
 }
 
 fn alloc_job_ids() -> (String, u32) {
@@ -119,6 +134,8 @@ pub struct JobManager {
     /// Last chroma start time per volume key (`G:/`) for HDD deferral gaps.
     last_chroma_start_on_volume: HashMap<String, u64>,
     chroma_disk_poll_wakeup_armed: bool,
+    rescan_throttle_until_ms: u64,
+    rescan_throttle_wakeup_armed: bool,
     snapshot_emit_wakeup_armed: bool,
     last_snapshot_emit_ms: u64,
     op_ed_analysis_emit_wakeup_armed: bool,
@@ -140,6 +157,8 @@ impl JobManager {
             history: VecDeque::new(),
             last_chroma_start_on_volume: HashMap::new(),
             chroma_disk_poll_wakeup_armed: false,
+            rescan_throttle_until_ms: 0,
+            rescan_throttle_wakeup_armed: false,
             snapshot_emit_wakeup_armed: false,
             last_snapshot_emit_ms: 0,
             op_ed_analysis_emit_wakeup_armed: false,
@@ -539,6 +558,7 @@ impl JobManager {
         scrub_imports: &[RescanScrubImport],
         op_ed_imports: &[RescanOpEdImport],
     ) -> Result<(), String> {
+        self.activate_rescan_throttle();
         if scrub_imports.len() <= RESCAN_AUTO_SCRUB_MAX {
             for item in scrub_imports {
                 let _ = self.enqueue_scrub_sprite_inner(
@@ -558,6 +578,18 @@ impl JobManager {
         }
         self.finish_scheduling_batch();
         Ok(())
+    }
+
+    fn activate_rescan_throttle(&mut self) {
+        let until_ms = now_ms().saturating_add(RESCAN_LOW_PRIORITY_THROTTLE_MS);
+        self.rescan_throttle_until_ms = self.rescan_throttle_until_ms.max(until_ms);
+        crate::crash_log::log(
+            "INFO",
+            &format!(
+                "rescan jobs: limiting low-priority starts to {RESCAN_LOW_PRIORITY_CAP} for {}s",
+                RESCAN_LOW_PRIORITY_THROTTLE_MS / 1_000
+            ),
+        );
     }
 
     fn enqueue_op_ed_for_rescan_imports_inner(
@@ -1535,6 +1567,15 @@ impl JobManager {
             .count() as u32
     }
 
+    fn running_low_priority_count(&self) -> u32 {
+        self.records
+            .values()
+            .filter(|record| {
+                record.view.status == JobStatus::Running && record.view.priority == JobPriority::Low
+            })
+            .count() as u32
+    }
+
     fn type_max_for(&self, resource_type: JobResourceType) -> Option<u32> {
         if resource_type == JobResourceType::None {
             return None;
@@ -1620,6 +1661,14 @@ impl JobManager {
         if !is_high && self.running_count() >= self.max_parallel {
             return false;
         }
+        if rescan_throttle_blocks_low_priority(
+            record.view.priority,
+            now_ms(),
+            self.rescan_throttle_until_ms,
+            self.running_low_priority_count(),
+        ) {
+            return false;
+        }
         if let Some(type_limit) = self.type_max_for(record.view.resource_type) {
             if self.running_count_for_resource_type(record.view.resource_type) >= type_limit {
                 return false;
@@ -1678,8 +1727,33 @@ impl JobManager {
         super::schedule_job_pump_after_ms(&self.app, delay_ms);
     }
 
-    pub fn on_chroma_stagger_wakeup(&mut self) {
+    fn schedule_rescan_throttle_wakeup_if_needed(&mut self) {
+        let now = now_ms();
+        if self.rescan_throttle_wakeup_armed
+            || self.rescan_throttle_until_ms <= now
+            || !self.queued_ids.iter().any(|id| {
+                self.records.get(id).is_some_and(|record| {
+                    record.view.status == JobStatus::Queued
+                        && record.view.priority == JobPriority::Low
+                })
+            })
+        {
+            return;
+        }
+        self.rescan_throttle_wakeup_armed = true;
+        super::schedule_job_pump_after_ms(
+            &self.app,
+            self.rescan_throttle_until_ms.saturating_sub(now),
+        );
+    }
+
+    pub fn on_job_pump_wakeup(&mut self) {
         self.chroma_disk_poll_wakeup_armed = false;
+        self.rescan_throttle_wakeup_armed = false;
+        if self.rescan_throttle_until_ms > 0 && now_ms() >= self.rescan_throttle_until_ms {
+            self.rescan_throttle_until_ms = 0;
+            crate::crash_log::log("INFO", "rescan jobs: low-priority start limit released");
+        }
         self.refresh_disk_busy_if_needed();
         self.pump();
         self.emit_snapshot();
@@ -1712,6 +1786,7 @@ impl JobManager {
             self.start_job(&next_id);
         }
         self.schedule_chroma_disk_poll_if_needed();
+        self.schedule_rescan_throttle_wakeup_if_needed();
     }
 
     fn pick_startable_queued_id(&self) -> Option<String> {
@@ -2220,5 +2295,35 @@ mod scheduler_tests {
             pick_startable_from_queue(&queue, can, pri).as_deref(),
             Some("chroma")
         );
+    }
+
+    #[test]
+    fn rescan_throttle_only_blocks_low_priority_at_its_cap() {
+        let now = 1_000;
+        let until = 2_000;
+        assert!(!rescan_throttle_blocks_low_priority(
+            JobPriority::Low,
+            now,
+            until,
+            RESCAN_LOW_PRIORITY_CAP - 1,
+        ));
+        assert!(rescan_throttle_blocks_low_priority(
+            JobPriority::Low,
+            now,
+            until,
+            RESCAN_LOW_PRIORITY_CAP,
+        ));
+        assert!(!rescan_throttle_blocks_low_priority(
+            JobPriority::Medium,
+            now,
+            until,
+            RESCAN_LOW_PRIORITY_CAP,
+        ));
+        assert!(!rescan_throttle_blocks_low_priority(
+            JobPriority::Low,
+            until,
+            until,
+            RESCAN_LOW_PRIORITY_CAP,
+        ));
     }
 }

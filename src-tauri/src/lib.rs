@@ -3,6 +3,17 @@ use std::sync::Mutex;
 use tauri::{Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 
+#[cfg(windows)]
+use webview2_com::{
+    Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2ProcessFailedEventArgs2, COREWEBVIEW2_PROCESS_FAILED_KIND,
+        COREWEBVIEW2_PROCESS_FAILED_REASON,
+    },
+    ProcessFailedEventHandler,
+};
+#[cfg(windows)]
+use windows::core::Interface;
+
 mod anilist;
 mod app_lifecycle;
 mod crash_log;
@@ -395,6 +406,74 @@ fn diagnostic_log(message: String, level: Option<String>) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(windows)]
+fn install_webview2_process_diagnostics(window: &tauri::WebviewWindow) {
+    let install_result = window.with_webview(|platform_webview| {
+        let result: windows::core::Result<()> = unsafe {
+            let environment = platform_webview.environment();
+            let mut version = windows::core::PWSTR::null();
+            if environment.BrowserVersionString(&mut version).is_ok() {
+                crash_log::log(
+                    "INFO",
+                    &format!(
+                        "WebView2 runtime version {}",
+                        webview2_com::take_pwstr(version)
+                    ),
+                );
+            }
+
+            match platform_webview.controller().CoreWebView2() {
+                Ok(webview) => {
+                    let handler = ProcessFailedEventHandler::create(Box::new(|_, args| {
+                        let Some(args) = args else {
+                            crash_log::log(
+                                "ERROR",
+                                "WebView2 process failed without event details",
+                            );
+                            return Ok(());
+                        };
+
+                        let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
+                        let _ = args.ProcessFailedKind(&mut kind);
+
+                        let mut reason = COREWEBVIEW2_PROCESS_FAILED_REASON::default();
+                        let mut exit_code = 0;
+                        if let Ok(details) = args.cast::<ICoreWebView2ProcessFailedEventArgs2>() {
+                            let _ = details.Reason(&mut reason);
+                            let _ = details.ExitCode(&mut exit_code);
+                        }
+
+                        crash_log::log(
+                            "ERROR",
+                            &format!(
+                                "WebView2 process failed: kind={kind:?}, reason={reason:?}, exit_code={exit_code}"
+                            ),
+                        );
+                        Ok(())
+                    }));
+                    let mut token = 0;
+                    webview.add_ProcessFailed(&handler, &mut token)
+                }
+                Err(error) => Err(error),
+            }
+        };
+
+        if let Err(error) = result {
+            crash_log::log(
+                "ERROR",
+                &format!("WebView2 process diagnostics setup failed: {error}"),
+            );
+        }
+    });
+
+    if let Err(error) = install_result {
+        crash_log::log(
+            "ERROR",
+            &format!("WebView2 diagnostics dispatch failed: {error}"),
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     crash_log::init();
@@ -450,6 +529,9 @@ pub fn run() {
 
             // Close-into-tray + mpv teardown (Windows) / native resize (Windows).
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(windows)]
+                install_webview2_process_diagnostics(&window);
+
                 let app_handle = app.handle().clone();
                 let window_for_handler = window.clone();
                 window.on_window_event(move |event| match event {

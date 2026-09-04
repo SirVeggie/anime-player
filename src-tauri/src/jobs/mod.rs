@@ -13,6 +13,7 @@ use crate::op_ed;
 use manager::{JobManager, WorkerOutcome};
 
 const EPISODE_PAGE_SCRUB_ENQUEUE_CHUNK: usize = 50;
+const RESCAN_JOB_ENQUEUE_DELAY_MS: u64 = 3_000;
 
 #[cfg(windows)]
 pub struct JobsState {
@@ -44,7 +45,7 @@ fn wake_job_pump(app: AppHandle) {
         let Ok(mut guard) = jobs_state.manager.lock() else {
             return;
         };
-        guard.on_chroma_stagger_wakeup();
+        guard.on_job_pump_wakeup();
     });
 }
 
@@ -145,13 +146,17 @@ pub fn schedule_rescan_job_enqueue(
     crate::crash_log::log(
         "INFO",
         &format!(
-            "rescan_library: scheduling background enqueue (scrub={}, op_ed_anime_rows={})",
+            "rescan_library: scheduling background enqueue in {}ms (scrub={}, op_ed_anime_rows={})",
+            RESCAN_JOB_ENQUEUE_DELAY_MS,
             scrub_imports.len(),
             op_ed_imports.len()
         ),
     );
     tauri::async_runtime::spawn(async move {
         let outcome = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(
+                RESCAN_JOB_ENQUEUE_DELAY_MS,
+            ));
             let jobs = app.state::<JobsState>();
             let db = app.state::<AppDatabase>();
             let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
