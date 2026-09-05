@@ -11,7 +11,10 @@ async function sha256File(filePath) {
 
 async function packageRelease() {
   const root = process.cwd();
-  const exePath = path.join(root, 'src-tauri', 'target', 'release', 'anime-player.exe');
+  const cargoTargetDir = process.env.CARGO_TARGET_DIR
+    ? path.resolve(process.env.CARGO_TARGET_DIR)
+    : path.join(root, 'src-tauri', 'target');
+  const exePath = path.join(cargoTargetDir, 'release', 'anime-player.exe');
   const dllPath = path.join(root, 'src-tauri', 'libs', 'mpv', 'libmpv-2.dll');
   const ffmpegDir = path.join(root, 'src-tauri', 'libs', 'ffmpeg');
   const ffmpegPaths = ['ffmpeg.exe', 'ffprobe.exe'].map((name) =>
@@ -24,7 +27,7 @@ async function packageRelease() {
   try {
     await fs.access(exePath);
   } catch {
-    console.error('Error: anime-player.exe not found in src-tauri/target/release.');
+    console.error(`Error: anime-player.exe not found at ${exePath}.`);
     console.error('Please run `npm run tauri build` first.');
     process.exit(1);
   }
