@@ -130,6 +130,17 @@ export type MpvTrack = {
   title: string | null;
   lang: string | null;
   selected: boolean;
+  external: boolean;
+  external_filename: string | null;
+};
+
+export type TrackPref = {
+  audio_lang: string | null;
+  audio_title: string | null;
+  subtitle_off: boolean;
+  subtitle_lang: string | null;
+  subtitle_title: string | null;
+  subtitle_external_path: string | null;
 };
 
 export type MpvVideoGeometry = {

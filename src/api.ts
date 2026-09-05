@@ -16,6 +16,7 @@ import type {
   LocalDataCleanupSummary,
   LocalDataStats,
   MpvTrack,
+  TrackPref,
   MpvPlaybackEndState,
   MpvVideoGeometry,
   AnimeOpEdAnalysisSummary,
@@ -419,6 +420,14 @@ export function selectMpvSubtitleTrack(trackId: number | null): Promise<void> {
 
 export function addMpvSubtitleFile(path: string): Promise<void> {
   return invoke("mpv_add_subtitle_file", { path });
+}
+
+export function applySavedTrackPrefs(animeId: number, episodeId: number): Promise<TrackPref> {
+  return invoke("apply_saved_track_prefs", { animeId, episodeId });
+}
+
+export function saveCurrentTrackPrefs(animeId: number, episodeId: number): Promise<TrackPref> {
+  return invoke("save_current_track_prefs", { animeId, episodeId });
 }
 
 export function setMpvVolume(volume: number): Promise<void> {

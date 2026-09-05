@@ -28,6 +28,8 @@ pub struct MpvTrack {
     pub title: Option<String>,
     pub lang: Option<String>,
     pub selected: bool,
+    pub external: bool,
+    pub external_filename: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -382,6 +384,8 @@ unsafe fn decode_track(node: &MpvNode) -> Option<MpvTrack> {
     let mut title = None;
     let mut lang = None;
     let mut selected = false;
+    let mut external = false;
+    let mut external_filename = None;
 
     for idx in 0..map.num {
         let key_ptr = unsafe { *map.keys.add(idx as usize) };
@@ -398,6 +402,8 @@ unsafe fn decode_track(node: &MpvNode) -> Option<MpvTrack> {
             "title" => title = node_string(value),
             "lang" => lang = node_string(value),
             "selected" => selected = node_bool(value).unwrap_or(false),
+            "external" => external = node_bool(value).unwrap_or(false),
+            "external-filename" => external_filename = node_string(value),
             _ => {}
         }
     }
@@ -413,6 +419,8 @@ unsafe fn decode_track(node: &MpvNode) -> Option<MpvTrack> {
         title,
         lang,
         selected,
+        external,
+        external_filename,
     })
 }
 

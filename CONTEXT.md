@@ -286,7 +286,8 @@ view components. Per-screen UI lives in `src/components/`:
 - A custom HTML controls bar (transport + scrubber + time + track menus
   + volume + aspect fit + fullscreen) drives mpv via `mpv_cycle_pause`,
   `mpv_set_pause`, `mpv_seek`, `mpv_seek_relative`, `mpv_set_volume`,
-  track selection commands, and reads state from `mpv://time-pos`,
+  track selection commands (remembered per episode, with a latest-used
+  preference per anime for episodes the user has not customized), and reads state from `mpv://time-pos`,
   `mpv://duration`, `mpv://pause`, `mpv://eof-reached`,
   `mpv://file-loaded`, and `mpv://playback-restart` events. Controls
   fade out after pointer idle, hide immediately when the pointer leaves
@@ -579,8 +580,16 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_set_layout(window_width, sidebar_px)`, `mpv_get_tracks()`,
   `mpv_select_audio_track(track_id)`,
   `mpv_select_subtitle_track(track_id)`,
-  `mpv_add_subtitle_file(path)`, `mpv_get_video_geometry()`,
+  `mpv_add_subtitle_file(path)`, `apply_saved_track_prefs(anime_id, episode_id)`,
+  `save_current_track_prefs(anime_id, episode_id)`, `mpv_get_video_geometry()`,
   `mpv_get_time_pos()`, `mpv_get_playback_end_state()`, `mpv_set_volume(volume)`, and `mpv_stop()`.
+  Audio/subtitle choices are stored in SQLite (`anime_track_prefs` for the
+  latest explicit pick on a title, `episode_track_prefs` for per-episode
+  overrides including an optional external subtitle path). On `mpv://file-loaded`
+  the player applies the episode override if present, otherwise the anime
+  preference, matching language + title (not mpv track IDs) and falling back
+  to the closest track. Auto-apply does not create an episode override; menu
+  picks, added subtitle files, and later `J`/`#` changes do.
 - `scrub_preview.rs` — sprite cache I/O and ffmpeg generation;
   `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
 - `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,
@@ -723,9 +732,14 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src/volume.ts` — volume constants and clamping for
   mpv's native 0–130 log scale.
+- `src/trackPrefs.ts` — compare/restore helpers for remembered audio/subs.
+- `src-tauri/src/track_prefs.rs` — SQLite track prefs, closest-track
+  matching, and apply/save Tauri commands.
 - `src-tauri/src/db.rs`, `src-tauri/src/library.rs`,
   `src-tauri/src/scanner.rs` — portable SQLite, library commands, and
-  regex scanner.
+  regex scanner. Schema follow-ups (including `anime_track_prefs` /
+  `episode_track_prefs`) live in `ensure_schema_updates`; see
+  `docs/migrations.md`.
 - `src-tauri/src/watcher.rs`, `src-tauri/src/app_lifecycle.rs` — automatic
   file discovery watchers; tray / close-into-tray / launch-at-startup.
 - `src-tauri/src/op_ed.rs`, `src-tauri/src/media_tools.rs` — OP/ED detection

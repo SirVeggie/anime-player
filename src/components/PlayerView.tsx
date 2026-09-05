@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addMpvSubtitleFile,
+  applySavedTrackPrefs,
   getScrubSpriteIfReady,
   jobsEnqueueOpEdChromaForEpisode,
   jobsEnqueueScrubSprite,
@@ -13,12 +14,14 @@ import {
   getMpvTimePos,
   getMpvTracks,
   getMpvVideoGeometry,
+  saveCurrentTrackPrefs,
   saveEpisodeProgress,
   selectMpvAudioTrack,
   selectMpvSubtitleTrack,
   setMpvVolume,
   syncAnilistEpisodeProgress,
 } from "../api";
+import { trackPrefFromTracks, trackPrefsEqual } from "../trackPrefs";
 import { opEdSeekMarkers, type OpEdSeekMarker } from "../opEd";
 import { animeDisplayTitle } from "../utils";
 import type {
@@ -29,6 +32,7 @@ import type {
   MpvVideoGeometry,
   ScrubSpriteReady,
   ScrubSpriteStatus,
+  TrackPref,
 } from "../types";
 import { SkipOpEdIcon } from "./Icons";
 import {
@@ -405,6 +409,7 @@ export function PlayerView(props: {
   const scrubSpritePathRef = useRef<string | null>(null);
   const [activeTrackMenu, setActiveTrackMenu] = useState<"audio" | "sub" | null>(null);
   const [tracks, setTracks] = useState<MpvTrack[]>([]);
+  const appliedTrackPrefRef = useRef<TrackPref | null>(null);
   const [videoGeometry, setVideoGeometry] = useState<MpvVideoGeometry | null>(null);
   const [volume, setVolume] = useState(loadVolume);
   const [muted, setMuted] = useState(false);
@@ -415,6 +420,7 @@ export function PlayerView(props: {
   const volumeRef = useRef(volume);
   const mpvReadyRef = useRef(false);
   const loadedPathRef = useRef<string | null>(null);
+  const pendingTrackPrefTargetRef = useRef<Pick<Episode, "id" | "anime_id"> | null>(null);
   const playbackRef = useRef({ episode, position, duration });
   const pendingResumeSecondsRef = useRef<number | null>(null);
   const controlsHideTimerRef = useRef<number | null>(null);
@@ -784,18 +790,41 @@ export function PlayerView(props: {
   const persistProgressRef = useRef(persistProgress);
   persistProgressRef.current = persistProgress;
 
+  const persistTrackPrefsIfChanged = useCallback(async (
+    target?: Pick<Episode, "id" | "anime_id" | "path">,
+  ) => {
+    const current = target ?? playbackRef.current.episode;
+    if (appliedTrackPrefRef.current === null) return;
+    if (loadedPathRef.current && !mediaPathsEqual(loadedPathRef.current, current.path)) return;
+    try {
+      const identity = trackPrefFromTracks(await getMpvTracks());
+      if (trackPrefsEqual(identity, appliedTrackPrefRef.current)) return;
+      const saved = await saveCurrentTrackPrefs(current.anime_id, current.id);
+      if (playbackRef.current.episode.id === current.id) {
+        appliedTrackPrefRef.current = saved;
+      }
+    } catch (e) {
+      propsRef.current.onError(errorMessage(e));
+    }
+  }, []);
+
+  const persistTrackPrefsIfChangedRef = useRef(persistTrackPrefsIfChanged);
+  persistTrackPrefsIfChangedRef.current = persistTrackPrefsIfChanged;
+
   useEffect(() => {
     const wasVisible = wasVisibleForAutoPersistRef.current;
     wasVisibleForAutoPersistRef.current = visible;
     if (!wasVisible || visible) return;
-    const episodeId = playbackRef.current.episode.id;
-    if (shouldSkipAutoPersist(episodeId)) return;
+    const current = playbackRef.current.episode;
+    if (shouldSkipAutoPersist(current.id)) return;
+    void persistTrackPrefsIfChangedRef.current(current);
     void persistProgressRef.current().catch((err) => propsRef.current.onError(errorMessage(err)));
   }, [shouldSkipAutoPersist, visible]);
 
   useEffect(() => {
     const r = playbackProgressFlushRef;
     r.current = async () => {
+      await persistTrackPrefsIfChangedRef.current();
       await persistProgressRef.current();
     };
     return () => {
@@ -844,8 +873,10 @@ export function PlayerView(props: {
     void (async () => {
       try {
         if (next) {
+          await persistTrackPrefsIfChangedRef.current();
           seamlessAdvanceRef.current = true;
           pendingResumeSecondsRef.current = null;
+          pendingTrackPrefTargetRef.current = { id: next.id, anime_id: next.anime_id };
           await invoke("mpv_load", { path: next.path });
           loadedPathRef.current = next.path;
           handlingEofRef.current = false;
@@ -865,6 +896,7 @@ export function PlayerView(props: {
           return;
         }
 
+        await persistTrackPrefsIfChangedRef.current();
         await persistProgress(true, { deferAnilistSync: true });
         handlingEofRef.current = false;
         advancingFromEpisodeIdRef.current = null;
@@ -1002,7 +1034,21 @@ export function PlayerView(props: {
           () => {
             if (playbackSuspendedRef.current) return;
             handlingEofRef.current = false;
-            void refreshTracks();
+            void (async () => {
+              try {
+                const current = playbackRef.current.episode;
+                const target = pendingTrackPrefTargetRef.current ?? current;
+                pendingTrackPrefTargetRef.current = null;
+                appliedTrackPrefRef.current = await applySavedTrackPrefs(
+                  target.anime_id,
+                  target.id,
+                );
+                await refreshTracks();
+              } catch (err) {
+                propsRef.current.onError(errorMessage(err));
+                void refreshTracks();
+              }
+            })();
             void refreshVideoGeometry();
             const seconds = pendingResumeSecondsRef.current;
             pendingResumeSecondsRef.current = null;
@@ -1062,12 +1108,18 @@ export function PlayerView(props: {
   // `episode.id`; doing that here cleared `videoCompositorRevealed` and left the pane opaque
   // while mpv still had the file loaded, which broke reopening the same episode from the list.
   useEffect(() => {
+    const episodeForPrefs = {
+      id: episode.id,
+      anime_id: episode.anime_id,
+      path: episode.path,
+    };
     return () => {
+      void persistTrackPrefsIfChangedRef.current(episodeForPrefs);
       const episodeId = playbackRef.current.episode.id;
       if (shouldSkipAutoPersist(episodeId)) return;
       void persistProgressRef.current().catch((err) => propsRef.current.onError(errorMessage(err)));
     };
-  }, [episode.id, shouldSkipAutoPersist]);
+  }, [episode.anime_id, episode.id, episode.path, shouldSkipAutoPersist]);
 
   useEffect(() => {
     sessionOpenedAtMsRef.current = Date.now();
@@ -1078,6 +1130,7 @@ export function PlayerView(props: {
     clearEndAdvancePolling();
     setPosition(episode.position_seconds || 0);
     setDuration(episode.duration_seconds || 0);
+    appliedTrackPrefRef.current = null;
     setTracks([]);
     setVideoGeometry(null);
     setActiveTrackMenu(null);
@@ -1152,6 +1205,7 @@ export function PlayerView(props: {
         pendingResumeSecondsRef.current =
           episode.position_seconds > 1 && !episode.watched ? episode.position_seconds : null;
         setPaused(false);
+        pendingTrackPrefTargetRef.current = { id: episode.id, anime_id: episode.anime_id };
         await invoke("mpv_load", { path: episode.path });
         loadedPathRef.current = episode.path;
       } catch (e) {
@@ -1295,6 +1349,8 @@ export function PlayerView(props: {
     async (trackId: number) => {
       try {
         await selectMpvAudioTrack(trackId);
+        const current = playbackRef.current.episode;
+        appliedTrackPrefRef.current = await saveCurrentTrackPrefs(current.anime_id, current.id);
         await refreshTracks();
         setActiveTrackMenu(null);
       } catch (e) {
@@ -1308,6 +1364,8 @@ export function PlayerView(props: {
     async (trackId: number | null) => {
       try {
         await selectMpvSubtitleTrack(trackId);
+        const current = playbackRef.current.episode;
+        appliedTrackPrefRef.current = await saveCurrentTrackPrefs(current.anime_id, current.id);
         await refreshTracks();
         setActiveTrackMenu(null);
       } catch (e) {
@@ -1333,6 +1391,8 @@ export function PlayerView(props: {
       });
       if (typeof picked !== "string" || !picked) return;
       await addMpvSubtitleFile(picked);
+      const current = playbackRef.current.episode;
+      appliedTrackPrefRef.current = await saveCurrentTrackPrefs(current.anime_id, current.id);
       await refreshTracks();
       setActiveTrackMenu(null);
     } catch (e) {
@@ -1432,23 +1492,26 @@ export function PlayerView(props: {
     try {
       await invoke("mpv_set_pause", { paused: true });
       setPaused(true);
+      await persistTrackPrefsIfChanged();
       await persistProgress();
       onBack();
     } catch (e) {
       onError(errorMessage(e));
     }
-  }, [cancelScrubSession, onBack, onError, persistProgress]);
+  }, [cancelScrubSession, onBack, onError, persistProgress, persistTrackPrefsIfChanged]);
 
   const loadSibling = useCallback(
     (delta: number) => {
       const next = playlist[selectedIndex + delta];
       if (!next) return;
-      void persistProgress(false, { deferAnilistSync: true })
+      void persistTrackPrefsIfChanged()
+        .then(() => persistProgress(false, { deferAnilistSync: true }))
         .catch((e) => onError(errorMessage(e)))
         .then(async (saved) => {
           if (delta === 1 && saved?.watched) {
             pendingResumeSecondsRef.current = null;
             try {
+              pendingTrackPrefTargetRef.current = { id: next.id, anime_id: next.anime_id };
               const [nextSaved] = await Promise.all([
                 saveEpisodeProgress(next.id, 0, next.duration_seconds, false),
                 invoke("mpv_load", { path: next.path }),
@@ -1464,7 +1527,15 @@ export function PlayerView(props: {
           onSelectEpisode(next);
         });
     },
-    [onError, onProgressSaved, onSelectEpisode, persistProgress, playlist, selectedIndex],
+    [
+      onError,
+      onProgressSaved,
+      onSelectEpisode,
+      persistProgress,
+      persistTrackPrefsIfChanged,
+      playlist,
+      selectedIndex,
+    ],
   );
 
   const onCanvasMouseDown = useCallback(

@@ -22,6 +22,7 @@ mod library;
 mod library_ops;
 mod media_tools;
 mod scanner;
+mod track_prefs;
 mod watcher;
 
 #[cfg(windows)]
@@ -662,6 +663,8 @@ pub fn run() {
         mpv_select_audio_track,
         mpv_select_subtitle_track,
         mpv_add_subtitle_file,
+        track_prefs::apply_saved_track_prefs,
+        track_prefs::save_current_track_prefs,
         mpv_get_video_geometry,
         mpv_get_time_pos,
         mpv_get_playback_end_state,
