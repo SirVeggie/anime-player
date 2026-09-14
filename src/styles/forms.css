@@ -500,6 +500,16 @@
   flex-direction: column;
 }
 
+.settings-item--stacked + .settings-item--stacked {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.settings-item--stacked:has(+ .settings-item--stacked) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .settings-actions {
   display: flex;
   align-items: center;
