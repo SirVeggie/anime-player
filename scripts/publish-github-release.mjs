@@ -88,27 +88,37 @@ function ensureBinariesRelease() {
 
 async function publishHashedBinaries(releasesDir, files) {
   const existing = ensureBinariesRelease();
-  for (const file of files) {
-    const assetName = hashedAssetName(file.name, file.sha256);
-    if (existing.has(assetName)) {
-      console.log(`Already on ${BINARIES_TAG}: ${assetName}`);
-      continue;
+  const stagingDir = path.join(releasesDir, '.hashed-upload');
+  await fs.mkdir(stagingDir, { recursive: true });
+  try {
+    for (const file of files) {
+      const assetName = hashedAssetName(file.name, file.sha256);
+      if (existing.has(assetName)) {
+        console.log(`Already on ${BINARIES_TAG}: ${assetName}`);
+        continue;
+      }
+      const localPath = path.join(releasesDir, file.localPath);
+      try {
+        await fs.access(localPath);
+      } catch {
+        console.error(`Error: Hashed source file not found: ${localPath}`);
+        process.exit(1);
+      }
+      // Upload from a hashed filename. `path#name` only sets the GitHub
+      // display label; the download URL still uses the local basename.
+      const stagedPath = path.join(stagingDir, assetName);
+      await fs.copyFile(localPath, stagedPath);
+      console.log(`Uploading ${assetName} to ${BINARIES_TAG}...`);
+      try {
+        runGh(`release upload ${BINARIES_TAG} "${stagedPath}"`, { stdio: 'inherit' });
+        existing.add(assetName);
+      } catch {
+        console.error(`Error: Failed to upload ${assetName} to ${BINARIES_TAG}.`);
+        process.exit(1);
+      }
     }
-    const localPath = path.join(releasesDir, file.localPath);
-    try {
-      await fs.access(localPath);
-    } catch {
-      console.error(`Error: Hashed source file not found: ${localPath}`);
-      process.exit(1);
-    }
-    console.log(`Uploading ${assetName} to ${BINARIES_TAG}...`);
-    try {
-      runGh(`release upload ${BINARIES_TAG} "${localPath}#${assetName}"`, { stdio: 'inherit' });
-      existing.add(assetName);
-    } catch {
-      console.error(`Error: Failed to upload ${assetName} to ${BINARIES_TAG}.`);
-      process.exit(1);
-    }
+  } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true });
   }
 }
 
