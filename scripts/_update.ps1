@@ -3,13 +3,20 @@
 $ErrorActionPreference = 'Stop'
 
 $Repo = 'SirVeggie/anime-player'
-$ExeName = 'anime-player.exe'
-$HashAssetName = 'anime-player.exe.sha256'
+$ManifestUrl = "https://github.com/$Repo/releases/latest/download/manifest.json"
 $InstallDir = $PSScriptRoot
-$ExePath = Join-Path $InstallDir $ExeName
+$ExeName = 'anime-player.exe'
 $VersionPath = Join-Path $InstallDir 'VERSION.txt'
-$DownloadPath = Join-Path $InstallDir "$ExeName.download"
-$BackupPath = Join-Path $InstallDir "$ExeName.bak"
+$PendingDir = Join-Path $InstallDir '_pending'
+$AllowedFiles = @(
+  'anime-player.exe',
+  'libmpv-2.dll',
+  'ffmpeg.exe',
+  'ffprobe.exe',
+  'fpcalc.exe',
+  'update.bat',
+  '_update.ps1'
+)
 
 function Write-Info([string]$Message) {
   Write-Host $Message
@@ -20,35 +27,24 @@ function Write-Err([string]$Message) {
 }
 
 function Get-GitHubHeaders {
-  $headers = @{
-    Accept       = 'application/vnd.github+json'
+  return @{
+    Accept       = 'application/json, application/octet-stream'
     'User-Agent' = 'anime-player-updater'
   }
-  if ($env:GITHUB_TOKEN) {
-    $headers.Authorization = "Bearer $($env:GITHUB_TOKEN)"
-  }
-  return $headers
 }
 
-function Get-ResponseText($Content) {
-  if ($null -eq $Content) {
-    return ''
+function Test-AllowedFileName([string]$Name) {
+  if ($AllowedFiles -notcontains $Name) {
+    return $false
   }
-  if ($Content -is [byte[]]) {
-    return [System.Text.Encoding]::UTF8.GetString($Content)
+  if ($Name -match '[\\/]' -or $Name -like '*..*') {
+    return $false
   }
-  return [string]$Content
+  return $true
 }
 
-function Get-ExpectedSha256([string]$HashText) {
-  $line = ($HashText -split "`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1).Trim()
-  if ($line -match '^([0-9A-Fa-f]{64})\s') {
-    return $Matches[1].ToUpperInvariant()
-  }
-  if ($line -match '^([0-9A-Fa-f]{64})$') {
-    return $Matches[1].ToUpperInvariant()
-  }
-  throw "Could not parse SHA256 from release asset ($HashAssetName)."
+function Get-FileSha256Lower([string]$Path) {
+  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
 $running = Get-Process -Name 'anime-player' -ErrorAction SilentlyContinue
@@ -60,18 +56,51 @@ if ($running) {
 Write-Info "Checking for updates ($Repo)..."
 
 try {
-  $release = Invoke-RestMethod `
-    -Uri "https://api.github.com/repos/$Repo/releases/latest" `
-    -Headers (Get-GitHubHeaders)
+  $manifest = Invoke-RestMethod -Uri $ManifestUrl -Headers (Get-GitHubHeaders)
 } catch {
-  Write-Err "Failed to query GitHub releases: $($_.Exception.Message)"
+  Write-Err "Failed to download update manifest: $($_.Exception.Message)"
   exit 1
 }
 
-$tag = [string]$release.tag_name
-if ([string]::IsNullOrWhiteSpace($tag)) {
-  Write-Err 'Latest release has no tag_name.'
+if ($null -eq $manifest -or [string]::IsNullOrWhiteSpace([string]$manifest.version) -or -not $manifest.files) {
+  Write-Err 'Update manifest is missing a version or file list.'
   exit 1
+}
+
+$tag = [string]$manifest.version
+$needed = @()
+foreach ($file in $manifest.files) {
+  $name = [string]$file.name
+  if (-not (Test-AllowedFileName $name)) {
+    Write-Err "Manifest listed a disallowed file: $name"
+    exit 1
+  }
+  $expected = ([string]$file.sha256).Trim().ToLowerInvariant()
+  if ($expected -notmatch '^[0-9a-f]{64}$') {
+    Write-Err "Manifest hash for $name is not a SHA256 digest."
+    exit 1
+  }
+  $url = [string]$file.url
+  if ($url -notmatch '^https://') {
+    Write-Err "Manifest url for $name must be https."
+    exit 1
+  }
+  $localPath = Join-Path $InstallDir $name
+  $needsDownload = $true
+  if (Test-Path -LiteralPath $localPath) {
+    $actual = Get-FileSha256Lower $localPath
+    if ($actual -eq $expected) {
+      $needsDownload = $false
+    }
+  }
+  if ($needsDownload) {
+    $needed += [pscustomobject]@{
+      Name     = $name
+      Sha256   = $expected
+      Url      = $url
+      Size     = [int64]$file.size
+    }
+  }
 }
 
 $localVersion = $null
@@ -79,74 +108,49 @@ if (Test-Path -LiteralPath $VersionPath) {
   $localVersion = (Get-Content -LiteralPath $VersionPath -Raw).Trim()
 }
 
-if ($localVersion -eq $tag -and (Test-Path -LiteralPath $ExePath)) {
+if ($needed.Count -eq 0 -and $localVersion -eq $tag) {
   Write-Info "Already on $tag. Nothing to do."
   exit 0
 }
 
-$asset = $release.assets | Where-Object { $_.name -eq $ExeName } | Select-Object -First 1
-if (-not $asset -or -not $asset.browser_download_url) {
-  Write-Err "Release $tag does not include a $ExeName asset."
-  exit 1
-}
-
-$hashAsset = $release.assets | Where-Object { $_.name -eq $HashAssetName } | Select-Object -First 1
-
-Write-Info "Downloading $ExeName from $tag..."
-
-if (Test-Path -LiteralPath $DownloadPath) {
-  Remove-Item -LiteralPath $DownloadPath -Force
-}
-
-try {
-  Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $DownloadPath -UseBasicParsing
-} catch {
-  Write-Err "Download failed: $($_.Exception.Message)"
-  if (Test-Path -LiteralPath $DownloadPath) {
-    Remove-Item -LiteralPath $DownloadPath -Force -ErrorAction SilentlyContinue
-  }
-  exit 1
-}
-
-if ($hashAsset -and $hashAsset.browser_download_url) {
-  Write-Info 'Verifying download hash...'
-  try {
-    $hashRaw = (Invoke-WebRequest -Uri $hashAsset.browser_download_url -UseBasicParsing).Content
-    $expected = Get-ExpectedSha256 (Get-ResponseText $hashRaw)
-    $actual = (Get-FileHash -LiteralPath $DownloadPath -Algorithm SHA256).Hash.ToUpperInvariant()
-    if ($actual -ne $expected) {
-      Write-Err "SHA256 mismatch. Expected $expected but got $actual."
-      Remove-Item -LiteralPath $DownloadPath -Force
-      exit 1
-    }
-  } catch {
-    Write-Err "Hash verification failed: $($_.Exception.Message)"
-    Remove-Item -LiteralPath $DownloadPath -Force -ErrorAction SilentlyContinue
-    exit 1
-  }
-} else {
-  Write-Info 'No SHA256 asset on this release; skipping hash check.'
-}
-
-if (Test-Path -LiteralPath $ExePath) {
-  Copy-Item -LiteralPath $ExePath -Destination $BackupPath -Force
-}
-
-try {
-  Move-Item -LiteralPath $DownloadPath -Destination $ExePath -Force
+if ($needed.Count -eq 0) {
   Set-Content -LiteralPath $VersionPath -Value $tag -NoNewline -Encoding utf8
-  if (Test-Path -LiteralPath $BackupPath) {
-    Remove-Item -LiteralPath $BackupPath -Force
+  Write-Info "Already have the $tag files. Updated VERSION.txt."
+  exit 0
+}
+
+$downloadBytes = ($needed | Measure-Object -Property Size -Sum).Sum
+Write-Info "Downloading $($needed.Count) file(s) for $tag ($([math]::Round($downloadBytes / 1MB, 1)) MB)..."
+
+if (Test-Path -LiteralPath $PendingDir) {
+  Remove-Item -LiteralPath $PendingDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $PendingDir | Out-Null
+
+try {
+  foreach ($file in $needed) {
+    $dest = Join-Path $PendingDir $file.Name
+    Write-Info "Downloading $($file.Name)..."
+    Invoke-WebRequest -Uri $file.Url -OutFile $dest -UseBasicParsing -Headers (Get-GitHubHeaders)
+    $actual = Get-FileSha256Lower $dest
+    if ($actual -ne $file.Sha256) {
+      throw "SHA256 mismatch for $($file.Name). Expected $($file.Sha256) but got $actual."
+    }
   }
+
+  foreach ($file in $needed) {
+    $source = Join-Path $PendingDir $file.Name
+    $dest = Join-Path $InstallDir $file.Name
+    Copy-Item -LiteralPath $source -Destination $dest -Force
+  }
+  Set-Content -LiteralPath $VersionPath -Value $tag -NoNewline -Encoding utf8
 } catch {
-  Write-Err "Failed to install new executable: $($_.Exception.Message)"
-  if ((Test-Path -LiteralPath $BackupPath) -and -not (Test-Path -LiteralPath $ExePath)) {
-    Move-Item -LiteralPath $BackupPath -Destination $ExePath -Force
-  }
-  if (Test-Path -LiteralPath $DownloadPath) {
-    Remove-Item -LiteralPath $DownloadPath -Force -ErrorAction SilentlyContinue
+  Write-Err "Update failed: $($_.Exception.Message)"
+  if (Test-Path -LiteralPath $PendingDir) {
+    Remove-Item -LiteralPath $PendingDir -Recurse -Force -ErrorAction SilentlyContinue
   }
   exit 1
 }
 
+Remove-Item -LiteralPath $PendingDir -Recurse -Force -ErrorAction SilentlyContinue
 Write-Info "Updated to $tag."

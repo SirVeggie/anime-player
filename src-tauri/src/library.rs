@@ -26,6 +26,7 @@ const CLEAN_UNUSED_SCRUB_SPRITES_KEY: &str = "clean_unused_scrub_sprites";
 const AUTOMATIC_FILE_DISCOVERY_KEY: &str = "automatic_file_discovery";
 const LAUNCH_AT_STARTUP_KEY: &str = "launch_at_startup";
 const CLOSE_INTO_TRAY_KEY: &str = "close_into_tray";
+const CHECK_FOR_UPDATES_KEY: &str = "check_for_updates";
 const LOCAL_DATA_STATS_CACHE_KEY: &str = "local_data_stats_cache";
 
 /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
@@ -174,6 +175,7 @@ pub struct LibraryState {
     automatic_file_discovery: bool,
     launch_at_startup: bool,
     close_into_tray: bool,
+    check_for_updates: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -460,6 +462,14 @@ fn write_close_into_tray(conn: &Connection, enabled: bool) -> Result<(), String>
     write_bool_setting(conn, CLOSE_INTO_TRAY_KEY, enabled)
 }
 
+pub(crate) fn read_check_for_updates(conn: &Connection) -> Result<bool, String> {
+    read_bool_setting(conn, CHECK_FOR_UPDATES_KEY, true)
+}
+
+fn write_check_for_updates(conn: &Connection, enabled: bool) -> Result<(), String> {
+    write_bool_setting(conn, CHECK_FOR_UPDATES_KEY, enabled)
+}
+
 pub(crate) fn root_folder_paths(conn: &Connection) -> Result<Vec<PathBuf>, String> {
     Ok(list_root_folders(conn)?
         .into_iter()
@@ -496,6 +506,7 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         automatic_file_discovery: read_automatic_file_discovery(conn)?,
         launch_at_startup: read_launch_at_startup(conn)?,
         close_into_tray: read_close_into_tray(conn)?,
+        check_for_updates: read_check_for_updates(conn)?,
     })
 }
 
@@ -599,6 +610,17 @@ pub fn set_close_into_tray(
     })?;
     crate::app_lifecycle::set_close_into_tray(&app, enabled)?;
     Ok(state)
+}
+
+#[tauri::command]
+pub fn set_check_for_updates(
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        write_check_for_updates(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
 }
 
 #[tauri::command]

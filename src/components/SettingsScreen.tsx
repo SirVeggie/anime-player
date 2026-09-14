@@ -7,7 +7,9 @@ import type {
   RegexRule,
   RegexRuleInput,
   RootFolder,
+  UpdateStatus,
 } from "../types";
+import { formatSize } from "../utils";
 import { CustomCheckbox } from "./CustomCheckbox";
 import { ViewHeader } from "./ViewHeader";
 
@@ -54,7 +56,12 @@ export function SettingsScreen(props: {
   onAutomaticFileDiscovery: (enabled: boolean) => void;
   onLaunchAtStartup: (enabled: boolean) => void;
   onCloseIntoTray: (enabled: boolean) => void;
+  onCheckForUpdates: (enabled: boolean) => void;
   onCleanLocalData: () => void;
+  updateStatus: UpdateStatus | null;
+  onCheckUpdatesNow: () => void;
+  onDownloadUpdate: () => void;
+  onRestartToApplyUpdate: () => void;
 }) {
   const {
     library,
@@ -91,7 +98,12 @@ export function SettingsScreen(props: {
     onAutomaticFileDiscovery,
     onLaunchAtStartup,
     onCloseIntoTray,
+    onCheckForUpdates,
     onCleanLocalData,
+    updateStatus,
+    onCheckUpdatesNow,
+    onDownloadUpdate,
+    onRestartToApplyUpdate,
   } = props;
   const [anilistClientDraft, setAnilistClientDraft] = useState(anilistAuth?.client_id ?? "");
 
@@ -135,6 +147,76 @@ export function SettingsScreen(props: {
             tooltip="Closing the window hides the app to the system tray so file discovery and background jobs keep running. Use Quit from the tray menu to exit fully."
           />
         </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.check_for_updates}
+            disabled={busy}
+            onChange={onCheckForUpdates}
+            label="Check for updates on startup"
+            tooltip="Look for a newer GitHub release after the app is ready. You can still check manually below."
+          />
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Updates</h2>
+          <span className="muted">
+            {updateStatus?.current_version
+              ? `Current version: ${updateStatus.current_version}`
+              : "Current version: unknown"}
+          </span>
+        </div>
+        <p className="muted">
+          {updateSummary(updateStatus)}
+        </p>
+        {updateStatus?.notes ? (
+          <pre className="muted update-notes">{updateStatus.notes}</pre>
+        ) : null}
+        {updateStatus?.last_error ? (
+          <p className="muted">{updateStatus.last_error}</p>
+        ) : null}
+        {updateStatus?.downloading ? (
+          <div className="update-progress">
+            <p className="muted">{updateProgressLabel(updateStatus)}</p>
+            <div className="job-progress-track" aria-hidden>
+              <div
+                className="job-progress-fill"
+                style={{ width: `${updateProgressPercent(updateStatus)}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+        <div className="settings-actions">
+          <button
+            type="button"
+            onClick={onCheckUpdatesNow}
+            disabled={busy || updateStatus?.downloading === true}
+          >
+            Check now
+          </button>
+          {updateStatus?.pending_apply ? (
+            <button type="button" onClick={onRestartToApplyUpdate} disabled={busy}>
+              Restart now
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onDownloadUpdate}
+              disabled={
+                busy ||
+                !updateStatus?.available ||
+                updateStatus.downloading ||
+                !updateStatus.updates_supported
+              }
+            >
+              Update
+            </button>
+          )}
+        </div>
+        {!updateStatus?.updates_supported ? (
+          <p className="muted">In-app updates are disabled in development builds.</p>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -559,4 +641,38 @@ function formatBytes(bytes: number): string {
     unitIndex += 1;
   }
   return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function formatUpdateBytes(bytes: number): string {
+  return bytes > 0 ? formatSize(bytes) : "0 B";
+}
+
+function updateSummary(status: UpdateStatus | null): string {
+  if (!status) {
+    return "Checking update status…";
+  }
+  if (status.pending_apply) {
+    return `Version ${status.latest_version ?? "the latest release"} is downloaded. Restart to apply it.`;
+  }
+  if (status.available) {
+    const latest = status.latest_version ?? "a newer release";
+    return `Version ${latest} is available (${formatUpdateBytes(status.download_bytes)} to download).`;
+  }
+  if (status.latest_version) {
+    return `You are on the latest version (${status.latest_version}).`;
+  }
+  return "Check GitHub for a newer portable build.";
+}
+
+function updateProgressLabel(status: UpdateStatus): string {
+  const file = status.progress.file ? ` ${status.progress.file}` : "";
+  return `Downloading${file} (${formatUpdateBytes(status.progress.bytes_downloaded)} / ${formatUpdateBytes(status.progress.bytes_total)})`;
+}
+
+function updateProgressPercent(status: UpdateStatus): number {
+  const total = status.progress.bytes_total;
+  if (total <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.round((status.progress.bytes_downloaded / total) * 100));
 }

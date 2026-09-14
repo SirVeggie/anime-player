@@ -308,8 +308,30 @@ fn candidates_of_kind<'a>(tracks: &'a [MpvTrack], kind: &'a str) -> Vec<TrackCan
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubtitleApply {
+    Auto,
+    Off,
+    Track,
+}
+
+/// Absence of a selected subtitle is not Off. Off is only `subtitle_off`.
+/// A row with `subtitle_off = 0` and no lang/title/path means "use mpv auto".
+pub fn subtitle_apply(pref: &TrackPref) -> SubtitleApply {
+    if pref.subtitle_off {
+        return SubtitleApply::Off;
+    }
+    if pref.subtitle_lang.is_some()
+        || pref.subtitle_title.is_some()
+        || pref.subtitle_external_path.is_some()
+    {
+        return SubtitleApply::Track;
+    }
+    SubtitleApply::Auto
+}
+
 #[cfg(windows)]
-pub fn identity_from_tracks(tracks: &[MpvTrack]) -> TrackPref {
+pub fn identity_from_tracks(tracks: &[MpvTrack], no_sub_is_off: bool) -> TrackPref {
     let audio = tracks
         .iter()
         .find(|track| track.kind == "audio" && track.selected);
@@ -319,7 +341,7 @@ pub fn identity_from_tracks(tracks: &[MpvTrack]) -> TrackPref {
     TrackPref {
         audio_lang: empty_to_none(audio.and_then(|track| track.lang.clone())),
         audio_title: empty_to_none(audio.and_then(|track| track.title.clone())),
-        subtitle_off: sub.is_none(),
+        subtitle_off: sub.is_none() && no_sub_is_off,
         subtitle_lang: empty_to_none(sub.and_then(|track| track.lang.clone())),
         subtitle_title: empty_to_none(sub.and_then(|track| track.title.clone())),
         subtitle_external_path: sub.filter(|track| track.external).and_then(|track| {
@@ -344,25 +366,42 @@ fn apply_pref_to_mpv(
         }
     }
 
-    let audio_id = pick_closest_track(
-        &candidates_of_kind(tracks, "audio"),
-        pref.audio_lang.as_deref(),
-        pref.audio_title.as_deref(),
-    );
-    if let Some(track_id) = audio_id {
-        mpv.select_audio_track(track_id)?;
+    if pref.audio_lang.is_some() || pref.audio_title.is_some() {
+        let audio_id = pick_closest_track(
+            &candidates_of_kind(tracks, "audio"),
+            pref.audio_lang.as_deref(),
+            pref.audio_title.as_deref(),
+        );
+        if let Some(track_id) = audio_id {
+            mpv.select_audio_track(track_id)?;
+        } else {
+            mpv.select_audio_auto()?;
+        }
+    } else {
+        mpv.select_audio_auto()?;
     }
 
-    if pref.subtitle_off {
-        mpv.select_subtitle_track(None)?;
-    } else if !restored_external_sub {
-        let sub_id = pick_closest_track(
-            &candidates_of_kind(tracks, "sub"),
-            pref.subtitle_lang.as_deref(),
-            pref.subtitle_title.as_deref(),
-        );
-        if let Some(track_id) = sub_id {
-            mpv.select_subtitle_track(Some(track_id))?;
+    match subtitle_apply(pref) {
+        SubtitleApply::Off => mpv.select_subtitle_track(None)?,
+        SubtitleApply::Auto => {
+            if !restored_external_sub {
+                mpv.select_subtitle_auto()?;
+            }
+        }
+        SubtitleApply::Track => {
+            if restored_external_sub {
+                return Ok(());
+            }
+            let sub_id = pick_closest_track(
+                &candidates_of_kind(tracks, "sub"),
+                pref.subtitle_lang.as_deref(),
+                pref.subtitle_title.as_deref(),
+            );
+            if let Some(track_id) = sub_id {
+                mpv.select_subtitle_track(Some(track_id))?;
+            } else {
+                mpv.select_subtitle_auto()?;
+            }
         }
     }
     Ok(())
@@ -389,22 +428,23 @@ pub fn apply_saved_track_prefs(
     let tracks = mpv.tracks()?;
     if let Some(pref) = pref.as_ref() {
         apply_pref_to_mpv(mpv, pref, &tracks)?;
+    } else {
+        // Restore mpv's per-file defaults. An earlier `set sid no` / `set aid N`
+        // sticks across loadfile and would otherwise disable auto-selection.
+        mpv.select_audio_auto()?;
+        mpv.select_subtitle_auto()?;
     }
-    Ok(identity_from_tracks(&mpv.tracks()?))
+    Ok(identity_from_tracks(&mpv.tracks()?, false))
 }
 
 #[cfg(windows)]
 #[tauri::command]
-pub fn save_current_track_prefs(
+pub fn save_track_prefs(
     db: State<'_, AppDatabase>,
-    state: State<'_, AppState>,
     anime_id: i64,
     episode_id: i64,
+    pref: TrackPref,
 ) -> Result<TrackPref, String> {
-    let guard = state.mpv.lock().map_err(|e| e.to_string())?;
-    let mpv = guard.as_ref().ok_or("mpv has not been initialized yet")?;
-    let pref = identity_from_tracks(&mpv.tracks()?);
-    drop(guard);
     db.with_conn(|conn| save_track_pref(conn, anime_id, episode_id, &pref))?;
     Ok(pref)
 }
@@ -506,5 +546,31 @@ mod tests {
         let tracks = [track(1, "eng", "English")];
         assert_eq!(pick_closest_track(&tracks, None, Some("spa")), None);
         assert!(pick_closest_track(&[], Some("en"), Some("English")).is_none());
+    }
+
+    #[test]
+    fn missing_subtitle_is_auto_not_off() {
+        let auto = TrackPref {
+            audio_lang: Some("jpn".into()),
+            audio_title: None,
+            subtitle_off: false,
+            subtitle_lang: None,
+            subtitle_title: None,
+            subtitle_external_path: None,
+        };
+        assert_eq!(subtitle_apply(&auto), SubtitleApply::Auto);
+
+        let off = TrackPref {
+            subtitle_off: true,
+            ..auto.clone()
+        };
+        assert_eq!(subtitle_apply(&off), SubtitleApply::Off);
+
+        let named = TrackPref {
+            subtitle_lang: Some("eng".into()),
+            subtitle_title: Some("English subs".into()),
+            ..auto
+        };
+        assert_eq!(subtitle_apply(&named), SubtitleApply::Track);
     }
 }

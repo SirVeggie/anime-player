@@ -36,6 +36,7 @@ mod op_ed;
 mod scrub_preview;
 #[cfg(windows)]
 mod thumbnails;
+mod updater;
 
 #[cfg(windows)]
 use mpv::MpvHandle;
@@ -475,9 +476,12 @@ fn install_webview2_process_diagnostics(window: &tauri::WebviewWindow) {
     }
 }
 
+pub use updater::apply_pending_update;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     crash_log::init();
+    updater::try_apply_pending_on_startup();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             app_lifecycle::show_main_window(app);
@@ -505,6 +509,7 @@ pub fn run() {
             library_ops::start_queued_operations(app.handle().clone());
 
             app.manage(app_lifecycle::AppLifecycleState::new(close_into_tray));
+            app.manage(updater::UpdaterState::new());
             app.manage(watcher::LibraryWatcherState::new());
             if let Err(error) = watcher::start(app.handle()) {
                 crash_log::log("ERROR", &format!("library watcher start failed: {error}"));
@@ -575,6 +580,11 @@ pub fn run() {
         library::set_automatic_file_discovery,
         library::set_launch_at_startup,
         library::set_close_into_tray,
+        library::set_check_for_updates,
+        updater::updater_get_status,
+        updater::updater_check,
+        updater::updater_start_download,
+        updater::updater_apply_and_restart,
         app_lifecycle::confirm_quit,
         app_lifecycle::hide_to_tray,
         library::add_root_folder,
@@ -664,7 +674,7 @@ pub fn run() {
         mpv_select_subtitle_track,
         mpv_add_subtitle_file,
         track_prefs::apply_saved_track_prefs,
-        track_prefs::save_current_track_prefs,
+        track_prefs::save_track_prefs,
         mpv_get_video_geometry,
         mpv_get_time_pos,
         mpv_get_playback_end_state,
@@ -696,6 +706,11 @@ pub fn run() {
         library::set_automatic_file_discovery,
         library::set_launch_at_startup,
         library::set_close_into_tray,
+        library::set_check_for_updates,
+        updater::updater_get_status,
+        updater::updater_check,
+        updater::updater_start_download,
+        updater::updater_apply_and_restart,
         app_lifecycle::confirm_quit,
         app_lifecycle::hide_to_tray,
         library::add_root_folder,

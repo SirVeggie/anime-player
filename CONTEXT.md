@@ -227,10 +227,19 @@ view components. Per-screen UI lives in `src/components/`:
   **`core:window:allow-destroy`**, and tray mode also needs
   **`allow-hide` / `allow-show` / `allow-unminimize` / `allow-set-focus`**,
   in the default capability file in addition to `allow-close`.
-- Settings **Application** panel exposes three SQLite-backed booleans on
+- Settings **Application** panel exposes SQLite-backed booleans on
   `LibraryState`: **Automatic file discovery** (`automatic_file_discovery`,
-  default on), **Launch at startup** (`launch_at_startup`, default off), and
-  **Close into tray** (`close_into_tray`, default off). Discovery uses
+  default on), **Launch at startup** (`launch_at_startup`, default off),
+  **Close into tray** (`close_into_tray`, default off), and **Check for updates
+  on startup** (`check_for_updates`, default on). The **Updates** panel shows
+  the portable `VERSION.txt` tag, checks
+  `https://github.com/SirVeggie/anime-player/releases/latest/download/manifest.json`,
+  downloads only files whose SHA256 changed into `<install>/_pending/`, then
+  restarts via `anime-player.exe --apply-update` (handled in `main.rs` before
+  Tauri / single-instance). Large sidecars (`libmpv-2.dll`, ffmpeg, ffprobe)
+  are skipped when they already match. Download/apply are disabled in debug
+  / `tauri dev` builds. `update.bat` uses the same manifest as a closed-app
+  fallback. Discovery uses
   `watcher.rs` (`notify`) on every root folder: path-deduped events, ~2s quiet
   debounce, then size-stability settle (~1.5s unchanged, 60s cap) before
   `library_ops::request_rescan_coalesced` (at most one queued/running rescan;
@@ -581,15 +590,20 @@ view components. Per-screen UI lives in `src/components/`:
   `mpv_select_audio_track(track_id)`,
   `mpv_select_subtitle_track(track_id)`,
   `mpv_add_subtitle_file(path)`, `apply_saved_track_prefs(anime_id, episode_id)`,
-  `save_current_track_prefs(anime_id, episode_id)`, `mpv_get_video_geometry()`,
+  `save_track_prefs(anime_id, episode_id, pref)`, `mpv_get_video_geometry()`,
   `mpv_get_time_pos()`, `mpv_get_playback_end_state()`, `mpv_set_volume(volume)`, and `mpv_stop()`.
   Audio/subtitle choices are stored in SQLite (`anime_track_prefs` for the
   latest explicit pick on a title, `episode_track_prefs` for per-episode
   overrides including an optional external subtitle path). On `mpv://file-loaded`
   the player applies the episode override if present, otherwise the anime
   preference, matching language + title (not mpv track IDs) and falling back
-  to the closest track. Auto-apply does not create an episode override; menu
-  picks, added subtitle files, and later `J`/`#` changes do.
+  to the closest track. With no saved subtitle choice, `sid` is reset to
+  **`auto`** so mpv's own selection runs (container default flag,
+  `subs-match-os-language`, `subs-fallback=default`). `subtitle_off` is only
+  an explicit user Off — a snapshot with no selected sub is not Off. `set sid`
+  / `set aid` stick across `loadfile`, so apply always sets `auto` when there
+  is no pref. Auto-apply does not create an episode override; menu picks,
+  added subtitle files, and later `J`/`#` changes do.
 - `scrub_preview.rs` — sprite cache I/O and ffmpeg generation;
   `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
 - `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,
@@ -742,6 +756,8 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
   `docs/migrations.md`.
 - `src-tauri/src/watcher.rs`, `src-tauri/src/app_lifecycle.rs` — automatic
   file discovery watchers; tray / close-into-tray / launch-at-startup.
+- `src-tauri/src/updater.rs` — GitHub manifest check, hash-skip download,
+  and `--apply-update` restart helper.
 - `src-tauri/src/op_ed.rs`, `src-tauri/src/media_tools.rs` — OP/ED detection
   and shared ffmpeg/ffprobe helpers.
 - `src/opEd.ts` — OP/ED job identity and episode-page progress helpers.
@@ -756,9 +772,16 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
   Chromaprint `fpcalc.exe` artifacts.
 - `scripts/release-notes.mjs` and `scripts/publish-github-release.mjs` — automated
   GitHub release flow (run `npm run release:notes` then `npm run release:publish`).
+  Versioned releases attach the zip and `manifest.json`; hash-named install
+  files go to the long-lived `binaries` prerelease only when the SHA256 is new.
+- `scripts/release-assets.mjs` — shared GitHub repo, install-file list, and
+  content-addressed asset names for packaging/publish.
 - `scripts/update.bat` and `scripts/_update.ps1` — portable end-user
   updater (`update.bat` only; `_update.ps1` is internal). Shipped in the
-  release zip; downloads `anime-player.exe` from GitHub `releases/latest`.
+  release zip; uses `releases/latest/download/manifest.json` and downloads
+  only changed files.
+- `src-tauri/src/updater.rs` — in-app update check, staged download, and
+  `--apply-update` helper.
 - `temp/` — gitignored scratch space for agent HTML UI mockups (see
   `.cursor/rules/design-documents.mdc`).
 - `.cursor/rules/` — agent rules. `read-context.mdc` points new agents
@@ -811,8 +834,8 @@ npm run tauri build
 # update.bat, _update.ps1, and VERSION.txt (release only). Scrub thumbnails
 # and OP/ED detection prefer bundled tools beside the exe; PATH is a fallback
 # if those files are removed.
-# Publish GitHub release with the zip, standalone anime-player.exe, and
-# anime-player.exe.sha256.
+# Publish GitHub release with the zip and manifest.json; unchanged large
+# binaries are reused from the binaries prerelease.
 npm run release
 
 # Local dev portable only (no tag, zip, or publish artifacts): `releases/dev/`

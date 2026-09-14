@@ -14,8 +14,8 @@ These steps are for the pre-built Windows release. To build from source, see [De
 ### First-time install
 
 1. Open [GitHub Releases](https://github.com/SirVeggie/anime-player/releases).
-2. Download the **versioned zip** `AnimePlayer-vX.X.zip`, **not** the standalone `anime-player.exe`.
-   - The zip includes `anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `fpcalc.exe`, `update.bat`, and `_update.ps1`. The loose exe on the release page is only for updating an existing install and will not run on its own without the DLL beside it. You may delete the bundled ffmpeg/Chromaprint tools if you already have them on PATH (scrub thumbnails and OP/ED detection will use those instead).
+2. Download the **versioned zip** `AnimePlayer-vX.X.zip`.
+   - The zip includes `anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `fpcalc.exe`, `update.bat`, and `_update.ps1`. You may delete the bundled ffmpeg/Chromaprint tools if you already have them on PATH (scrub thumbnails and OP/ED detection will use those instead).
 3. Extract the folder anywhere you like (the app is portable) and run `anime-player.exe`.
 4. Your library database and settings are stored in `data/` next to the executable, so you can move the whole folder later.
 
@@ -23,12 +23,15 @@ WebView2 is required; it is already installed on most current Windows 10/11 syst
 
 ### Updating
 
-1. Close Anime Player completely.
-2. In the same folder as `anime-player.exe`, double-click **`update.bat`**.
-   - Do not run `_update.ps1` directly; it is only used by `update.bat`.
-3. The script downloads the latest `anime-player.exe` from the release (much smaller than re-downloading the zip).
+From the app: Settings → **Updates** → **Update**, then **Restart now**. The app downloads only files whose contents changed (large tools such as `libmpv-2.dll` and ffmpeg are skipped when they already match). Startup can also notify you when a newer release is available.
 
-Download the **full zip** again when you are installing on a new PC, or when release notes say the bundled `libmpv-2.dll` changed. App-only updates are enough when only the executable changed.
+Or, with the app closed:
+
+1. In the same folder as `anime-player.exe`, double-click **`update.bat`**.
+   - Do not run `_update.ps1` directly; it is only used by `update.bat`.
+2. The script uses the same GitHub `manifest.json` and downloads only changed files.
+
+Download the **full zip** again when you are installing on a new PC.
 
 ## Features
 
@@ -152,7 +155,7 @@ npm run portable
 
 Output goes to `releases/dev/` (`anime-player.exe`, `libmpv-2.dll`, `ffmpeg.exe`, `ffprobe.exe`, `fpcalc.exe`, `update.bat`, `_update.ps1`).
 
-When publishing a GitHub release, attach the versioned zip, a standalone `anime-player.exe`, and `anime-player.exe.sha256` (written under `releases/` by the package script).
+When publishing a GitHub release, attach the versioned zip and `manifest.json`. Unchanged large binaries are uploaded once to the shared `binaries` prerelease under hash-named files.
 
 ### Publishing to GitHub
 
@@ -163,10 +166,10 @@ We use a local build + `gh` CLI workflow to publish releases.
 2. Authenticate: `gh auth login` with `repo` scope.
 
 **Release Workflow (for Agents/Maintainers):**
-1. **Build:** Run `npm run release` to build the app and generate the versioned artifacts (`zip`, `exe`, `sha256`) in the `releases/` directory. This also creates a local git tag.
+1. **Build:** Run `npm run release` to build the app and generate the versioned artifacts (`zip`, `manifest.json`) in the `releases/` directory. This also creates a local git tag.
 2. **Draft Notes:** Run `npm run release:notes` to generate a draft markdown file (`releases/NOTES-vX.Y.md`) from recent git commits.
 3. **Polish Notes:** Open the generated `NOTES-vX.Y.md` file and rewrite the bullet points into user-facing language (group fixes, remove noise).
-4. **Publish:** Run `npm run release:publish`. This will push the tag to origin, create the GitHub release using your notes, and upload the three required assets.
+4. **Publish:** Run `npm run release:publish`. This will push the tag to origin, create the GitHub release using your notes, upload the zip and manifest, and add any new hash-named files to the `binaries` prerelease.
 
 *Note for Agents: If you are instructed to create a release, follow the above 4 steps. After running `release:notes`, present the draft to the user or polish the notes file before running `release:publish`.*
 

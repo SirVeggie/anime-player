@@ -14,14 +14,14 @@ import {
   getMpvTimePos,
   getMpvTracks,
   getMpvVideoGeometry,
-  saveCurrentTrackPrefs,
+  saveTrackPrefs,
   saveEpisodeProgress,
   selectMpvAudioTrack,
   selectMpvSubtitleTrack,
   setMpvVolume,
   syncAnilistEpisodeProgress,
 } from "../api";
-import { trackPrefFromTracks, trackPrefsEqual } from "../trackPrefs";
+import { missingSubForSave, trackPrefFromTracks, trackPrefsEqual } from "../trackPrefs";
 import { opEdSeekMarkers, type OpEdSeekMarker } from "../opEd";
 import { animeDisplayTitle } from "../utils";
 import type {
@@ -797,9 +797,10 @@ export function PlayerView(props: {
     if (appliedTrackPrefRef.current === null) return;
     if (loadedPathRef.current && !mediaPathsEqual(loadedPathRef.current, current.path)) return;
     try {
-      const identity = trackPrefFromTracks(await getMpvTracks());
+      const tracks = await getMpvTracks();
+      const identity = trackPrefFromTracks(tracks, missingSubForSave(appliedTrackPrefRef.current));
       if (trackPrefsEqual(identity, appliedTrackPrefRef.current)) return;
-      const saved = await saveCurrentTrackPrefs(current.anime_id, current.id);
+      const saved = await saveTrackPrefs(current.anime_id, current.id, identity);
       if (playbackRef.current.episode.id === current.id) {
         appliedTrackPrefRef.current = saved;
       }
@@ -1349,8 +1350,13 @@ export function PlayerView(props: {
     async (trackId: number) => {
       try {
         await selectMpvAudioTrack(trackId);
+        const tracks = await getMpvTracks();
         const current = playbackRef.current.episode;
-        appliedTrackPrefRef.current = await saveCurrentTrackPrefs(current.anime_id, current.id);
+        appliedTrackPrefRef.current = await saveTrackPrefs(
+          current.anime_id,
+          current.id,
+          trackPrefFromTracks(tracks, missingSubForSave(appliedTrackPrefRef.current)),
+        );
         await refreshTracks();
         setActiveTrackMenu(null);
       } catch (e) {
@@ -1364,8 +1370,13 @@ export function PlayerView(props: {
     async (trackId: number | null) => {
       try {
         await selectMpvSubtitleTrack(trackId);
+        const tracks = await getMpvTracks();
         const current = playbackRef.current.episode;
-        appliedTrackPrefRef.current = await saveCurrentTrackPrefs(current.anime_id, current.id);
+        appliedTrackPrefRef.current = await saveTrackPrefs(
+          current.anime_id,
+          current.id,
+          trackPrefFromTracks(tracks, trackId === null ? "off" : "auto"),
+        );
         await refreshTracks();
         setActiveTrackMenu(null);
       } catch (e) {
@@ -1391,8 +1402,13 @@ export function PlayerView(props: {
       });
       if (typeof picked !== "string" || !picked) return;
       await addMpvSubtitleFile(picked);
+      const tracks = await getMpvTracks();
       const current = playbackRef.current.episode;
-      appliedTrackPrefRef.current = await saveCurrentTrackPrefs(current.anime_id, current.id);
+      appliedTrackPrefRef.current = await saveTrackPrefs(
+        current.anime_id,
+        current.id,
+        trackPrefFromTracks(tracks, "auto"),
+      );
       await refreshTracks();
       setActiveTrackMenu(null);
     } catch (e) {

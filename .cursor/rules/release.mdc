@@ -29,8 +29,7 @@ This runs `tauri build` then `release:package`, which:
 
 - Creates an annotated tag `vMAJOR.MINOR` at HEAD (or reuses the tag already
   on HEAD).
-- Writes `releases/AnimePlayer-<tag>.zip`, `releases/anime-player.exe`, and
-  `releases/anime-player.exe.sha256`.
+- Writes `releases/AnimePlayer-<tag>.zip` and `releases/manifest.json`.
 
 If the user already ran a recent `npm run release` and artifacts match the
 intended tag, skip the rebuild after confirming with them.
@@ -126,8 +125,9 @@ Optional flags (pass through to the script):
 
 The script verifies `gh` auth, required artifacts, and
 `releases/.build-meta.json` (commit/tag must match HEAD and the publish tag),
-creates the tag if needed, runs `git push origin <tag>`, then `gh release create`
-with the zip, exe, and sha256 attached.
+creates the tag if needed, runs `git push origin <tag>`, uploads any new
+hash-named install files to the `binaries` prerelease, then `gh release create`
+with the zip and `manifest.json` attached.
 
 ## Git / safety
 
@@ -140,16 +140,22 @@ with the zip, exe, and sha256 attached.
 
 ## End-user updater alignment
 
-GitHub release assets must include exactly what `_update.ps1` expects:
+Each versioned GitHub release must include:
 
-- `anime-player.exe`
-- `anime-player.exe.sha256` (uppercase hex, `hash anime-player.exe` format)
+- `AnimePlayer-<tag>.zip`
+- `manifest.json` (schema 1: version, notes, per-file name/sha256/size/url)
 
-The portable zip must include `update.bat`, `_update.ps1`, `libmpv-2.dll`, and
-`VERSION.txt` (handled by `release-package.mjs`).
+The in-app updater and `update.bat` both fetch
+`releases/latest/download/manifest.json` and download only files whose SHA256
+does not match the local copy. Large unchanged files stay on the long-lived
+`binaries` **prerelease** (hash-named assets; never clobber).
+
+The portable zip must include `update.bat`, `_update.ps1`, `libmpv-2.dll`,
+ffmpeg/ffprobe, `fpcalc.exe`, and `VERSION.txt` (handled by
+`release-package.mjs`).
 
 ## Reference
 
 - User-facing steps: `README.md` → **Publishing to GitHub**
 - Scripts: `scripts/release-version.mjs`, `release-notes.mjs`,
-  `publish-github-release.mjs`, `release-package.mjs`
+  `publish-github-release.mjs`, `release-package.mjs`, `release-assets.mjs`

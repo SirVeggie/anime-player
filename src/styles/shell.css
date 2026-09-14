@@ -238,3 +238,12 @@
   border-radius: 999px;
   pointer-events: none;
 }
+
+.nav-item-badge--dot {
+  top: 6px;
+  right: 6px;
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+}

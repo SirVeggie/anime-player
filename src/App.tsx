@@ -45,6 +45,7 @@ import {
   searchAnilistAnime,
   setAutoOpEdDetect,
   setAutomaticFileDiscovery,
+  setCheckForUpdates,
   setCleanUnusedScrubSprites,
   setCloseIntoTray,
   setDontSkipFirstEpisodeOpEd,
@@ -64,6 +65,10 @@ import {
   stopMpv,
   unlinkAnimeAnilist,
   updateRegexRule,
+  updaterApplyAndRestart,
+  updaterCheck,
+  updaterGetStatus,
+  updaterStartDownload,
   validateFileRenames,
 } from "./api";
 import { isLatestWatchedEpisode, maxWatchedDisplayEpisode } from "./episodeProgress";
@@ -111,6 +116,8 @@ import type {
   RegexRuleInput,
   RenameFileRequest,
   RootFolder,
+  UpdateProgress,
+  UpdateStatus,
 } from "./types";
 import {
   animeDisplayTitle,
@@ -218,6 +225,8 @@ function App() {
   const playbackProgressFlushRef = useRef<(() => Promise<void>) | null>(null);
   /** Set during initial load; cleared when deferred startup rescan runs or user rescans manually. */
   const pendingStartupRescanRef = useRef(false);
+  const pendingStartupUpdateCheckRef = useRef(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     if (kind === "error") {
@@ -284,6 +293,9 @@ function App() {
         } else {
           diagnosticLog("startup: skipping rescan (no root folders)");
         }
+        if (state.check_for_updates) {
+          pendingStartupUpdateCheckRef.current = true;
+        }
         diagnosticLog("startup: initial load complete");
       } catch (e) {
         const msg = errorMessage(e);
@@ -310,6 +322,65 @@ function App() {
           const msg = errorMessage(e);
           diagnosticLog(`startup: rescan_library failed: ${msg}`, "ERROR");
           showToast("error", msg);
+        }
+      })();
+    });
+
+    return cancelSchedule;
+  }, [loading, showToast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenStatus: UnlistenFn | undefined;
+    let unlistenProgress: UnlistenFn | undefined;
+    void (async () => {
+      try {
+        const status = await updaterGetStatus();
+        if (!cancelled) setUpdateStatus(status);
+      } catch (e) {
+        diagnosticLog(`update status failed: ${errorMessage(e)}`, "ERROR");
+      }
+      unlistenStatus = await listen<UpdateStatus>("update://status", (event) => {
+        setUpdateStatus(event.payload);
+      });
+      unlistenProgress = await listen<UpdateProgress>("update://progress", (event) => {
+        setUpdateStatus((current) =>
+          current
+            ? {
+                ...current,
+                progress: event.payload,
+                downloading: event.payload.phase === "downloading",
+              }
+            : current,
+        );
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unlistenStatus?.();
+      unlistenProgress?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading || !pendingStartupUpdateCheckRef.current) return;
+
+    const cancelSchedule = scheduleAfterAppReady(() => {
+      if (!pendingStartupUpdateCheckRef.current) return;
+      pendingStartupUpdateCheckRef.current = false;
+      void (async () => {
+        try {
+          const status = await updaterCheck();
+          setUpdateStatus(status);
+          if (status.last_error) {
+            showToast("error", status.last_error);
+            return;
+          }
+          if (status.available && !status.pending_apply && status.latest_version) {
+            showToast("success", `Version ${status.latest_version} is available — see Settings`);
+          }
+        } catch (e) {
+          diagnosticLog(`startup: update check failed: ${errorMessage(e)}`, "ERROR");
         }
       })();
     });
@@ -1338,6 +1409,53 @@ function App() {
     setLibrary(state);
   }, []);
 
+  const handleCheckForUpdatesSetting = useCallback(async (enabled: boolean) => {
+    const state = await setCheckForUpdates(enabled);
+    setLibrary(state);
+  }, []);
+
+  const handleCheckUpdatesNow = useCallback(async () => {
+    try {
+      const status = await updaterCheck();
+      setUpdateStatus(status);
+      if (status.last_error) {
+        showToast("error", status.last_error);
+      } else if (!status.available) {
+        showToast("success", "You are on the latest version.");
+      }
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [showToast]);
+
+  const handleDownloadUpdate = useCallback(async () => {
+    try {
+      const status = await updaterStartDownload();
+      setUpdateStatus(status);
+      if (status.pending_apply) {
+        showToast("success", "Update downloaded. Restart to apply it.");
+      }
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [showToast]);
+
+  const handleRestartToApplyUpdate = useCallback(async () => {
+    const flush = playbackProgressFlushRef.current;
+    if (flush) {
+      try {
+        await flush();
+      } catch (e) {
+        showToast("error", errorMessage(e));
+      }
+    }
+    try {
+      await updaterApplyAndRestart();
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [showToast]);
+
   const handleSearchAnilist = useCallback((query: string): Promise<AnilistSearchResult[]> => {
     return searchAnilistAnime(query);
   }, []);
@@ -1833,6 +1951,9 @@ function App() {
           >
             <SettingsIcon />
             <span className="nav-label">Settings</span>
+            {updateStatus?.available || updateStatus?.pending_apply ? (
+              <span className="nav-item-badge nav-item-badge--dot" aria-hidden />
+            ) : null}
           </button>
           <button
             type="button"
@@ -2041,7 +2162,12 @@ function App() {
               onAutomaticFileDiscovery={(enabled) => void handleAutomaticFileDiscovery(enabled)}
               onLaunchAtStartup={(enabled) => void handleLaunchAtStartup(enabled)}
               onCloseIntoTray={(enabled) => void handleCloseIntoTray(enabled)}
+              onCheckForUpdates={(enabled) => void handleCheckForUpdatesSetting(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
+              updateStatus={updateStatus}
+              onCheckUpdatesNow={() => void handleCheckUpdatesNow()}
+              onDownloadUpdate={() => void handleDownloadUpdate()}
+              onRestartToApplyUpdate={() => void handleRestartToApplyUpdate()}
             />
           ) : null}
         </div>

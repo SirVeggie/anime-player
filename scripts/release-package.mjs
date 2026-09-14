@@ -3,10 +3,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { getAndTagVersion, getHeadCommit } from './release-version.mjs';
+import { INSTALL_FILES, binariesDownloadUrl } from './release-assets.mjs';
 
 async function sha256File(filePath) {
   const data = await fs.readFile(filePath);
-  return createHash('sha256').update(data).digest('hex').toUpperCase();
+  return createHash('sha256').update(data).digest('hex').toLowerCase();
 }
 
 async function packageRelease() {
@@ -24,45 +25,26 @@ async function packageRelease() {
   const updateBat = path.join(root, 'scripts', 'update.bat');
   const updatePs1 = path.join(root, 'scripts', '_update.ps1');
 
-  try {
-    await fs.access(exePath);
-  } catch {
-    console.error(`Error: anime-player.exe not found at ${exePath}.`);
-    console.error('Please run `npm run tauri build` first.');
-    process.exit(1);
-  }
+  const sourceByName = {
+    'anime-player.exe': exePath,
+    'libmpv-2.dll': dllPath,
+    'ffmpeg.exe': ffmpegPaths[0],
+    'ffprobe.exe': ffmpegPaths[1],
+    'fpcalc.exe': fpcalcPath,
+    'update.bat': updateBat,
+    '_update.ps1': updatePs1,
+  };
 
-  try {
-    await fs.access(dllPath);
-  } catch {
-    console.error('Error: libmpv-2.dll not found in src-tauri/libs/mpv.');
-    console.error('Please run `npm run setup:mpv` first.');
-    process.exit(1);
-  }
-
-  for (const toolPath of ffmpegPaths) {
-    try {
-      await fs.access(toolPath);
-    } catch {
-      console.error(`Error: ${path.basename(toolPath)} not found in src-tauri/libs/ffmpeg.`);
-      console.error('Please run `npm run setup:ffmpeg` first.');
+  for (const name of INSTALL_FILES) {
+    const sourcePath = sourceByName[name];
+    if (!sourcePath) {
+      console.error(`Error: no source mapping for ${name}.`);
       process.exit(1);
     }
-  }
-
-  try {
-    await fs.access(fpcalcPath);
-  } catch {
-    console.error('Error: fpcalc.exe not found in src-tauri/libs/chromaprint.');
-    console.error('Please run `npm run setup:chromaprint` first.');
-    process.exit(1);
-  }
-
-  for (const scriptPath of [updateBat, updatePs1]) {
     try {
-      await fs.access(scriptPath);
+      await fs.access(sourcePath);
     } catch {
-      console.error(`Error: ${path.basename(scriptPath)} not found in scripts/.`);
+      console.error(`Error: ${name} not found at ${sourcePath}.`);
       process.exit(1);
     }
   }
@@ -71,12 +53,9 @@ async function packageRelease() {
   const releasesDir = path.join(root, 'releases');
   const destDirName = `AnimePlayer-${version}`;
   const destDir = path.join(releasesDir, destDirName);
-  const destExe = path.join(destDir, 'anime-player.exe');
-  const destDll = path.join(destDir, 'libmpv-2.dll');
   const destVersion = path.join(destDir, 'VERSION.txt');
   const zipPath = path.join(releasesDir, `${destDirName}.zip`);
-  const hashPath = path.join(releasesDir, 'anime-player.exe.sha256');
-  const looseExePath = path.join(releasesDir, 'anime-player.exe');
+  const manifestPath = path.join(releasesDir, 'manifest.json');
   const buildMetaPath = path.join(releasesDir, '.build-meta.json');
 
   console.log(`\nCreating ${destDirName}...`);
@@ -86,21 +65,32 @@ async function packageRelease() {
   await fs.mkdir(destDir, { recursive: true });
 
   console.log('Copying files...');
-  await fs.copyFile(exePath, destExe);
-  await fs.copyFile(dllPath, destDll);
-  for (const toolPath of ffmpegPaths) {
-    await fs.copyFile(toolPath, path.join(destDir, path.basename(toolPath)));
+  for (const name of INSTALL_FILES) {
+    await fs.copyFile(sourceByName[name], path.join(destDir, name));
   }
-  await fs.copyFile(fpcalcPath, path.join(destDir, 'fpcalc.exe'));
-  await fs.copyFile(updateBat, path.join(destDir, 'update.bat'));
-  await fs.copyFile(updatePs1, path.join(destDir, '_update.ps1'));
   await fs.writeFile(destVersion, version, 'utf8');
 
-  await fs.copyFile(destExe, looseExePath);
+  const files = [];
+  for (const name of INSTALL_FILES) {
+    const destFile = path.join(destDir, name);
+    const stat = await fs.stat(destFile);
+    const sha256 = await sha256File(destFile);
+    files.push({
+      name,
+      sha256,
+      size: stat.size,
+      url: binariesDownloadUrl(name, sha256),
+      localPath: path.join(destDirName, name).replaceAll('\\', '/'),
+    });
+  }
 
-  const exeHash = await sha256File(destExe);
-  const hashLine = `${exeHash}  anime-player.exe\n`;
-  await fs.writeFile(hashPath, hashLine, 'utf8');
+  const manifest = {
+    schema: 1,
+    version,
+    notes: '',
+    files: files.map(({ name, sha256, size, url }) => ({ name, sha256, size, url })),
+  };
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
   console.log(`Creating zip archive: ${destDirName}.zip...`);
   try {
@@ -113,18 +103,17 @@ async function packageRelease() {
   const commit = getHeadCommit();
   await fs.writeFile(
     buildMetaPath,
-    JSON.stringify({ tag: version, commit }, null, 2) + '\n',
+    JSON.stringify({ tag: version, commit, files }, null, 2) + '\n',
     'utf8',
   );
 
   console.log('\nSuccess! Your clean portable package is ready at:');
   console.log(destDir);
   console.log(`Archive created at:\n${zipPath}`);
-  console.log(`\nSHA256 for GitHub upload:\n${hashPath}`);
+  console.log(`Updater manifest:\n${manifestPath}`);
   console.log('\nWhen publishing the GitHub release, attach:');
   console.log(`  - ${destDirName}.zip`);
-  console.log('  - anime-player.exe');
-  console.log('  - anime-player.exe.sha256');
+  console.log('  - manifest.json');
 }
 
 packageRelease().catch((err) => {

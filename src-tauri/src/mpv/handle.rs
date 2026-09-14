@@ -170,11 +170,21 @@ impl MpvHandle {
         self.command(&["set", "aid", &track_id.to_string()])
     }
 
+    pub fn select_audio_auto(&self) -> Result<(), String> {
+        // `auto` is mpv's per-file default. An explicit aid/sid sticks across
+        // loadfile, so callers must reset this when there is no saved pref.
+        self.command(&["set", "aid", "auto"])
+    }
+
     pub fn select_subtitle_track(&self, track_id: Option<i64>) -> Result<(), String> {
         let value = track_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "no".to_string());
         self.command(&["set", "sid", &value])
+    }
+
+    pub fn select_subtitle_auto(&self) -> Result<(), String> {
+        self.command(&["set", "sid", "auto"])
     }
 
     pub fn add_subtitle_file(&self, path: &str) -> Result<(), String> {

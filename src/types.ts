@@ -178,6 +178,33 @@ export type LibraryState = {
   launch_at_startup: boolean;
   /** Close hides to the system tray instead of quitting. Default off. */
   close_into_tray: boolean;
+  /** Check GitHub for a newer portable build on startup. Default on. */
+  check_for_updates: boolean;
+};
+
+export type UpdatePhase = "idle" | "checking" | "downloading" | "ready" | "error";
+
+export type UpdateProgress = {
+  phase: UpdatePhase;
+  file: string | null;
+  downloaded: number;
+  total: number;
+  bytes_downloaded: number;
+  bytes_total: number;
+};
+
+export type UpdateStatus = {
+  current_version: string | null;
+  latest_version: string | null;
+  notes: string;
+  available: boolean;
+  pending_apply: boolean;
+  downloading: boolean;
+  updates_supported: boolean;
+  download_bytes: number;
+  files_to_download: string[];
+  last_error: string | null;
+  progress: UpdateProgress;
 };
 
 export type ScanSummary = {

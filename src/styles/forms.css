@@ -541,6 +541,21 @@ button.settings-reorder-button:hover:not(:disabled) span {
   word-break: break-word;
 }
 
+.update-notes {
+  margin: 0;
+  max-height: 8.5em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .local-data-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

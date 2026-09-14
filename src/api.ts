@@ -39,6 +39,7 @@ import type {
   RenameFilesSummary,
   RootFolder,
   ScanSummary,
+  UpdateStatus,
   VideoFile,
 } from "./types";
 
@@ -84,6 +85,26 @@ export function setLaunchAtStartup(enabled: boolean): Promise<LibraryState> {
 
 export function setCloseIntoTray(enabled: boolean): Promise<LibraryState> {
   return invoke("set_close_into_tray", { enabled });
+}
+
+export function setCheckForUpdates(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_check_for_updates", { enabled });
+}
+
+export function updaterGetStatus(): Promise<UpdateStatus> {
+  return invoke("updater_get_status");
+}
+
+export function updaterCheck(): Promise<UpdateStatus> {
+  return invoke("updater_check");
+}
+
+export function updaterStartDownload(): Promise<UpdateStatus> {
+  return invoke("updater_start_download");
+}
+
+export function updaterApplyAndRestart(): Promise<void> {
+  return invoke("updater_apply_and_restart");
 }
 
 export function confirmQuit(): Promise<void> {
@@ -426,8 +447,12 @@ export function applySavedTrackPrefs(animeId: number, episodeId: number): Promis
   return invoke("apply_saved_track_prefs", { animeId, episodeId });
 }
 
-export function saveCurrentTrackPrefs(animeId: number, episodeId: number): Promise<TrackPref> {
-  return invoke("save_current_track_prefs", { animeId, episodeId });
+export function saveTrackPrefs(
+  animeId: number,
+  episodeId: number,
+  pref: TrackPref,
+): Promise<TrackPref> {
+  return invoke("save_track_prefs", { animeId, episodeId, pref });
 }
 
 export function setMpvVolume(volume: number): Promise<void> {

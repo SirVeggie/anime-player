@@ -4,17 +4,30 @@ function norm(value: string | null | undefined): string {
   return (value ?? "").trim();
 }
 
-export function trackPrefFromTracks(tracks: MpvTrack[]): TrackPref {
+export function trackPrefFromTracks(
+  tracks: MpvTrack[],
+  missingSub: "off" | "auto" = "auto",
+): TrackPref {
   const audio = tracks.find((track) => track.kind === "audio" && track.selected) ?? null;
   const sub = tracks.find((track) => track.kind === "sub" && track.selected) ?? null;
   return {
     audio_lang: audio?.lang ?? null,
     audio_title: audio?.title ?? null,
-    subtitle_off: sub === null,
+    subtitle_off: sub === null && missingSub === "off",
     subtitle_lang: sub?.lang ?? null,
     subtitle_title: sub?.title ?? null,
     subtitle_external_path: sub?.external ? (sub.external_filename ?? null) : null,
   };
+}
+
+/** Infer Off only when the user already had an explicit sub choice (or Off). */
+export function missingSubForSave(applied: TrackPref | null): "off" | "auto" {
+  if (!applied) return "auto";
+  if (applied.subtitle_off) return "off";
+  if (applied.subtitle_lang || applied.subtitle_title || applied.subtitle_external_path) {
+    return "off";
+  }
+  return "auto";
 }
 
 export function trackPrefsEqual(left: TrackPref | null, right: TrackPref | null): boolean {

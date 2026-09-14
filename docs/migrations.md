@@ -21,3 +21,8 @@ rewrite unless a change below says so.
   own choice. `J` / `#` after load should persist on leave / next episode.
 - **When to remove:** Keep the `CREATE TABLE IF NOT EXISTS` statements; they
   are the schema definition for new and existing databases.
+- **Semantics (2026-09):** `subtitle_off` is only an explicit user Off.
+  A snapshot with no selected subtitle is **not** Off; apply uses mpv
+  `sid=auto` when there is no subtitle identity. Rows already saved with
+  `subtitle_off = 1` (including false Offs from the first implementation)
+  keep applying Off until the user picks a subtitle again.
