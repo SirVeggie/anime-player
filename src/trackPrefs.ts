@@ -30,6 +30,15 @@ export function missingSubForSave(applied: TrackPref | null): "off" | "auto" {
   return "auto";
 }
 
+/**
+ * After `mpv stop` the track list is empty or has nothing selected. Persisting
+ * that snapshot would treat a missing subtitle as Off and overwrite the
+ * saved choice. A live file still has a selected audio (or subtitle) track.
+ */
+export function canPersistTrackSnapshot(tracks: MpvTrack[]): boolean {
+  return tracks.some((track) => track.selected);
+}
+
 export function trackPrefsEqual(left: TrackPref | null, right: TrackPref | null): boolean {
   if (left === right) return true;
   if (!left || !right) return false;

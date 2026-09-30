@@ -603,7 +603,9 @@ view components. Per-screen UI lives in `src/components/`:
   an explicit user Off — a snapshot with no selected sub is not Off. `set sid`
   / `set aid` stick across `loadfile`, so apply always sets `auto` when there
   is no pref. Auto-apply does not create an episode override; menu picks,
-  added subtitle files, and later `J`/`#` changes do.
+  added subtitle files, and later `J`/`#` changes do. Persist skips when
+  mpv has no selected track (after EOF `stop`, the unmount snapshot would
+  otherwise rewrite the saved subtitle as Off).
 - `scrub_preview.rs` — sprite cache I/O and ffmpeg generation;
   `get_scrub_sprite_if_ready_cmd`, `scrub_sprite_is_cached_cmd`.
 - `jobs/` — `JobManager` in `AppState`, scheduler (priority, parallel limit,

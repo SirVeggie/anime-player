@@ -21,7 +21,7 @@ import {
   setMpvVolume,
   syncAnilistEpisodeProgress,
 } from "../api";
-import { missingSubForSave, trackPrefFromTracks, trackPrefsEqual } from "../trackPrefs";
+import { canPersistTrackSnapshot, missingSubForSave, trackPrefFromTracks, trackPrefsEqual } from "../trackPrefs";
 import { opEdSeekMarkers, type OpEdSeekMarker } from "../opEd";
 import { animeDisplayTitle } from "../utils";
 import type {
@@ -798,6 +798,7 @@ export function PlayerView(props: {
     if (loadedPathRef.current && !mediaPathsEqual(loadedPathRef.current, current.path)) return;
     try {
       const tracks = await getMpvTracks();
+      if (!canPersistTrackSnapshot(tracks)) return;
       const identity = trackPrefFromTracks(tracks, missingSubForSave(appliedTrackPrefRef.current));
       if (trackPrefsEqual(identity, appliedTrackPrefRef.current)) return;
       const saved = await saveTrackPrefs(current.anime_id, current.id, identity);
