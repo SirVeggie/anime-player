@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  filterAnimeForGrid,
+  readStoredGridFilter,
+  storeGridFilter,
+} from "../animeGridFilter";
+import {
   GRID_SORT_OPTIONS,
   gridSortLabel,
   readStoredGridSort,
@@ -19,6 +24,7 @@ import { animeDisplayTitle, animeTooltipTitle } from "../utils";
 import { AnimeCardLabel } from "./AnimeCardLabel";
 import { useAnimeContextMenu, type AnimeContextMenuHandlers } from "./animeContextMenu";
 import { CustomDropdown } from "./CustomDropdown";
+import { GridFilterBar } from "./GridFilterBar";
 import { ViewHeader } from "./ViewHeader";
 
 export function AnimeGrid(props: {
@@ -53,14 +59,26 @@ export function AnimeGrid(props: {
     onSearchAnilist,
     onLinkAnilist,
   } = props;
+  const [filterValue, setFilterValue] = useState(readStoredGridFilter);
   const [sortValue, setSortValue] = useState(readStoredGridSort);
 
+  const filteredAnime = useMemo(() => filterAnimeForGrid(anime, filterValue), [anime, filterValue]);
   const sortedAnime = useMemo(
-    () => sortAnimeForGrid(anime, sortValue, preferAnilistDisplayTitle),
-    [anime, preferAnilistDisplayTitle, sortValue],
+    () => sortAnimeForGrid(filteredAnime, sortValue, preferAnilistDisplayTitle),
+    [filteredAnime, preferAnilistDisplayTitle, sortValue],
   );
 
   const sortLabel = gridSortLabel(sortValue);
+  const titleCountLabel = `${anime.length} title${anime.length === 1 ? "" : "s"}`;
+  const subtitle =
+    filterValue === 0 || anime.length === 0
+      ? `${titleCountLabel} in this category.`
+      : `${filteredAnime.length} of ${titleCountLabel} in this category.`;
+
+  const handleFilterChange = (value: number) => {
+    setFilterValue(value);
+    storeGridFilter(value);
+  };
 
   const handleSortChange = (value: number) => {
     setSortValue(value);
@@ -71,16 +89,19 @@ export function AnimeGrid(props: {
     <>
       <ViewHeader
         title={category?.name ?? "Titles"}
-        subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} in this category.`}
+        subtitle={subtitle}
         onBack={onBack}
         action={
           anime.length > 0 ? (
-            <CustomDropdown
-              label={`Sort: ${sortLabel}`}
-              options={[...GRID_SORT_OPTIONS]}
-              value={sortValue}
-              onChange={handleSortChange}
-            />
+            <>
+              <GridFilterBar value={filterValue} onChange={handleFilterChange} />
+              <CustomDropdown
+                label={`Sort: ${sortLabel}`}
+                options={[...GRID_SORT_OPTIONS]}
+                value={sortValue}
+                onChange={handleSortChange}
+              />
+            </>
           ) : null
         }
       />
@@ -90,6 +111,14 @@ export function AnimeGrid(props: {
           <p className="muted">Add root folders and rescan from settings, or move titles into this category later.</p>
           <button type="button" onClick={onOpenSettings}>
             Open settings
+          </button>
+        </div>
+      ) : filteredAnime.length === 0 ? (
+        <div className="empty empty--wide">
+          <h2>No titles match this filter</h2>
+          <p className="muted">Try a different filter, or show every title in this category.</p>
+          <button type="button" onClick={() => handleFilterChange(0)}>
+            Show all
           </button>
         </div>
       ) : (

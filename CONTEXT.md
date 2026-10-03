@@ -26,7 +26,7 @@ view selection, async handlers, toasts, F11 / Esc / Q hotkeys) and composes the
 view components. Per-screen UI lives in `src/components/`:
 `WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
 `EpisodeScreen.tsx`, `BulkEditScreen.tsx`, `JobsScreen.tsx`, `SettingsScreen.tsx` (plus the local
-`RuleEditor`), `PlayerView.tsx`, `ViewHeader.tsx`, `CustomDropdown.tsx`,
+`RuleEditor`), `PlayerView.tsx`, `ViewHeader.tsx`, `GridFilterBar.tsx`, `CustomDropdown.tsx`,
 `ToastStack.tsx`, `ContextMenu.tsx`, `PromptModal.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
 `EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
 
@@ -48,8 +48,10 @@ view components. Per-screen UI lives in `src/components/`:
   space-separated words are ANDed (any order); `|`, `||`, or uppercase `OR` split
   alternatives (lowercase `or` is a normal search word). **Regular expression** mode (off by default) replaces that syntax
   with a case-insensitive `RegExp` against the same fields. Results use the same
-  grid sort dropdown (always visible; `animePlayer.searchGridSort` in
-  `localStorage`, separate from category `animePlayer.animeGridSort`). Clear with the ×
+  grid filter bar and sort dropdown (always visible;
+  `animePlayer.searchGridFilter` / `animePlayer.searchGridSort` in
+  `localStorage`, separate from category `animePlayer.animeGridFilter` /
+  `animePlayer.animeGridSort`). Clear with the ×
   control or Esc (clears query first;
   Esc again leaves search). Index from `get_anime_search_index`; matching in
   `src/search.ts`.
@@ -101,9 +103,14 @@ view components. Per-screen UI lives in `src/components/`:
   thread), but **must not** hold `AppDatabase::with_conn` across ffmpeg/fpcalc
   or other slow I/O—only brief SQLite reads/writes—so UI commands like
   `list_episodes` and `get_anilist_cover_image` stay responsive.
-- The anime grid header includes a sort dropdown (alphabetical, most recent
-  episode, last watched, episode/remaining counts); the choice is persisted in
-  `localStorage` under `animePlayer.animeGridSort`. **Most recent** sorts by
+- The anime grid header includes a watch-status **filter bar** (All, Remaining,
+  Completed, Missing) to the left of the sort dropdown (alphabetical, most recent
+  episode, last watched, episode/remaining counts, watch progress). Remaining is
+  `unwatched_count > 0`, Completed is `unwatched_count === 0`, Missing is
+  `gap_episode_count > 0`. Filter and sort persist in `localStorage` under
+  `animePlayer.animeGridFilter` and `animePlayer.animeGridSort`. Search uses the
+  same controls with `animePlayer.searchGridFilter` /
+  `animePlayer.searchGridSort`. **Most recent** sorts by
   `anime.latest_episode_at` descending. That field is stored on `anime` and
   recomputed after every library rescan as `MAX(episodes.updated_at)` per show
   (`db::refresh_anime_latest_episode_at`). On each app start, if at least one
@@ -743,8 +750,10 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `src/components/PlayerView.tsx` — mpv-backed player view and controls.
 - `src/components/ManualSkipScreen.tsx`, `src/components/TemplateRangeScrubber.tsx`
   — manual OP/ED template editor UI.
-- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,CustomDropdown,ContextMenu,PromptModal,ToastStack,icons}.tsx`
+- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,GridFilterBar,CustomDropdown,ContextMenu,PromptModal,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
+- `src/animeGridSort.ts`, `src/animeGridFilter.ts` — category/search grid sort
+  and watch-status filter helpers (localStorage keys included).
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src/volume.ts` — volume constants and clamping for
   mpv's native 0–130 log scale.
