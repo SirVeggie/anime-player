@@ -847,6 +847,44 @@ button:disabled {
   min-width: 180px;
 }
 
+.grid-text-filter {
+  position: relative;
+  width: 200px;
+  min-width: 132px;
+  flex: 0 1 200px;
+}
+
+.grid-text-filter input {
+  width: 100%;
+  padding-right: 32px;
+}
+
+button.grid-text-filter__clear,
+.view-actions button.grid-text-filter__clear {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  transform: translateY(-50%);
+  cursor: pointer;
+  filter: none;
+}
+
+button.grid-text-filter__clear:hover:not(:disabled),
+.view-actions button.grid-text-filter__clear:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-color);
+  filter: none;
+}
+
 .grid-filter-bar {
   display: inline-flex;
   align-items: center;

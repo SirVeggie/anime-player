@@ -103,14 +103,18 @@ view components. Per-screen UI lives in `src/components/`:
   thread), but **must not** hold `AppDatabase::with_conn` across ffmpeg/fpcalc
   or other slow I/O—only brief SQLite reads/writes—so UI commands like
   `list_episodes` and `get_anilist_cover_image` stay responsive.
-- The anime grid header includes a watch-status **filter bar** (All, Remaining,
-  Completed, Missing) to the left of the sort dropdown (alphabetical, most recent
-  episode, last watched, episode/remaining counts, watch progress). Remaining is
-  `unwatched_count > 0`, Completed is `unwatched_count === 0`, Missing is
-  `gap_episode_count > 0`. Filter and sort persist in `localStorage` under
-  `animePlayer.animeGridFilter` and `animePlayer.animeGridSort`. Search uses the
-  same controls with `animePlayer.searchGridFilter` /
-  `animePlayer.searchGridSort`. **Most recent** sorts by
+- The anime grid header includes a live **text filter** (left of the watch-status
+  chips and sort dropdown) that case-insensitively contains-matches local title,
+  linked AniList title, and episode file names from `get_anime_search_index`. It
+  updates as you type and lives in `sessionStorage` (`animePlayer.animeGridTextFilter`)
+  so it survives opening an episode in the same session. A watch-status **filter
+  bar** (All, Remaining, Completed, Missing) sits between that field and the sort
+  dropdown (alphabetical, most recent episode, last watched, episode/remaining
+  counts, watch progress). Remaining is `unwatched_count > 0`, Completed is
+  `unwatched_count === 0`, Missing is `gap_episode_count > 0`. Status filter and
+  sort persist in `localStorage` under `animePlayer.animeGridFilter` and
+  `animePlayer.animeGridSort`. Search uses the same status/sort controls with
+  `animePlayer.searchGridFilter` / `animePlayer.searchGridSort`. **Most recent** sorts by
   `anime.latest_episode_at` descending. That field is stored on `anime` and
   recomputed after every library rescan as `MAX(episodes.updated_at)` per show
   (`db::refresh_anime_latest_episode_at`). On each app start, if at least one
@@ -752,8 +756,8 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
   — manual OP/ED template editor UI.
 - `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,GridFilterBar,CustomDropdown,ContextMenu,PromptModal,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
-- `src/animeGridSort.ts`, `src/animeGridFilter.ts` — category/search grid sort
-  and watch-status filter helpers (localStorage keys included).
+- `src/animeGridSort.ts`, `src/animeGridFilter.ts` — category/search grid sort,
+  watch-status filter, and category text-filter helpers (storage keys included).
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src/volume.ts` — volume constants and clamping for
   mpv's native 0–130 log scale.

@@ -2031,6 +2031,7 @@ function App() {
             <AnimeGrid
               category={selectedCategory}
               anime={animeInCategory}
+              searchIndex={animeSearchIndex}
               categories={library.categories}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
               onBack={() => navigateToView("categories", "restore")}
