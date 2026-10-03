@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  filterAnimeForGrid,
-  readStoredSearchGridFilter,
-  storeSearchGridFilter,
-} from "../animeGridFilter";
-import {
   GRID_SORT_OPTIONS,
   gridSortLabel,
   readStoredSearchGridSort,
@@ -24,7 +19,6 @@ import type { AnimeSearchEntry, AnimeSummary } from "../types";
 import { AnimeCardGrid, type AnimeContextMenuHandlers } from "./AnimeGrid";
 import { CustomCheckbox } from "./CustomCheckbox";
 import { CustomDropdown } from "./CustomDropdown";
-import { GridFilterBar } from "./GridFilterBar";
 import { ViewHeader } from "./ViewHeader";
 
 export function SearchScreen(props: {
@@ -50,7 +44,6 @@ export function SearchScreen(props: {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [includeFilenames, setIncludeFilenames] = useState(readStoredSearchIncludeFilenames);
   const [useRegex, setUseRegex] = useState(readStoredSearchUseRegex);
-  const [filterValue, setFilterValue] = useState(readStoredSearchGridFilter);
   const [sortValue, setSortValue] = useState(readStoredSearchGridSort);
 
   const searchOptions = useMemo(
@@ -67,21 +60,12 @@ export function SearchScreen(props: {
     return anime.filter((item) => ids.has(item.id));
   }, [activeSearch, anime, query, regexInvalid, searchIndex, searchOptions]);
 
-  const filteredMatchingAnime = useMemo(
-    () => filterAnimeForGrid(matchingAnime, filterValue),
-    [filterValue, matchingAnime],
-  );
   const sortedMatchingAnime = useMemo(
-    () => sortAnimeForGrid(filteredMatchingAnime, sortValue, preferAnilistDisplayTitle),
-    [filteredMatchingAnime, preferAnilistDisplayTitle, sortValue],
+    () => sortAnimeForGrid(matchingAnime, sortValue, preferAnilistDisplayTitle),
+    [matchingAnime, preferAnilistDisplayTitle, sortValue],
   );
 
   const sortLabel = gridSortLabel(sortValue);
-
-  const handleFilterChange = (value: number) => {
-    setFilterValue(value);
-    storeSearchGridFilter(value);
-  };
 
   const handleSortChange = (value: number) => {
     setSortValue(value);
@@ -109,9 +93,7 @@ export function SearchScreen(props: {
         : "Search titles and AniList names."
     : regexInvalid
       ? "Invalid regular expression."
-      : filterValue === 0 || matchingAnime.length === 0
-        ? `${matchingCountLabel}.`
-        : `${filteredMatchingAnime.length} of ${matchingCountLabel}.`;
+      : `${matchingCountLabel}.`;
 
   const placeholder = useRegex
     ? "Regular expression (case-insensitive)"
@@ -141,7 +123,6 @@ export function SearchScreen(props: {
             />
           </div>
           <div className="search-panel__toolbar">
-            <GridFilterBar value={filterValue} onChange={handleFilterChange} />
             <CustomDropdown
               label={`Sort: ${sortLabel}`}
               options={[...GRID_SORT_OPTIONS]}
@@ -206,14 +187,6 @@ export function SearchScreen(props: {
               ? "Try a different pattern or turn off regular expression mode."
               : "Try other words, a filename fragment, or an alternate OR branch."}
           </p>
-        </div>
-      ) : filteredMatchingAnime.length === 0 ? (
-        <div className="empty empty--wide">
-          <h2>No titles match this filter</h2>
-          <p className="muted">Try a different filter, or show every search match.</p>
-          <button type="button" onClick={() => handleFilterChange(0)}>
-            Show all
-          </button>
         </div>
       ) : (
         <AnimeCardGrid

@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   filterAnimeByText,
-  filterAnimeForGrid,
-  readStoredGridFilter,
   readStoredGridTextFilter,
-  storeGridFilter,
   storeGridTextFilter,
 } from "../animeGridFilter";
 import {
@@ -27,7 +24,7 @@ import { animeDisplayTitle, animeTooltipTitle } from "../utils";
 import { AnimeCardLabel } from "./AnimeCardLabel";
 import { useAnimeContextMenu, type AnimeContextMenuHandlers } from "./animeContextMenu";
 import { CustomDropdown } from "./CustomDropdown";
-import { GridFilterBar, GridTextFilter } from "./GridFilterBar";
+import { GridTextFilter } from "./GridFilterBar";
 import { ViewHeader } from "./ViewHeader";
 
 export function AnimeGrid(props: {
@@ -64,17 +61,12 @@ export function AnimeGrid(props: {
     onSearchAnilist,
     onLinkAnilist,
   } = props;
-  const [filterValue, setFilterValue] = useState(readStoredGridFilter);
   const [textFilter, setTextFilter] = useState(readStoredGridTextFilter);
   const [sortValue, setSortValue] = useState(readStoredGridSort);
 
-  const textFilteredAnime = useMemo(
+  const filteredAnime = useMemo(
     () => filterAnimeByText(anime, textFilter, searchIndex),
     [anime, searchIndex, textFilter],
-  );
-  const filteredAnime = useMemo(
-    () => filterAnimeForGrid(textFilteredAnime, filterValue),
-    [filterValue, textFilteredAnime],
   );
   const sortedAnime = useMemo(
     () => sortAnimeForGrid(filteredAnime, sortValue, preferAnilistDisplayTitle),
@@ -83,25 +75,15 @@ export function AnimeGrid(props: {
 
   const sortLabel = gridSortLabel(sortValue);
   const titleCountLabel = `${anime.length} title${anime.length === 1 ? "" : "s"}`;
-  const filtersActive = filterValue !== 0 || Boolean(textFilter.trim());
+  const filterActive = Boolean(textFilter.trim());
   const subtitle =
-    !filtersActive || anime.length === 0
+    !filterActive || anime.length === 0
       ? `${titleCountLabel} in this category.`
       : `${filteredAnime.length} of ${titleCountLabel} in this category.`;
-
-  const handleFilterChange = (value: number) => {
-    setFilterValue(value);
-    storeGridFilter(value);
-  };
 
   const handleTextFilterChange = (value: string) => {
     setTextFilter(value);
     storeGridTextFilter(value);
-  };
-
-  const clearGridFilters = () => {
-    handleFilterChange(0);
-    handleTextFilterChange("");
   };
 
   const handleSortChange = (value: number) => {
@@ -119,7 +101,6 @@ export function AnimeGrid(props: {
           anime.length > 0 ? (
             <>
               <GridTextFilter value={textFilter} onChange={handleTextFilterChange} />
-              <GridFilterBar value={filterValue} onChange={handleFilterChange} />
               <CustomDropdown
                 label={`Sort: ${sortLabel}`}
                 options={[...GRID_SORT_OPTIONS]}
@@ -142,7 +123,7 @@ export function AnimeGrid(props: {
         <div className="empty empty--wide">
           <h2>No titles match this filter</h2>
           <p className="muted">Try a different filter, or show every title in this category.</p>
-          <button type="button" onClick={clearGridFilters}>
+          <button type="button" onClick={() => handleTextFilterChange("")}>
             Show all
           </button>
         </div>
