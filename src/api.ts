@@ -91,6 +91,14 @@ export function setCheckForUpdates(enabled: boolean): Promise<LibraryState> {
   return invoke("set_check_for_updates", { enabled });
 }
 
+export function setUpdateReminders(enabled: boolean): Promise<LibraryState> {
+  return invoke("set_update_reminders", { enabled });
+}
+
+export function setSkippedUpdateVersion(version: string | null): Promise<LibraryState> {
+  return invoke("set_skipped_update_version", { version });
+}
+
 export function updaterGetStatus(): Promise<UpdateStatus> {
   return invoke("updater_get_status");
 }

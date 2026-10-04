@@ -27,7 +27,7 @@ view components. Per-screen UI lives in `src/components/`:
 `WindowTitleBar.tsx`, `CategoryScreen.tsx`, `AnimeGrid.tsx`,
 `EpisodeScreen.tsx`, `BulkEditScreen.tsx`, `JobsScreen.tsx`, `SettingsScreen.tsx` (plus the local
 `RuleEditor`), `PlayerView.tsx`, `ViewHeader.tsx`, `GridFilterBar.tsx`, `CustomDropdown.tsx`,
-`ToastStack.tsx`, `ContextMenu.tsx`, `PromptModal.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
+`ToastStack.tsx`, `ContextMenu.tsx`, `PromptModal.tsx`, `UpdatePopup.tsx`, `icons.tsx`. The `pickQuickPlayEpisode` helper used by both `App.tsx` and
 `EpisodeScreen.tsx` lives in `src/quickPlay.ts`.
 
 - The library/settings UI is an original dark design. Only the video player
@@ -246,8 +246,14 @@ view components. Per-screen UI lives in `src/components/`:
 - Settings **Application** panel exposes SQLite-backed booleans on
   `LibraryState`: **Automatic file discovery** (`automatic_file_discovery`,
   default on), **Launch at startup** (`launch_at_startup`, default off),
-  **Close into tray** (`close_into_tray`, default off), and **Check for updates
-  on startup** (`check_for_updates`, default on). The **Updates** panel shows
+  **Close into tray** (`close_into_tray`, default off), and   **Check for updates
+  on startup** (`check_for_updates`, default on), and **Show update reminders**
+  (`update_reminders`, default on). When a startup check finds a newer release
+  and reminders are on, a modal offers **Update**, **Remind me later** (this
+  session), or **Skip version** (persisted as `skipped_update_version` until a
+  different latest tag appears). Reminders also drive the Settings sidebar
+  badge; turning them off hides the popup, toast, and blip, but Settings still
+  shows download/restart. The **Updates** panel shows
   the portable `VERSION.txt` tag, checks
   `https://github.com/SirVeggie/anime-player/releases/latest/download/manifest.json`,
   downloads only files whose SHA256 changed into `<install>/_pending/`, then
@@ -756,12 +762,12 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
 - `README.md` — user-facing setup + run + project layout.
 - `TODO.md` — running list of follow-ups.
 - `CONTEXT.md` — this file.
-- `src/api.ts`, `src/types.ts`, `src/utils.ts` — frontend command
-  bindings, shared DTOs, and formatting helpers.
+- `src/api.ts`, `src/types.ts`, `src/utils.ts`, `src/updateReminders.ts` — frontend command
+  bindings, shared DTOs, formatting helpers, and update-popup reminder rules.
 - `src/components/PlayerView.tsx` — mpv-backed player view and controls.
 - `src/components/ManualSkipScreen.tsx`, `src/components/TemplateRangeScrubber.tsx`
   — manual OP/ED template editor UI.
-- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,GridFilterBar,CustomDropdown,ContextMenu,PromptModal,ToastStack,icons}.tsx`
+- `src/components/{CategoryScreen,AnimeGrid,EpisodeScreen,SettingsScreen,WindowTitleBar,ViewHeader,GridFilterBar,CustomDropdown,ContextMenu,PromptModal,ConfirmModal,UpdatePopup,ToastStack,icons}.tsx`
   — split-out view components composed by `App.tsx`.
 - `src/animeGridSort.ts`, `src/animeGridFilter.ts` — category/search grid sort
   and category text-filter helpers (storage keys included).

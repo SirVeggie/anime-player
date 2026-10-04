@@ -57,6 +57,7 @@ export function SettingsScreen(props: {
   onLaunchAtStartup: (enabled: boolean) => void;
   onCloseIntoTray: (enabled: boolean) => void;
   onCheckForUpdates: (enabled: boolean) => void;
+  onUpdateReminders: (enabled: boolean) => void;
   onCleanLocalData: () => void;
   updateStatus: UpdateStatus | null;
   onCheckUpdatesNow: () => void;
@@ -99,6 +100,7 @@ export function SettingsScreen(props: {
     onLaunchAtStartup,
     onCloseIntoTray,
     onCheckForUpdates,
+    onUpdateReminders,
     onCleanLocalData,
     updateStatus,
     onCheckUpdatesNow,
@@ -154,6 +156,15 @@ export function SettingsScreen(props: {
             onChange={onCheckForUpdates}
             label="Check for updates on startup"
             tooltip="Look for a newer GitHub release after the app is ready. You can still check manually below."
+          />
+        </div>
+        <div className="settings-item settings-item--stacked">
+          <CustomCheckbox
+            checked={library.update_reminders}
+            disabled={busy}
+            onChange={onUpdateReminders}
+            label="Show update reminders"
+            tooltip="Show a startup popup, notifications, and the Settings badge when a new version is available. Turn this off to keep updates quiet."
           />
         </div>
       </section>
@@ -214,6 +225,10 @@ export function SettingsScreen(props: {
             </button>
           )}
         </div>
+        {library.skipped_update_version &&
+        library.skipped_update_version === updateStatus?.latest_version ? (
+          <p className="muted">Reminders for {library.skipped_update_version} are skipped.</p>
+        ) : null}
         {!updateStatus?.updates_supported ? (
           <p className="muted">In-app updates are disabled in development builds.</p>
         ) : null}

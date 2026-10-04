@@ -754,13 +754,15 @@ button:focus-visible {
 }
 
 :where(button[type="submit"]),
-.view-actions button {
+.view-actions button,
+button.button-primary {
   background: var(--progress-color);
   color: #fff;
 }
 
 :where(button[type="submit"]:hover:not(:disabled)),
-.view-actions button:hover:not(:disabled) {
+.view-actions button:hover:not(:disabled),
+button.button-primary:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 

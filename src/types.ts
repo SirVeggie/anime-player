@@ -180,6 +180,10 @@ export type LibraryState = {
   close_into_tray: boolean;
   /** Check GitHub for a newer portable build on startup. Default on. */
   check_for_updates: boolean;
+  /** Startup popup, toast, and settings badge when an update is available. Default on. */
+  update_reminders: boolean;
+  /** Latest version the user chose to skip reminders for. */
+  skipped_update_version: string | null;
 };
 
 export type UpdatePhase = "idle" | "checking" | "downloading" | "ready" | "error";

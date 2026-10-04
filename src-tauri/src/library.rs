@@ -27,6 +27,8 @@ const AUTOMATIC_FILE_DISCOVERY_KEY: &str = "automatic_file_discovery";
 const LAUNCH_AT_STARTUP_KEY: &str = "launch_at_startup";
 const CLOSE_INTO_TRAY_KEY: &str = "close_into_tray";
 const CHECK_FOR_UPDATES_KEY: &str = "check_for_updates";
+const UPDATE_REMINDERS_KEY: &str = "update_reminders";
+const SKIPPED_UPDATE_VERSION_KEY: &str = "skipped_update_version";
 const LOCAL_DATA_STATS_CACHE_KEY: &str = "local_data_stats_cache";
 
 /// Gaps in the integer episode-number sequence, optionally extended to AniList total.
@@ -176,6 +178,8 @@ pub struct LibraryState {
     launch_at_startup: bool,
     close_into_tray: bool,
     check_for_updates: bool,
+    update_reminders: bool,
+    skipped_update_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -438,6 +442,36 @@ fn write_bool_setting(conn: &Connection, key: &str, enabled: bool) -> Result<(),
     Ok(())
 }
 
+fn read_string_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(value.and_then(|raw| {
+        let trimmed = raw.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }))
+}
+
+fn write_string_setting(conn: &Connection, key: &str, value: Option<&str>) -> Result<(), String> {
+    let stored = value.map(str::trim).unwrap_or("");
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, stored],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn read_automatic_file_discovery(conn: &Connection) -> Result<bool, String> {
     read_bool_setting(conn, AUTOMATIC_FILE_DISCOVERY_KEY, true)
 }
@@ -468,6 +502,22 @@ pub(crate) fn read_check_for_updates(conn: &Connection) -> Result<bool, String> 
 
 fn write_check_for_updates(conn: &Connection, enabled: bool) -> Result<(), String> {
     write_bool_setting(conn, CHECK_FOR_UPDATES_KEY, enabled)
+}
+
+fn read_update_reminders(conn: &Connection) -> Result<bool, String> {
+    read_bool_setting(conn, UPDATE_REMINDERS_KEY, true)
+}
+
+fn write_update_reminders(conn: &Connection, enabled: bool) -> Result<(), String> {
+    write_bool_setting(conn, UPDATE_REMINDERS_KEY, enabled)
+}
+
+fn read_skipped_update_version(conn: &Connection) -> Result<Option<String>, String> {
+    read_string_setting(conn, SKIPPED_UPDATE_VERSION_KEY)
+}
+
+fn write_skipped_update_version(conn: &Connection, version: Option<&str>) -> Result<(), String> {
+    write_string_setting(conn, SKIPPED_UPDATE_VERSION_KEY, version)
 }
 
 pub(crate) fn root_folder_paths(conn: &Connection) -> Result<Vec<PathBuf>, String> {
@@ -507,6 +557,8 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         launch_at_startup: read_launch_at_startup(conn)?,
         close_into_tray: read_close_into_tray(conn)?,
         check_for_updates: read_check_for_updates(conn)?,
+        update_reminders: read_update_reminders(conn)?,
+        skipped_update_version: read_skipped_update_version(conn)?,
     })
 }
 
@@ -619,6 +671,28 @@ pub fn set_check_for_updates(
 ) -> Result<LibraryState, String> {
     db.with_conn(|conn| {
         write_check_for_updates(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
+}
+
+#[tauri::command]
+pub fn set_update_reminders(
+    db: State<'_, AppDatabase>,
+    enabled: bool,
+) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        write_update_reminders(conn, enabled)?;
+        build_library_state(conn, &db)
+    })
+}
+
+#[tauri::command]
+pub fn set_skipped_update_version(
+    db: State<'_, AppDatabase>,
+    version: Option<String>,
+) -> Result<LibraryState, String> {
+    db.with_conn(|conn| {
+        write_skipped_update_version(conn, version.as_deref())?;
         build_library_state(conn, &db)
     })
 }

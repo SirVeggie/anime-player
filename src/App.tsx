@@ -46,6 +46,7 @@ import {
   setAutoOpEdDetect,
   setAutomaticFileDiscovery,
   setCheckForUpdates,
+  setSkippedUpdateVersion,
   setCleanUnusedScrubSprites,
   setCloseIntoTray,
   setDontSkipFirstEpisodeOpEd,
@@ -53,6 +54,7 @@ import {
   setHideAnilistFeatures,
   setLaunchAtStartup,
   setSkipOpEd,
+  setUpdateReminders,
   confirmQuit,
   hideToTray,
   setAnimeCustomThumbnailPath,
@@ -98,6 +100,7 @@ import { PlayerView } from "./components/PlayerView";
 import { SearchScreen } from "./components/SearchScreen";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { type Toast, ToastStack } from "./components/ToastStack";
+import { UpdatePopup } from "./components/UpdatePopup";
 import { WindowTitleBar } from "./components/WindowTitleBar";
 import {
   attachHistoryIndex,
@@ -114,6 +117,7 @@ import {
   type NavSnapshot,
 } from "./navigationHistory";
 import { pickQuickPlayEpisode } from "./quickPlay";
+import { shouldRemindAboutUpdate } from "./updateReminders";
 import type {
   AnimeSearchEntry,
   AnimeSummary,
@@ -236,7 +240,9 @@ function App() {
   /** Set during initial load; cleared when deferred startup rescan runs or user rescans manually. */
   const pendingStartupRescanRef = useRef(false);
   const pendingStartupUpdateCheckRef = useRef(false);
+  const updatePopupDismissedVersionRef = useRef<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updatePopupOpen, setUpdatePopupOpen] = useState(false);
 
   const showToast = useCallback((kind: Toast["kind"], message: string) => {
     if (kind === "error") {
@@ -386,8 +392,12 @@ function App() {
             showToast("error", status.last_error);
             return;
           }
-          if (status.available && !status.pending_apply && status.latest_version) {
-            showToast("success", `Version ${status.latest_version} is available — see Settings`);
+          const latest = status.latest_version?.trim() ?? "";
+          if (
+            shouldRemindAboutUpdate(libraryRef.current, status) &&
+            latest !== updatePopupDismissedVersionRef.current
+          ) {
+            setUpdatePopupOpen(true);
           }
         } catch (e) {
           diagnosticLog(`startup: update check failed: ${errorMessage(e)}`, "ERROR");
@@ -1481,6 +1491,30 @@ function App() {
     setLibrary(state);
   }, []);
 
+  const handleUpdateRemindersSetting = useCallback(async (enabled: boolean) => {
+    const state = await setUpdateReminders(enabled);
+    setLibrary(state);
+    if (!enabled) setUpdatePopupOpen(false);
+  }, []);
+
+  const handleRemindUpdateLater = useCallback(() => {
+    updatePopupDismissedVersionRef.current = updateStatus?.latest_version?.trim() ?? "";
+    setUpdatePopupOpen(false);
+  }, [updateStatus?.latest_version]);
+
+  const handleSkipUpdateVersion = useCallback(async () => {
+    const version = updateStatus?.latest_version?.trim() ?? null;
+    updatePopupDismissedVersionRef.current = version ?? "";
+    setUpdatePopupOpen(false);
+    if (!version) return;
+    try {
+      const state = await setSkippedUpdateVersion(version);
+      setLibrary(state);
+    } catch (e) {
+      showToast("error", errorMessage(e));
+    }
+  }, [showToast, updateStatus?.latest_version]);
+
   const handleCheckUpdatesNow = useCallback(async () => {
     try {
       const status = await updaterCheck();
@@ -1499,13 +1533,13 @@ function App() {
     try {
       const status = await updaterStartDownload();
       setUpdateStatus(status);
-      if (status.pending_apply) {
+      if (status.pending_apply && !updatePopupOpen) {
         showToast("success", "Update downloaded. Restart to apply it.");
       }
     } catch (e) {
       showToast("error", errorMessage(e));
     }
-  }, [showToast]);
+  }, [showToast, updatePopupOpen]);
 
   const handleRestartToApplyUpdate = useCallback(async () => {
     const flush = playbackProgressFlushRef.current;
@@ -2190,7 +2224,7 @@ function App() {
           >
             <SettingsIcon />
             <span className="nav-label">Settings</span>
-            {updateStatus?.available || updateStatus?.pending_apply ? (
+            {shouldRemindAboutUpdate(library, updateStatus) ? (
               <span className="nav-item-badge nav-item-badge--dot" aria-hidden />
             ) : null}
           </button>
@@ -2405,6 +2439,7 @@ function App() {
               onLaunchAtStartup={(enabled) => void handleLaunchAtStartup(enabled)}
               onCloseIntoTray={(enabled) => void handleCloseIntoTray(enabled)}
               onCheckForUpdates={(enabled) => void handleCheckForUpdatesSetting(enabled)}
+              onUpdateReminders={(enabled) => void handleUpdateRemindersSetting(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
               updateStatus={updateStatus}
               onCheckUpdatesNow={() => void handleCheckUpdatesNow()}
@@ -2427,6 +2462,16 @@ function App() {
       ) : null}
 
       <div className="screen-transition-overlay" data-state={screenTransition} aria-hidden />
+      {updatePopupOpen && updateStatus && shouldRemindAboutUpdate(library, updateStatus) ? (
+        <UpdatePopup
+          status={updateStatus}
+          busy={busy}
+          onUpdate={() => void handleDownloadUpdate()}
+          onRestart={() => void handleRestartToApplyUpdate()}
+          onRemindLater={handleRemindUpdateLater}
+          onSkipVersion={() => void handleSkipUpdateVersion()}
+        />
+      ) : null}
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </main>
   );
