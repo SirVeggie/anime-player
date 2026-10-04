@@ -100,12 +100,14 @@ import { SettingsScreen } from "./components/SettingsScreen";
 import { type Toast, ToastStack } from "./components/ToastStack";
 import { WindowTitleBar } from "./components/WindowTitleBar";
 import {
+  attachHistoryIndex,
   isBrowserBackButton,
   isBrowserBackKey,
   isBrowserForwardButton,
   isBrowserForwardKey,
   isNavSnapshot,
   navSnapshotsEqual,
+  snapshotHistoryIndex,
   type AppView,
   type EpisodeReturnView,
   type HistoryMode,
@@ -225,6 +227,7 @@ function App() {
   const pendingHistoryModeRef = useRef<HistoryMode>("push");
   const applyingHistoryRef = useRef(false);
   const lastHistoryPageKeyRef = useRef<string | null>(null);
+  const historyIndexRef = useRef(0);
   const historyGestureLockRef = useRef(false);
   const episodesRef = useRef<Episode[]>([]);
   episodesRef.current = episodes;
@@ -631,31 +634,34 @@ function App() {
     pendingHistoryModeRef.current = "push";
 
     if (lastHistoryPageKeyRef.current === null) {
-      history.replaceState(navSnapshot, "");
+      historyIndexRef.current = 0;
+      history.replaceState(attachHistoryIndex(navSnapshot, 0), "");
       lastHistoryPageKeyRef.current = pageKey;
       applyingHistoryRef.current = false;
       return;
     }
 
     if (mode === "none") {
-      history.replaceState(navSnapshot, "");
+      history.replaceState(attachHistoryIndex(navSnapshot, historyIndexRef.current), "");
       lastHistoryPageKeyRef.current = pageKey;
       applyingHistoryRef.current = false;
       return;
     }
 
     if (lastHistoryPageKeyRef.current === pageKey) {
-      if (!isNavSnapshot(history.state) || !navSnapshotsEqual(history.state, navSnapshot)) {
-        history.replaceState(navSnapshot, "");
+      const current = attachHistoryIndex(navSnapshot, historyIndexRef.current);
+      if (!isNavSnapshot(history.state) || !navSnapshotsEqual(history.state, current)) {
+        history.replaceState(current, "");
       }
       return;
     }
 
     lastHistoryPageKeyRef.current = pageKey;
     if (mode === "replace") {
-      history.replaceState(navSnapshot, "");
+      history.replaceState(attachHistoryIndex(navSnapshot, historyIndexRef.current), "");
     } else {
-      history.pushState(navSnapshot, "");
+      historyIndexRef.current += 1;
+      history.pushState(attachHistoryIndex(navSnapshot, historyIndexRef.current), "");
     }
   }, [navSnapshot, pageKey]);
 
@@ -1797,6 +1803,24 @@ function App() {
     history.forward();
   }, [lockHistoryGesture]);
 
+  /** Escape / on-screen Back: pop session history so Search or Settings opened
+   * from a category return there. Home does not pop. Player and manual-skip
+   * keep their own leave paths. */
+  const goViewBack = useCallback(() => {
+    if (historyIndexRef.current > 0) {
+      goSessionBack();
+      return;
+    }
+    const current = viewRef.current;
+    if (current === "episodes") {
+      navigateToView(episodeReturnViewRef.current, "restore");
+      return;
+    }
+    if (current !== "categories" && current !== "player" && current !== "manualSkip") {
+      navigateToView("categories", "restore");
+    }
+  }, [goSessionBack, navigateToView]);
+
   const restoreNavSnapshot = useCallback(
     async (snapshot: NavSnapshot) => {
       const previousView = viewRef.current;
@@ -1907,6 +1931,7 @@ function App() {
       if (!isNavSnapshot(event.state)) return;
       applyingHistoryRef.current = true;
       pendingHistoryModeRef.current = "none";
+      historyIndexRef.current = snapshotHistoryIndex(event.state);
       void restoreNavSnapshot(event.state);
     };
     window.addEventListener("popstate", onPopState);
@@ -1996,38 +2021,17 @@ function App() {
         setSearchQuery("");
         return;
       }
-      if (isTextInputTarget(e.target)) return;
       if (view === "manualSkip") return;
       if (view === "player") return;
       if (view === "categories") return;
+      // Search focuses the query field; empty-query Escape should leave the page.
+      if (isTextInputTarget(e.target) && view !== "search") return;
       e.preventDefault();
-      if (view === "anime") {
-        navigateToView("categories", "restore");
-        return;
-      }
-      if (view === "search") {
-        navigateToView("categories", "restore");
-        return;
-      }
-      if (view === "bulkEdit") {
-        navigateToView("categories", "restore");
-        return;
-      }
-      if (view === "missing") {
-        navigateToView("categories", "restore");
-        return;
-      }
-      if (view === "episodes" && selectedAnime) {
-        navigateToView(episodeReturnView, "restore");
-        return;
-      }
-      if (view === "settings" || view === "jobs") {
-        navigateToView("categories", "restore");
-      }
+      goViewBack();
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [episodeReturnView, navigateToView, searchQuery, selectedAnime, view]);
+  }, [goViewBack, searchQuery, view]);
 
   const showPlayer = view === "player" && Boolean(selectedEpisode);
   const manualSkipAnime = useMemo(() => {
@@ -2269,7 +2273,7 @@ function App() {
               searchIndex={animeSearchIndex}
               categories={library.categories}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
-              onBack={() => navigateToView("categories", "restore")}
+              onBack={goViewBack}
               onOpenAnime={(anime) => void openAnime(anime, "anime")}
               onOpenSettings={() => navigateToView("settings")}
               onDeleteAnime={(anime) => void handleDeleteAnimeSummary(anime)}
@@ -2291,6 +2295,7 @@ function App() {
               focusToken={searchFocusToken}
               onQueryChange={setSearchQuery}
               onOpenAnime={(anime) => void openAnime(anime, "search")}
+              onBack={goViewBack}
               contextMenu={animeContextMenu}
             />
           ) : null}
@@ -2315,6 +2320,7 @@ function App() {
             <MissingScreen
               anime={library.missing_anime}
               preferAnilistDisplayTitle={library.prefer_anilist_display_title}
+              onBack={goViewBack}
               onClearLocalData={(anime) => void handleClearMissingAnimeLocalData(anime)}
             />
           ) : null}
@@ -2325,7 +2331,7 @@ function App() {
               episodes={episodes}
               episodesLoading={episodesLoading}
               categories={library.categories}
-              onBack={() => navigateToView(episodeReturnView, "restore")}
+              onBack={goViewBack}
               onPlay={openEpisode}
               onMoveAnime={(categoryId) => void handleMoveAnime(categoryId)}
               onOpenEpisodeFolder={() => void handleOpenEpisodeFolder()}
@@ -2357,7 +2363,7 @@ function App() {
 
           {view === "jobs" ? (
             <JobsScreen
-              onBack={() => navigateToView("categories", "restore")}
+              onBack={goViewBack}
               onError={(message) => showToast("error", message)}
             />
           ) : null}
@@ -2371,7 +2377,7 @@ function App() {
               newRuleEditorKey={newRuleEditorKey}
               anilistAuth={anilistAuth}
               localDataStats={localDataStats}
-              onBack={() => navigateToView("categories", "restore")}
+              onBack={goViewBack}
               onRootInput={setRootInput}
               onPickFolder={() => void handlePickFolder()}
               onAddRoot={() => void handleAddRoot(rootInput)}

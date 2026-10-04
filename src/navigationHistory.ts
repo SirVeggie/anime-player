@@ -24,6 +24,8 @@ export type NavSnapshot = {
   selectedEpisodeId: number | null;
   episodeReturnView: EpisodeReturnView;
   manualSkipAnimeId: number | null;
+  /** Position in the in-app session stack. 0 is the first entry (usually home). */
+  index?: number;
 };
 
 export function isNavSnapshot(value: unknown): value is NavSnapshot {
@@ -39,8 +41,20 @@ export function isNavSnapshot(value: unknown): value is NavSnapshot {
       snap.episodeReturnView === "search" ||
       snap.episodeReturnView === "bulkEdit" ||
       snap.episodeReturnView === "categories") &&
-    (snap.manualSkipAnimeId === null || typeof snap.manualSkipAnimeId === "number")
+    (snap.manualSkipAnimeId === null || typeof snap.manualSkipAnimeId === "number") &&
+    (snap.index === undefined || typeof snap.index === "number")
   );
+}
+
+export function attachHistoryIndex(snapshot: NavSnapshot, index: number): NavSnapshot {
+  return { ...snapshot, index };
+}
+
+export function snapshotHistoryIndex(snapshot: unknown): number {
+  if (isNavSnapshot(snapshot) && typeof snapshot.index === "number") {
+    return snapshot.index;
+  }
+  return 0;
 }
 
 export function navSnapshotsEqual(a: NavSnapshot, b: NavSnapshot): boolean {

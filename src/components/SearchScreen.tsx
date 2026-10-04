@@ -29,6 +29,7 @@ export function SearchScreen(props: {
   focusToken: number;
   onQueryChange: (query: string) => void;
   onOpenAnime: (anime: AnimeSummary) => void;
+  onBack: () => void;
   contextMenu: AnimeContextMenuHandlers;
 }) {
   const {
@@ -39,6 +40,7 @@ export function SearchScreen(props: {
     focusToken,
     onQueryChange,
     onOpenAnime,
+    onBack,
     contextMenu,
   } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -101,7 +103,7 @@ export function SearchScreen(props: {
 
   return (
     <>
-      <ViewHeader title="Search" subtitle={subtitle} />
+      <ViewHeader title="Search" subtitle={subtitle} onBack={onBack} />
       <form className="search-panel" onSubmit={(event) => event.preventDefault()}>
         <div className="search-panel__options">
           <div className="search-panel__options-left">
@@ -166,7 +168,7 @@ export function SearchScreen(props: {
         <div className="empty empty--wide">
           <h2>Start typing to search</h2>
           <p className="muted">
-            Press Ctrl+F anytime to return here. Esc clears the query.
+            Press Ctrl+F anytime to return here. Esc clears the query, then goes back.
             {useRegex
               ? " Regular expression mode matches enabled fields."
               : includeFilenames

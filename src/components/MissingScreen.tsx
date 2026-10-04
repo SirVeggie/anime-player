@@ -16,9 +16,10 @@ import { ViewHeader } from "./ViewHeader";
 export function MissingScreen(props: {
   anime: MissingAnimeSummary[];
   preferAnilistDisplayTitle: boolean;
+  onBack: () => void;
   onClearLocalData: (anime: MissingAnimeSummary) => void;
 }) {
-  const { anime, preferAnilistDisplayTitle, onClearLocalData } = props;
+  const { anime, preferAnilistDisplayTitle, onBack, onClearLocalData } = props;
   const [covers, setCovers] = useState<ThumbnailUrlCache>({});
   const { menu, openMenu, closeMenu } = useContextMenu();
   const [deleteAnime, setDeleteAnime] = useState<MissingAnimeSummary | null>(null);
@@ -66,6 +67,7 @@ export function MissingScreen(props: {
       <ViewHeader
         title="Missing"
         subtitle={`${anime.length} title${anime.length === 1 ? "" : "s"} have episodes hidden from the main library.`}
+        onBack={onBack}
       />
       {anime.length === 0 ? (
         <div className="empty empty--wide">

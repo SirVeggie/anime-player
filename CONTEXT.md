@@ -207,16 +207,21 @@ view components. Per-screen UI lives in `src/components/`:
   field) toggles Tauri window fullscreen like a browser. Fullscreen entered
   only during a player session (F11, F, or double-click on the video) is
   reverted to windowed when leaving the player; if the window was already
-  fullscreen when playback started, it stays fullscreen after exit. **Escape** matches
-  the per-screen back control (library → up a level, settings → library);
-  in the player it uses the same path as **Q** / the back arrow (pause +
-  persist + return to episodes). **Browser Back / Browser Forward** (multimedia
+  fullscreen when playback started, it stays fullscreen after exit. **Escape**
+  matches the per-screen back control. In the player it uses the same path as
+  **Q** / the back arrow (pause + persist + return to episodes). **Browser Back /
+  Browser Forward** (multimedia
   keys and mouse X1/X2) walk a session history of visited views, including
   sidebar pages and player episodes. `App.tsx` keeps that stack with
   `history.pushState` / `popstate` (`src/navigationHistory.ts`) so WebView2
   does not leave the page; forced leaves (deleted title, empty Missing page)
-  replace the current entry. Escape and on-screen Back still go up one level
-  rather than popping history. Those actions
+  replace the current entry. **Escape** and on-screen Back pop that same
+  session history when there is a previous entry (Search or Settings opened
+  from a category return there instead of always going home). The home
+  categories view does not pop. The player and manual-skip screens keep their
+  own Back / Escape paths. With no previous entry, Back falls back to the
+  parent view (episodes → `episodeReturnView`, other pages → home). Search
+  Escape still clears a non-empty query first. Those actions
   require explicit `core:window:allow-*` entries in
   `src-tauri/capabilities/default.json` (Tauri v2 ACL).
   Even though the custom title bar hides the **Anime Player** label in the
