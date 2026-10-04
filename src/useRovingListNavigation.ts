@@ -89,6 +89,7 @@ export function useRovingListNavigation(itemCount: number, options: { enabled?: 
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!ARROW_KEYS.has(event.key)) return;
+      if (event.altKey) return;
       if (isTextInputTarget(event.target)) return;
 
       const items = getItems();

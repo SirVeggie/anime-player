@@ -210,7 +210,13 @@ view components. Per-screen UI lives in `src/components/`:
   fullscreen when playback started, it stays fullscreen after exit. **Escape** matches
   the per-screen back control (library → up a level, settings → library);
   in the player it uses the same path as **Q** / the back arrow (pause +
-  persist + return to episodes). Those actions
+  persist + return to episodes). **Browser Back / Browser Forward** (multimedia
+  keys and mouse X1/X2) walk a session history of visited views, including
+  sidebar pages and player episodes. `App.tsx` keeps that stack with
+  `history.pushState` / `popstate` (`src/navigationHistory.ts`) so WebView2
+  does not leave the page; forced leaves (deleted title, empty Missing page)
+  replace the current entry. Escape and on-screen Back still go up one level
+  rather than popping history. Those actions
   require explicit `core:window:allow-*` entries in
   `src-tauri/capabilities/default.json` (Tauri v2 ACL).
   Even though the custom title bar hides the **Anime Player** label in the
@@ -455,7 +461,9 @@ view components. Per-screen UI lives in `src/components/`:
   on unmute); adjusting volume with **W**/**S**, the wheel, or the slider
   clears mute;
   **Q**, **Escape**, or the back
-  control returns to the episode list (without unloading mpv). On the
+  control returns to the episode list (without unloading mpv). **Browser Back /
+  Browser Forward** (and mouse X1/X2) walk session history, including previous
+  player episodes. On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the
   next unwatched episode in list order if that one is already watched, or the
@@ -752,6 +760,8 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
   — split-out view components composed by `App.tsx`.
 - `src/animeGridSort.ts`, `src/animeGridFilter.ts` — category/search grid sort
   and category text-filter helpers (storage keys included).
+- `src/navigationHistory.ts` — session-history snapshots and BrowserBack /
+  BrowserForward / mouse X-button helpers used by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src/volume.ts` — volume constants and clamping for
   mpv's native 0–130 log scale.

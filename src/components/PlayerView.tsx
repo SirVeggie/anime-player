@@ -1605,6 +1605,8 @@ export function PlayerView(props: {
         if (canNext) loadSibling(1);
         return;
       }
+      // Leave Alt+Arrow to session history (Browser Back/Forward equivalent).
+      if (e.altKey && (e.code === "ArrowLeft" || e.code === "ArrowRight")) return;
       if (e.code === "ArrowLeft") {
         e.preventDefault();
         seekRelativeFromHotkey(-5);

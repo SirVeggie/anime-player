@@ -99,6 +99,18 @@ import { SearchScreen } from "./components/SearchScreen";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { type Toast, ToastStack } from "./components/ToastStack";
 import { WindowTitleBar } from "./components/WindowTitleBar";
+import {
+  isBrowserBackButton,
+  isBrowserBackKey,
+  isBrowserForwardButton,
+  isBrowserForwardKey,
+  isNavSnapshot,
+  navSnapshotsEqual,
+  type AppView,
+  type EpisodeReturnView,
+  type HistoryMode,
+  type NavSnapshot,
+} from "./navigationHistory";
 import { pickQuickPlayEpisode } from "./quickPlay";
 import type {
   AnimeSearchEntry,
@@ -129,18 +141,7 @@ import {
 } from "./utils";
 import "./App.css";
 
-type View =
-  | "categories"
-  | "anime"
-  | "search"
-  | "bulkEdit"
-  | "missing"
-  | "episodes"
-  | "manualSkip"
-  | "jobs"
-  | "settings"
-  | "player";
-type EpisodeReturnView = "anime" | "search" | "bulkEdit" | "categories";
+type View = AppView;
 type ScrollRestoration = "top" | "restore";
 
 type AnilistProgressUpdate = {
@@ -221,6 +222,12 @@ function App() {
   const currentPageKeyRef = useRef("categories");
   const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
   const scrollPositionsRef = useRef(new Map<string, number>());
+  const pendingHistoryModeRef = useRef<HistoryMode>("push");
+  const applyingHistoryRef = useRef(false);
+  const lastHistoryPageKeyRef = useRef<string | null>(null);
+  const historyGestureLockRef = useRef(false);
+  const episodesRef = useRef<Episode[]>([]);
+  episodesRef.current = episodes;
   /** Set by `PlayerView` when a session is active; used to flush SQLite before `destroy()` on window close. */
   const playbackProgressFlushRef = useRef<(() => Promise<void>) | null>(null);
   /** Set during initial load; cleared when deferred startup rescan runs or user rescans manually. */
@@ -536,6 +543,26 @@ function App() {
     }
   }, [episodeReturnView, manualSkipAnimeId, selectedAnime?.id, selectedCategoryId, selectedEpisode?.id, view]);
 
+  const navSnapshot = useMemo<NavSnapshot>(
+    () => ({
+      v: 1,
+      view,
+      selectedCategoryId,
+      selectedAnimeId: selectedAnime?.id ?? null,
+      selectedEpisodeId: selectedEpisode?.id ?? null,
+      episodeReturnView,
+      manualSkipAnimeId,
+    }),
+    [
+      episodeReturnView,
+      manualSkipAnimeId,
+      selectedAnime?.id,
+      selectedCategoryId,
+      selectedEpisode?.id,
+      view,
+    ],
+  );
+
   const saveCurrentScrollPosition = useCallback(() => {
     const content = contentRef.current;
     const currentPageKey = currentPageKeyRef.current;
@@ -544,9 +571,10 @@ function App() {
   }, []);
 
   const navigateToView = useCallback(
-    (nextView: View, restoration: ScrollRestoration = "top") => {
+    (nextView: View, restoration: ScrollRestoration = "top", historyMode: HistoryMode = "push") => {
       saveCurrentScrollPosition();
       pendingScrollRestorationRef.current = restoration;
+      pendingHistoryModeRef.current = historyMode;
       setView(nextView);
     },
     [saveCurrentScrollPosition],
@@ -566,7 +594,7 @@ function App() {
             } else {
               setSelectedAnime(null);
               setEpisodes([]);
-              navigateToView(episodeReturnViewRef.current, "restore");
+              navigateToView(episodeReturnViewRef.current, "restore", "replace");
             }
           }
           if (event.statsChanged) {
@@ -597,6 +625,39 @@ function App() {
     currentPageKeyRef.current = pageKey;
     pendingScrollRestorationRef.current = "top";
   }, [pageKey, view]);
+
+  useLayoutEffect(() => {
+    const mode = applyingHistoryRef.current ? "none" : pendingHistoryModeRef.current;
+    pendingHistoryModeRef.current = "push";
+
+    if (lastHistoryPageKeyRef.current === null) {
+      history.replaceState(navSnapshot, "");
+      lastHistoryPageKeyRef.current = pageKey;
+      applyingHistoryRef.current = false;
+      return;
+    }
+
+    if (mode === "none") {
+      history.replaceState(navSnapshot, "");
+      lastHistoryPageKeyRef.current = pageKey;
+      applyingHistoryRef.current = false;
+      return;
+    }
+
+    if (lastHistoryPageKeyRef.current === pageKey) {
+      if (!isNavSnapshot(history.state) || !navSnapshotsEqual(history.state, navSnapshot)) {
+        history.replaceState(navSnapshot, "");
+      }
+      return;
+    }
+
+    lastHistoryPageKeyRef.current = pageKey;
+    if (mode === "replace") {
+      history.replaceState(navSnapshot, "");
+    } else {
+      history.pushState(navSnapshot, "");
+    }
+  }, [navSnapshot, pageKey]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
@@ -666,7 +727,7 @@ function App() {
 
   useEffect(() => {
     if (view === "missing" && library?.missing_anime.length === 0) {
-      navigateToView("categories", "restore");
+      navigateToView("categories", "restore", "replace");
     }
   }, [library?.missing_anime.length, navigateToView, view]);
 
@@ -1049,7 +1110,7 @@ function App() {
         if (selectedAnimeIdRef.current === anime.id) {
           setEpisodes([]);
           setSelectedAnime(null);
-          navigateToView(episodeReturnView, "restore");
+          navigateToView(episodeReturnView, "restore", "replace");
         }
 
         showToast("success", "Title deletion queued.");
@@ -1058,7 +1119,7 @@ function App() {
             (item) => item.id !== anime.id && item.category_id === anime.category_id,
           );
           if (remaining.length === 0) {
-            navigateToView("categories", "restore");
+            navigateToView("categories", "restore", "replace");
           }
         }
       } catch (e) {
@@ -1094,7 +1155,7 @@ function App() {
         if (selectedAnimeIdRef.current === anime.id) {
           setEpisodes([]);
           setSelectedAnime(null);
-          navigateToView("missing", "restore");
+          navigateToView("missing", "restore", "replace");
         }
 
         showToast("success", "Local data cleared.");
@@ -1227,7 +1288,7 @@ function App() {
       setAnimeSearchIndex((current) => current.filter((item) => item.id !== selectedAnime.id));
       setEpisodes([]);
       setSelectedAnime(null);
-      navigateToView(episodeReturnView, "restore");
+      navigateToView(episodeReturnView, "restore", "replace");
       showToast("success", "Title deletion queued.");
     } catch (e) {
       showToast("error", errorMessage(e));
@@ -1255,7 +1316,7 @@ function App() {
         setEpisodes(nextEpisodes);
         if (nextEpisodes.length === 0) {
           setSelectedAnime(null);
-          navigateToView(episodeReturnView, "restore");
+          navigateToView(episodeReturnView, "restore", "replace");
         } else {
           setSelectedAnime((current) =>
             current && current.id === selectedAnime.id ?
@@ -1717,6 +1778,180 @@ function App() {
     [navigateToView, restoreFullscreenAfterPlayerIfNeeded, runScreenTransition],
   );
 
+  const lockHistoryGesture = useCallback(() => {
+    historyGestureLockRef.current = true;
+    queueMicrotask(() => {
+      historyGestureLockRef.current = false;
+    });
+  }, []);
+
+  const goSessionBack = useCallback(() => {
+    if (historyGestureLockRef.current) return;
+    lockHistoryGesture();
+    history.back();
+  }, [lockHistoryGesture]);
+
+  const goSessionForward = useCallback(() => {
+    if (historyGestureLockRef.current) return;
+    lockHistoryGesture();
+    history.forward();
+  }, [lockHistoryGesture]);
+
+  const restoreNavSnapshot = useCallback(
+    async (snapshot: NavSnapshot) => {
+      const previousView = viewRef.current;
+      const leavingPlayer = previousView === "player" && snapshot.view !== "player";
+      const enteringPlayer = previousView !== "player" && snapshot.view === "player";
+      const library = libraryRef.current;
+      const anime =
+        snapshot.selectedAnimeId != null
+          ? (library?.anime.find((item) => item.id === snapshot.selectedAnimeId) ?? null)
+          : null;
+
+      let nextView = snapshot.view;
+      if ((nextView === "episodes" || nextView === "player" || nextView === "manualSkip") && !anime) {
+        nextView = snapshot.episodeReturnView;
+      }
+      if (nextView === "missing" && (library?.missing_anime.length ?? 0) === 0) {
+        nextView = "categories";
+      }
+
+      const needsEpisodes = nextView === "episodes" || nextView === "player" || nextView === "manualSkip";
+      let nextEpisodes = episodesRef.current;
+      if (needsEpisodes && snapshot.selectedAnimeId != null) {
+        const loadedForAnime =
+          nextEpisodes.length > 0 &&
+          nextEpisodes.every((item) => item.anime_id === snapshot.selectedAnimeId);
+        if (selectedAnimeIdRef.current !== snapshot.selectedAnimeId || !loadedForAnime) {
+          try {
+            nextEpisodes = await listEpisodes(snapshot.selectedAnimeId);
+          } catch (e) {
+            showToast("error", errorMessage(e));
+            nextEpisodes = [];
+          }
+        }
+      }
+
+      const nextEpisode =
+        snapshot.selectedEpisodeId != null
+          ? (nextEpisodes.find((item) => item.id === snapshot.selectedEpisodeId) ?? null)
+          : null;
+      if (nextView === "player" && !nextEpisode) {
+        nextView = anime ? "episodes" : snapshot.episodeReturnView;
+      }
+
+      const commit = () => {
+        saveCurrentScrollPosition();
+        pendingScrollRestorationRef.current = "restore";
+        pendingHistoryModeRef.current = "none";
+        selectedAnimeIdRef.current = anime?.id ?? null;
+        setSelectedCategoryId(snapshot.selectedCategoryId);
+        setEpisodeReturnView(snapshot.episodeReturnView);
+        setManualSkipAnimeId(
+          nextView === "manualSkip" ? (snapshot.manualSkipAnimeId ?? anime?.id ?? null) : null,
+        );
+        setSelectedAnime(anime);
+        if (needsEpisodes && snapshot.selectedAnimeId != null) {
+          setEpisodes(nextEpisodes);
+        }
+        if (nextEpisode) {
+          setSelectedEpisode(nextEpisode);
+        } else if (snapshot.selectedEpisodeId == null) {
+          setSelectedEpisode(null);
+        }
+        setView(nextView);
+      };
+
+      if (leavingPlayer) {
+        const flush = playbackProgressFlushRef.current;
+        if (flush) {
+          try {
+            await flush();
+          } catch (e) {
+            showToast("error", errorMessage(e));
+          }
+        }
+        await restoreFullscreenAfterPlayerIfNeeded();
+        if (screenTransitionRef.current === "idle") {
+          await runScreenTransition(commit);
+        } else {
+          commit();
+        }
+        return;
+      }
+
+      if (enteringPlayer) {
+        await captureFullscreenAtPlayerEntry();
+        if (screenTransitionRef.current === "idle") {
+          await runScreenTransition(commit);
+        } else {
+          commit();
+        }
+        return;
+      }
+
+      commit();
+    },
+    [
+      captureFullscreenAtPlayerEntry,
+      restoreFullscreenAfterPlayerIfNeeded,
+      runScreenTransition,
+      saveCurrentScrollPosition,
+      showToast,
+    ],
+  );
+
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      lockHistoryGesture();
+      if (!isNavSnapshot(event.state)) return;
+      applyingHistoryRef.current = true;
+      pendingHistoryModeRef.current = "none";
+      void restoreNavSnapshot(event.state);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [lockHistoryGesture, restoreNavSnapshot]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const altArrow =
+        event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat;
+      if (isBrowserBackKey(event) || (altArrow && event.code === "ArrowLeft")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        goSessionBack();
+        return;
+      }
+      if (isBrowserForwardKey(event) || (altArrow && event.code === "ArrowRight")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        goSessionForward();
+      }
+    };
+    const onMouseNavigate = (event: MouseEvent) => {
+      if (isBrowserBackButton(event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        goSessionBack();
+        return;
+      }
+      if (isBrowserForwardButton(event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        goSessionForward();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("mouseup", onMouseNavigate, true);
+    window.addEventListener("auxclick", onMouseNavigate, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("mouseup", onMouseNavigate, true);
+      window.removeEventListener("auxclick", onMouseNavigate, true);
+    };
+  }, [goSessionBack, goSessionForward]);
+
   // Q on the episodes screen jumps into the current anime's last-played episode
   // (or the next one if that episode is already watched). Scoped to the
   // episodes view so PlayerView keeps owning Q while playback is visible.
@@ -1804,7 +2039,7 @@ function App() {
   useEffect(() => {
     if (view !== "manualSkip" || manualSkipAnime != null) return;
     setManualSkipAnimeId(null);
-    navigateToView("episodes", "restore");
+    navigateToView("episodes", "restore", "replace");
   }, [manualSkipAnime, navigateToView, view]);
 
   const osTitleAnimeLabel = useMemo(() => {

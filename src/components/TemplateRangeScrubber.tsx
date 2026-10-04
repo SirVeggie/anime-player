@@ -278,6 +278,7 @@ export function TemplateRangeScrubber(props: {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== "ArrowLeft" && e.code !== "ArrowRight") return;
+      if (e.altKey) return;
       const target = e.target;
       if (
         target instanceof HTMLElement &&

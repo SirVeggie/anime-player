@@ -140,6 +140,9 @@ export function ManualSkipScreen(props: {
   const [saving, setSaving] = useState(false);
   const [matchBusy, setMatchBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const closedViaExitRef = useRef(false);
   const [frameStepSec, setFrameStepSec] = useState(1 / 24);
   const [previewCompositorRevealed, setPreviewCompositorRevealed] = useState(false);
   const [editorDuration, setEditorDuration] = useState(0);
@@ -498,11 +501,20 @@ export function ManualSkipScreen(props: {
   }, [applyEditorDuration, editorEpisodeId, editorEpisodePath, loadEditorEpisode, schedulePreviewRect, syncMpvVolume, teardownMpv]);
 
   const exitScreen = useCallback(() => {
+    closedViaExitRef.current = true;
     void teardownMpv().finally(() => {
       if (dirty) onDirtyClose();
       onBack();
     });
   }, [dirty, onBack, onDirtyClose, teardownMpv]);
+
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current && !closedViaExitRef.current) {
+        onDirtyClose();
+      }
+    };
+  }, [onDirtyClose]);
 
   const stopEditorPlayback = useCallback(async () => {
     playbackRef.current = null;
