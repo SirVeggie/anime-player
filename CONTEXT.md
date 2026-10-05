@@ -869,6 +869,7 @@ npm run tauri build
 npm run release
 
 # Local dev portable only (no tag, zip, or publish artifacts): `releases/dev/`
+# Packs the release exe from CARGO_TARGET_DIR when set, else src-tauri/target.
 npm run portable
 ```
 

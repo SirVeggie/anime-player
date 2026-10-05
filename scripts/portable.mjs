@@ -3,7 +3,10 @@ import path from 'node:path';
 
 async function packagePortable() {
   const root = process.cwd();
-  const exePath = path.join(root, 'src-tauri', 'target', 'release', 'anime-player.exe');
+  const cargoTargetDir = process.env.CARGO_TARGET_DIR
+    ? path.resolve(process.env.CARGO_TARGET_DIR)
+    : path.join(root, 'src-tauri', 'target');
+  const exePath = path.join(cargoTargetDir, 'release', 'anime-player.exe');
   const dllPath = path.join(root, 'src-tauri', 'libs', 'mpv', 'libmpv-2.dll');
   const ffmpegDir = path.join(root, 'src-tauri', 'libs', 'ffmpeg');
   const ffmpegPaths = ['ffmpeg.exe', 'ffprobe.exe'].map((name) =>
@@ -16,7 +19,7 @@ async function packagePortable() {
   try {
     await fs.access(exePath);
   } catch {
-    console.error('Error: anime-player.exe not found in src-tauri/target/release.');
+    console.error(`Error: anime-player.exe not found at ${exePath}.`);
     console.error('Run `npm run portable` to build and package.');
     process.exit(1);
   }
