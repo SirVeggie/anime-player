@@ -1859,9 +1859,13 @@ pub(crate) fn rescan_library_for_operation(
             episode_label: item.episode_label,
         })
         .collect();
-    if import_count > 0 && import_count <= crate::jobs::RESCAN_AUTO_SCRUB_MAX {
-        crate::jobs::schedule_rescan_job_enqueue(app, scrub_imports, op_ed_imports);
-    }
+    let scrub_imports = if import_count <= crate::jobs::RESCAN_AUTO_SCRUB_MAX {
+        scrub_imports
+    } else {
+        Vec::new()
+    };
+    // Always schedule: besides new imports it also re-queues titles with unfinished OP/ED.
+    crate::jobs::schedule_rescan_job_enqueue(app, scrub_imports, op_ed_imports);
     Ok(summary)
 }
 
@@ -3160,6 +3164,14 @@ fn upsert_episode(
     anime_id: i64,
     episode: &scanner::ScannedEpisode,
 ) -> Result<bool, String> {
+    let previous: Option<(i64, i64)> = conn
+        .query_row(
+            "SELECT id, size FROM episodes WHERE path = ?1 AND pending_delete = 0",
+            params![episode.path],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
     let changed = conn.execute(
         "INSERT INTO episodes
             (anime_id, root_folder_id, path, relative_path, file_name, file_type,
@@ -3198,6 +3210,15 @@ fn upsert_episode(
         ],
     )
     .map_err(|e| e.to_string())?;
+    if changed > 0 {
+        if let Some((episode_id, previous_size)) = previous {
+            if previous_size != episode.size {
+                // Same path, different file contents (finished download, v2 release):
+                // results from the old file no longer apply.
+                op_ed::clear_episode_op_ed_segments(conn, episode_id)?;
+            }
+        }
+    }
     Ok(changed > 0)
 }
 

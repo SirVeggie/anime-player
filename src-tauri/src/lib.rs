@@ -531,6 +531,7 @@ pub fn run() {
                 crash_log::log("INFO", "initializing job manager");
                 app.manage(jobs::JobsState::new(app.handle().clone(), db_ref.inner()));
                 crash_log::log("INFO", "job manager ok");
+                jobs::schedule_op_ed_reconcile(app.handle().clone());
             }
 
             // Close-into-tray + mpv teardown (Windows) / native resize (Windows).

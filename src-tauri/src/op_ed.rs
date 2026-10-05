@@ -439,24 +439,86 @@ pub fn count_non_missing_episodes(conn: &Connection, anime_id: i64) -> Result<us
     Ok(count as usize)
 }
 
-fn count_episodes_missing_op_ed_segments(conn: &Connection, anime_id: i64) -> Result<i64, String> {
+/// Segment statuses a finished detect / rematch pass leaves behind. Anything else
+/// (`pending`, `analyzing`, `skipped`, `failed`, or no row at all) means the episode
+/// was never fully processed, e.g. a job was interrupted by app exit or cancelled.
+const OP_ED_TERMINAL_STATUSES_SQL: &str = "('matched', 'not_found')";
+
+fn count_episodes_needing_op_ed_segments(conn: &Connection, anime_id: i64) -> Result<i64, String> {
     conn.query_row(
-        "SELECT COUNT(*) FROM episodes e
-         WHERE e.anime_id = ?1 AND e.missing = 0
-         AND (
-           NOT EXISTS (
-             SELECT 1 FROM episode_op_ed_segments s
-             WHERE s.episode_id = e.id AND s.kind = 'op'
-           )
-           OR NOT EXISTS (
-             SELECT 1 FROM episode_op_ed_segments s
-             WHERE s.episode_id = e.id AND s.kind = 'ed'
-           )
-         )",
+        &format!(
+            "SELECT COUNT(*) FROM episodes e
+             WHERE e.anime_id = ?1 AND e.missing = 0
+             AND (
+               NOT EXISTS (
+                 SELECT 1 FROM episode_op_ed_segments s
+                 WHERE s.episode_id = e.id AND s.kind = 'op'
+                   AND s.status IN {OP_ED_TERMINAL_STATUSES_SQL}
+               )
+               OR NOT EXISTS (
+                 SELECT 1 FROM episode_op_ed_segments s
+                 WHERE s.episode_id = e.id AND s.kind = 'ed'
+                   AND s.status IN {OP_ED_TERMINAL_STATUSES_SQL}
+               )
+             )"
+        ),
         params![anime_id],
         |row| row.get(0),
     )
     .map_err(|e| e.to_string())
+}
+
+/// Titles that already went through OP/ED analysis (auto or manual) but have episodes
+/// without a finished OP/ED result. Used by the reconcile sweep after rescans and at
+/// startup, so a lost or interrupted enqueue is picked up again.
+pub fn list_anime_with_unfinished_op_ed(conn: &Connection) -> Result<Vec<(i64, String)>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT a.id, a.title FROM anime a
+             WHERE (
+               COALESCE(TRIM(a.op_ed_analyzed_at), '') != ''
+               OR EXISTS (SELECT 1 FROM op_ed_templates t WHERE t.anime_id = a.id)
+               OR EXISTS (
+                 SELECT 1 FROM episode_op_ed_segments s
+                 INNER JOIN episodes e2 ON e2.id = s.episode_id
+                 WHERE e2.anime_id = a.id
+               )
+             )
+             AND (SELECT COUNT(*) FROM episodes c WHERE c.anime_id = a.id AND c.missing = 0) >= 2
+             AND EXISTS (
+               SELECT 1 FROM episodes e
+               WHERE e.anime_id = a.id AND e.missing = 0
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM episode_op_ed_segments s
+                   WHERE s.episode_id = e.id AND s.kind = 'op'
+                     AND s.status IN {OP_ED_TERMINAL_STATUSES_SQL}
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM episode_op_ed_segments s
+                   WHERE s.episode_id = e.id AND s.kind = 'ed'
+                     AND s.status IN {OP_ED_TERMINAL_STATUSES_SQL}
+                 )
+               )
+             )
+             ORDER BY a.id"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// Drop OP/ED results for one episode whose file changed (e.g. a download finished after
+/// the first import, or a v2 release replaced it) so the next pass analyzes it again.
+pub fn clear_episode_op_ed_segments(conn: &Connection, episode_id: i64) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM episode_op_ed_segments WHERE episode_id = ?1",
+        params![episode_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Whether manual template rematch should run (episode page / small rescan).
@@ -466,7 +528,7 @@ pub fn anime_needs_manual_op_ed_rematch(conn: &Connection, anime_id: i64) -> Res
     if !has_manual_templates(conn, anime_id)? {
         return Ok(false);
     }
-    if count_episodes_missing_op_ed_segments(conn, anime_id)? > 0 {
+    if count_episodes_needing_op_ed_segments(conn, anime_id)? > 0 {
         return Ok(true);
     }
     let templates_newer: bool = conn
@@ -539,7 +601,7 @@ pub fn anime_needs_op_ed_detect(conn: &Connection, anime_id: i64) -> Result<bool
     if !analyzed {
         return Ok(true);
     }
-    Ok(count_episodes_missing_op_ed_segments(conn, anime_id)? > 0)
+    Ok(count_episodes_needing_op_ed_segments(conn, anime_id)? > 0)
 }
 
 pub fn list_anime_episodes(conn: &Connection, anime_id: i64) -> Result<Vec<OpEdEpisode>, String> {
@@ -2588,6 +2650,41 @@ fn run_kind_detection(
     Ok(())
 }
 
+/// After a detect pass completes, episodes it never reached (block limit, fail-streak
+/// cut-off) still carry `pending` / `analyzing` / no row. Mark them `not_found` so only
+/// interrupted passes leave non-terminal rows, which the reconcile sweep then retries.
+fn finalize_unfinished_segments(conn: &Connection, episodes: &[EpisodeRow]) -> Result<(), String> {
+    for ep in episodes {
+        for kind in [SegmentKind::Op, SegmentKind::Ed] {
+            let status: Option<String> = conn
+                .query_row(
+                    "SELECT status FROM episode_op_ed_segments WHERE episode_id = ?1 AND kind = ?2",
+                    params![ep.id, kind.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            if matches!(status.as_deref(), Some("matched") | Some("not_found")) {
+                continue;
+            }
+            upsert_segment_status_conn(
+                conn,
+                ep.id,
+                kind,
+                OpEdSegmentStatus::NotFound,
+                None,
+                None,
+                None,
+                None,
+                "unreached",
+                None,
+                None,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub fn run_op_ed_detect_job(
     db: &AppDatabase,
     anime_id: i64,
@@ -2637,6 +2734,10 @@ pub fn run_op_ed_detect_job(
     }
 
     run_kind_detection(&ctx, SegmentKind::Ed, &mut step, total_steps)?;
+
+    if episodes.len() >= 2 {
+        db.with_conn(|conn| finalize_unfinished_segments(conn, &episodes))?;
+    }
 
     if options.mark_analyzed {
         db.with_conn(|conn| {
@@ -2725,10 +2826,10 @@ pub fn anime_has_op_ed_skip_timestamps(conn: &Connection, anime_id: i64) -> Resu
 }
 
 /// Whether automatic OP/ED enqueue (episode page / small rescan) may run for this title.
-/// Titles with existing matched skip timestamps keep automatic follow-up; the setting
-/// gates only titles that have never produced skip timestamps.
+/// Titles with existing matched skip timestamps or user-made manual templates keep
+/// automatic follow-up; the setting gates only titles the user never set up.
 pub fn auto_op_ed_enqueue_allowed(conn: &Connection, anime_id: i64) -> Result<bool, String> {
-    if anime_has_op_ed_skip_timestamps(conn, anime_id)? {
+    if anime_has_op_ed_skip_timestamps(conn, anime_id)? || has_manual_templates(conn, anime_id)? {
         return Ok(true);
     }
     read_auto_op_ed_detect(conn)

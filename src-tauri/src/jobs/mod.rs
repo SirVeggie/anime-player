@@ -14,6 +14,7 @@ use manager::{JobManager, WorkerOutcome};
 
 const EPISODE_PAGE_SCRUB_ENQUEUE_CHUNK: usize = 50;
 const RESCAN_JOB_ENQUEUE_DELAY_MS: u64 = 3_000;
+const OP_ED_STARTUP_RECONCILE_DELAY_MS: u64 = 10_000;
 
 #[cfg(windows)]
 pub struct JobsState {
@@ -140,9 +141,6 @@ pub fn schedule_rescan_job_enqueue(
     scrub_imports: Vec<RescanScrubImport>,
     op_ed_imports: Vec<RescanOpEdImport>,
 ) {
-    if scrub_imports.is_empty() && op_ed_imports.is_empty() {
-        return;
-    }
     crate::crash_log::log(
         "INFO",
         &format!(
@@ -180,6 +178,30 @@ pub fn schedule_rescan_job_enqueue(
                     &format!("rescan_library: background enqueue thread failed: {e}"),
                 );
             }
+        }
+    });
+}
+
+/// Queue OP/ED work that an earlier session left unfinished (see
+/// `JobManager::enqueue_op_ed_reconcile`). Runs once shortly after startup.
+#[cfg(windows)]
+pub fn schedule_op_ed_reconcile(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(OP_ED_STARTUP_RECONCILE_DELAY_MS));
+            let jobs = app.state::<JobsState>();
+            let db = app.state::<AppDatabase>();
+            let mut guard = jobs.manager.lock().map_err(|e| e.to_string())?;
+            guard.enqueue_op_ed_reconcile(&db)
+        })
+        .await;
+        match outcome {
+            Ok(Ok(count)) => crate::crash_log::log(
+                "INFO",
+                &format!("op/ed reconcile: checked {count} title(s) with unfinished episodes"),
+            ),
+            Ok(Err(e)) => crate::crash_log::log("ERROR", &format!("op/ed reconcile failed: {e}")),
+            Err(e) => crate::crash_log::log("ERROR", &format!("op/ed reconcile thread failed: {e}")),
         }
     });
 }

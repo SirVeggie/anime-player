@@ -347,15 +347,24 @@ view components. Per-screen UI lives in `src/components/`:
   `settings.auto_op_ed_detect` is enabled (default off): opening a title’s
   episode page may enqueue OP/ED work when needed. The setting applies only to
   titles with no matched skip timestamps yet; titles that already have matched
-  OP/ED segments keep automatic follow-up (new episodes, staleness) even when
-  the setting is off. Titles with manual skip templates use `anime_needs_manual_op_ed_rematch` instead
-  of the auto-detect staleness check: rematch runs only when episodes lack segment
-  rows (new imports) or custom templates changed without a follow-up rematch.
+  OP/ED segments or manual skip templates keep automatic follow-up (new episodes,
+  staleness) even when the setting is off. Titles with manual skip templates use `anime_needs_manual_op_ed_rematch` instead
+  of the auto-detect staleness check: rematch runs only when episodes lack a
+  finished segment row or custom templates changed without a follow-up rematch.
+  Only `matched` / `not_found` rows count as finished; `pending`, `analyzing`,
+  `skipped`, or no row means a pass never completed (app closed mid-job, queued
+  jobs are in-memory and dropped on exit). A completed detect pass marks episodes
+  it never reached `not_found` (`search_pass = 'unreached'`) so only interrupted
+  passes leave unfinished rows. When a rescan sees an existing episode path with a
+  different size (finished download, v2 release) it deletes that episode's OP/ED
+  rows. **Reconcile sweep**: after every rescan and 10s after startup,
+  `list_anime_with_unfinished_op_ed` finds titles with analysis history (analyzed,
+  templates, or segment rows) that have unfinished episodes and re-queues them
+  through the same gates (skipping titles with an active detect/rematch job).
   Detect jobs (`op_ed_detect:{anime_id}`, resource type `none`) always enqueue at
   **high** priority so they start as soon as chroma prerequisites finish (including
-  small-rescan auto-enqueue). A rescan that imports at most **50** new episodes
-  (`RESCAN_AUTO_SCRUB_MAX`, shared with scrub) also enqueues detect per affected
-  anime (detect high, chroma low). The worker (`jobs_enqueue_op_ed_detect`) scans
+  rescan auto-enqueue). Every rescan that imports episodes also enqueues detect per
+  affected anime (detect high, chroma low); unlike scrub, OP/ED has no import cap. The worker (`jobs_enqueue_op_ed_detect`) scans
   cached Chromaprint fingerprints and writes templates plus per-episode OP/ED rows
   in SQLite (`op_ed_templates`, `episode_op_ed_segments`, `anime.no_op_ed`).
   Progress survives app restarts; re-running resumes from saved rows. Detect reuses
@@ -537,8 +546,8 @@ view components. Per-screen UI lives in `src/components/`:
   `episodes.pending_delete` first so normal grids, search, and episode lists hide
   the target immediately; the worker then deletes/trashes files and caches before
   removing DB rows. If deletion fails, pending markers are cleared for surviving
-  rows and the operation is marked failed. On Windows, when a rescan imports at most 50 episodes
-  (new or updated paths), scrub and OP/ED auto-enqueue run on a background
+  rows and the operation is marked failed. On Windows, after every rescan, scrub (only when it imported at most 50
+  new or updated paths) and OP/ED auto-enqueue plus the OP/ED reconcile sweep run on a background
   thread 3 seconds after the command returns (one batched scheduler flush), with
   low-priority starts capped at two for the next 30 seconds. `rescan_library` commits one SQLite transaction per
   root folder and caches `title_key` → `anime_id` while importing so each

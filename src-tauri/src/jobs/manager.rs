@@ -33,7 +33,7 @@ pub struct RescanScrubImport {
     pub episode_label: String,
 }
 
-/// When a rescan imports at most this many episodes, queue scrub thumbnails and OP/ED detect for them.
+/// When a rescan imports at most this many episodes, queue scrub thumbnails for them.
 pub const RESCAN_AUTO_SCRUB_MAX: usize = 50;
 
 /// Title affected by a small rescan import batch (OP/ED detect is per anime, not per file).
@@ -558,7 +558,9 @@ impl JobManager {
         scrub_imports: &[RescanScrubImport],
         op_ed_imports: &[RescanOpEdImport],
     ) -> Result<(), String> {
-        self.activate_rescan_throttle();
+        if !scrub_imports.is_empty() || !op_ed_imports.is_empty() {
+            self.activate_rescan_throttle();
+        }
         if scrub_imports.len() <= RESCAN_AUTO_SCRUB_MAX {
             for item in scrub_imports {
                 let _ = self.enqueue_scrub_sprite_inner(
@@ -573,11 +575,39 @@ impl JobManager {
                 )?;
             }
         }
-        if !op_ed_imports.is_empty() && op_ed_imports.len() <= RESCAN_AUTO_SCRUB_MAX {
-            self.enqueue_op_ed_for_rescan_imports_inner(db, op_ed_imports)?;
+        // OP/ED detect is one job chain per title, so large imports are not capped.
+        // The reconcile list also retries titles whose earlier detect was lost or interrupted.
+        let mut op_ed_targets: Vec<RescanOpEdImport> = op_ed_imports.to_vec();
+        op_ed_targets.extend(Self::op_ed_reconcile_targets(db)?);
+        if !op_ed_targets.is_empty() {
+            self.enqueue_op_ed_for_rescan_imports_inner(db, &op_ed_targets)?;
         }
         self.finish_scheduling_batch();
         Ok(())
+    }
+
+    /// Startup sweep: queue OP/ED work for titles left with unfinished episodes
+    /// (app closed mid-job, queued jobs dropped on exit, enqueue lost before it ran).
+    pub fn enqueue_op_ed_reconcile(&mut self, db: &AppDatabase) -> Result<usize, String> {
+        let targets = Self::op_ed_reconcile_targets(db)?;
+        if targets.is_empty() {
+            return Ok(0);
+        }
+        let count = targets.len();
+        self.enqueue_op_ed_for_rescan_imports_inner(db, &targets)?;
+        self.finish_scheduling_batch();
+        Ok(count)
+    }
+
+    fn op_ed_reconcile_targets(db: &AppDatabase) -> Result<Vec<RescanOpEdImport>, String> {
+        let rows = db.with_conn(|conn| op_ed::list_anime_with_unfinished_op_ed(conn))?;
+        Ok(rows
+            .into_iter()
+            .map(|(anime_id, anime_title)| RescanOpEdImport {
+                anime_id,
+                anime_title,
+            })
+            .collect())
     }
 
     fn activate_rescan_throttle(&mut self) {
@@ -600,6 +630,12 @@ impl JobManager {
         let mut seen = std::collections::HashSet::new();
         for item in imports {
             if !seen.insert(item.anime_id) {
+                continue;
+            }
+            // Already queued or running: leave it alone (enqueue would bump it to high).
+            if self.active_op_ed_detect_job_id(item.anime_id).is_some()
+                || self.active_manual_op_ed_rematch_job_id(item.anime_id).is_some()
+            {
                 continue;
             }
             let allowed =
