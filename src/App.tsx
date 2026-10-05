@@ -104,12 +104,14 @@ import { UpdatePopup } from "./components/UpdatePopup";
 import { WindowTitleBar } from "./components/WindowTitleBar";
 import {
   attachHistoryIndex,
+  historyUrlForPageKey,
   isBrowserBackButton,
   isBrowserBackKey,
   isBrowserForwardButton,
   isBrowserForwardKey,
   isNavSnapshot,
   navSnapshotsEqual,
+  pageKeyFromSnapshot,
   snapshotHistoryIndex,
   type AppView,
   type EpisodeReturnView,
@@ -224,6 +226,8 @@ function App() {
   const libraryRef = useRef<LibraryState | null>(null);
   libraryRef.current = library;
   const selectedAnimeIdRef = useRef<number | null>(null);
+  const selectedAnimeRef = useRef<typeof selectedAnime>(null);
+  selectedAnimeRef.current = selectedAnime;
   const opEdRefreshTimerRef = useRef<number | null>(null);
   const currentPageKeyRef = useRef("categories");
   const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
@@ -232,6 +236,8 @@ function App() {
   const applyingHistoryRef = useRef(false);
   const lastHistoryPageKeyRef = useRef<string | null>(null);
   const historyIndexRef = useRef(0);
+  const historyEntriesRef = useRef<NavSnapshot[]>([]);
+  const ignorePopStateRestoreRef = useRef(false);
   const historyGestureLockRef = useRef(false);
   const episodesRef = useRef<Episode[]>([]);
   episodesRef.current = episodes;
@@ -535,27 +541,6 @@ function App() {
     };
   }, [showToast]);
 
-  const pageKey = useMemo(() => {
-    switch (view) {
-      case "anime":
-        return `anime:${selectedCategoryId ?? "none"}`;
-      case "episodes":
-        return `episodes:${selectedAnime?.id ?? "none"}:${episodeReturnView}`;
-      case "player":
-        return `player:${selectedEpisode?.id ?? "none"}`;
-      case "manualSkip":
-        return `manualSkip:${manualSkipAnimeId ?? "none"}`;
-      case "missing":
-        return "missing";
-      case "bulkEdit":
-        return "bulkEdit";
-      case "jobs":
-        return "jobs";
-      default:
-        return view;
-    }
-  }, [episodeReturnView, manualSkipAnimeId, selectedAnime?.id, selectedCategoryId, selectedEpisode?.id, view]);
-
   const navSnapshot = useMemo<NavSnapshot>(
     () => ({
       v: 1,
@@ -575,6 +560,35 @@ function App() {
       view,
     ],
   );
+  const pageKey = useMemo(() => pageKeyFromSnapshot(navSnapshot), [navSnapshot]);
+  const navSnapshotRef = useRef(navSnapshot);
+  navSnapshotRef.current = navSnapshot;
+  const pageKeyRef = useRef(pageKey);
+  pageKeyRef.current = pageKey;
+
+  const recordHistory = useCallback((snapshot: NavSnapshot, key: string, mode: "push" | "replace") => {
+    const index = mode === "push" ? historyIndexRef.current + 1 : historyIndexRef.current;
+    const recorded = attachHistoryIndex(snapshot, index);
+    historyIndexRef.current = index;
+    if (mode === "push") {
+      historyEntriesRef.current = historyEntriesRef.current.slice(0, index);
+      historyEntriesRef.current.push(recorded);
+      history.pushState(recorded, "", historyUrlForPageKey(key));
+    } else {
+      historyEntriesRef.current[index] = recorded;
+      history.replaceState(recorded, "", historyUrlForPageKey(key));
+    }
+    lastHistoryPageKeyRef.current = key;
+  }, []);
+
+  const ensureCurrentViewInHistory = useCallback(() => {
+    if (lastHistoryPageKeyRef.current === null) return;
+    const snapshot = navSnapshotRef.current;
+    const key = pageKeyRef.current;
+    const top = historyEntriesRef.current[historyIndexRef.current];
+    if (top && navSnapshotsEqual(top, snapshot) && lastHistoryPageKeyRef.current === key) return;
+    recordHistory(snapshot, key, "push");
+  }, [recordHistory]);
 
   const saveCurrentScrollPosition = useCallback(() => {
     const content = contentRef.current;
@@ -587,10 +601,13 @@ function App() {
     (nextView: View, restoration: ScrollRestoration = "top", historyMode: HistoryMode = "push") => {
       saveCurrentScrollPosition();
       pendingScrollRestorationRef.current = restoration;
+      if (historyMode === "push") {
+        ensureCurrentViewInHistory();
+      }
       pendingHistoryModeRef.current = historyMode;
       setView(nextView);
     },
-    [saveCurrentScrollPosition],
+    [ensureCurrentViewInHistory, saveCurrentScrollPosition],
   );
 
   useEffect(() => {
@@ -645,35 +662,34 @@ function App() {
 
     if (lastHistoryPageKeyRef.current === null) {
       historyIndexRef.current = 0;
-      history.replaceState(attachHistoryIndex(navSnapshot, 0), "");
+      historyEntriesRef.current = [attachHistoryIndex(navSnapshot, 0)];
+      history.replaceState(historyEntriesRef.current[0], "", historyUrlForPageKey(pageKey));
       lastHistoryPageKeyRef.current = pageKey;
       applyingHistoryRef.current = false;
       return;
     }
+
+    const historyTop = isNavSnapshot(history.state) ? history.state : null;
+    const sameHistorySlot = historyTop != null && historyTop.view === navSnapshot.view;
 
     if (mode === "none") {
-      history.replaceState(attachHistoryIndex(navSnapshot, historyIndexRef.current), "");
-      lastHistoryPageKeyRef.current = pageKey;
+      // After popstate, update the landed slot. If a user navigation raced in
+      // with a stale apply flag, push instead of clobbering the previous view.
+      recordHistory(navSnapshot, pageKey, sameHistorySlot ? "replace" : "push");
       applyingHistoryRef.current = false;
       return;
     }
 
-    if (lastHistoryPageKeyRef.current === pageKey) {
+    if (lastHistoryPageKeyRef.current === pageKey && sameHistorySlot) {
       const current = attachHistoryIndex(navSnapshot, historyIndexRef.current);
-      if (!isNavSnapshot(history.state) || !navSnapshotsEqual(history.state, current)) {
-        history.replaceState(current, "");
+      if (!historyTop || !navSnapshotsEqual(historyTop, current)) {
+        recordHistory(navSnapshot, pageKey, "replace");
       }
       return;
     }
 
-    lastHistoryPageKeyRef.current = pageKey;
-    if (mode === "replace") {
-      history.replaceState(attachHistoryIndex(navSnapshot, historyIndexRef.current), "");
-    } else {
-      historyIndexRef.current += 1;
-      history.pushState(attachHistoryIndex(navSnapshot, historyIndexRef.current), "");
-    }
-  }, [navSnapshot, pageKey]);
+    recordHistory(navSnapshot, pageKey, mode === "replace" ? "replace" : "push");
+  }, [navSnapshot, pageKey, recordHistory]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
@@ -1837,24 +1853,6 @@ function App() {
     history.forward();
   }, [lockHistoryGesture]);
 
-  /** Escape / on-screen Back: pop session history so Search or Settings opened
-   * from a category return there. Home does not pop. Player and manual-skip
-   * keep their own leave paths. */
-  const goViewBack = useCallback(() => {
-    if (historyIndexRef.current > 0) {
-      goSessionBack();
-      return;
-    }
-    const current = viewRef.current;
-    if (current === "episodes") {
-      navigateToView(episodeReturnViewRef.current, "restore");
-      return;
-    }
-    if (current !== "categories" && current !== "player" && current !== "manualSkip") {
-      navigateToView("categories", "restore");
-    }
-  }, [goSessionBack, navigateToView]);
-
   const restoreNavSnapshot = useCallback(
     async (snapshot: NavSnapshot) => {
       const previousView = viewRef.current;
@@ -1863,7 +1861,10 @@ function App() {
       const library = libraryRef.current;
       const anime =
         snapshot.selectedAnimeId != null
-          ? (library?.anime.find((item) => item.id === snapshot.selectedAnimeId) ?? null)
+          ? (library?.anime.find((item) => item.id === snapshot.selectedAnimeId) ??
+            (selectedAnimeRef.current?.id === snapshot.selectedAnimeId
+              ? selectedAnimeRef.current
+              : null))
           : null;
 
       let nextView = snapshot.view;
@@ -1959,14 +1960,64 @@ function App() {
     ],
   );
 
+  /** Escape / on-screen Back: pop session history so Search or Settings opened
+   * from a category (or title page) return there. Home does not pop. Player
+   * and manual-skip keep their own leave paths. */
+  const goViewBack = useCallback(() => {
+    if (historyIndexRef.current > 0) {
+      const prev = historyEntriesRef.current[historyIndexRef.current - 1];
+      if (prev) {
+        ignorePopStateRestoreRef.current = true;
+        applyingHistoryRef.current = true;
+        pendingHistoryModeRef.current = "none";
+        historyIndexRef.current -= 1;
+        historyEntriesRef.current = historyEntriesRef.current.slice(0, historyIndexRef.current + 1);
+        lastHistoryPageKeyRef.current = pageKeyFromSnapshot(prev);
+        goSessionBack();
+        void restoreNavSnapshot(prev);
+      } else {
+        goSessionBack();
+      }
+      window.setTimeout(() => {
+        ignorePopStateRestoreRef.current = false;
+      }, 100);
+      return;
+    }
+    const current = viewRef.current;
+    if (current === "episodes") {
+      navigateToView(episodeReturnViewRef.current, "restore");
+      return;
+    }
+    if (current !== "categories" && current !== "player" && current !== "manualSkip") {
+      navigateToView("categories", "restore");
+    }
+  }, [goSessionBack, navigateToView, restoreNavSnapshot]);
+
   useEffect(() => {
     const onPopState = (event: PopStateEvent) => {
       lockHistoryGesture();
       if (!isNavSnapshot(event.state)) return;
+      historyIndexRef.current = snapshotHistoryIndex(event.state);
+      if (ignorePopStateRestoreRef.current) {
+        ignorePopStateRestoreRef.current = false;
+        applyingHistoryRef.current = true;
+        pendingHistoryModeRef.current = "none";
+        const expected = historyEntriesRef.current[historyIndexRef.current];
+        if (expected && !navSnapshotsEqual(expected, event.state)) {
+          history.replaceState(
+            attachHistoryIndex(expected, historyIndexRef.current),
+            "",
+            historyUrlForPageKey(pageKeyFromSnapshot(expected)),
+          );
+        }
+        return;
+      }
       applyingHistoryRef.current = true;
       pendingHistoryModeRef.current = "none";
-      historyIndexRef.current = snapshotHistoryIndex(event.state);
-      void restoreNavSnapshot(event.state);
+      const landed = attachHistoryIndex(event.state, historyIndexRef.current);
+      historyEntriesRef.current[historyIndexRef.current] = landed;
+      historyEntriesRef.current = historyEntriesRef.current.slice(0, historyIndexRef.current + 1);
+      void restoreNavSnapshot(landed);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);

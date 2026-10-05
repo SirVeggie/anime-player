@@ -217,7 +217,9 @@ view components. Per-screen UI lives in `src/components/`:
   does not leave the page; forced leaves (deleted title, empty Missing page)
   replace the current entry. **Escape** and on-screen Back pop that same
   session history when there is a previous entry (Search or Settings opened
-  from a category return there instead of always going home). The home
+  from a category or title page return there instead of always going home).
+  Each view is recorded as its own `#pageKey` history URL so WebView2 does
+  not collapse nested pages. The home
   categories view does not pop. The player and manual-skip screens keep their
   own Back / Escape paths. With no previous entry, Back falls back to the
   parent view (episodes → `episodeReturnView`, other pages → home). Search

@@ -69,6 +69,32 @@ export function navSnapshotsEqual(a: NavSnapshot, b: NavSnapshot): boolean {
   );
 }
 
+export function pageKeyFromSnapshot(snapshot: NavSnapshot): string {
+  switch (snapshot.view) {
+    case "anime":
+      return `anime:${snapshot.selectedCategoryId ?? "none"}`;
+    case "episodes":
+      return `episodes:${snapshot.selectedAnimeId ?? "none"}:${snapshot.episodeReturnView}`;
+    case "player":
+      return `player:${snapshot.selectedEpisodeId ?? "none"}`;
+    case "manualSkip":
+      return `manualSkip:${snapshot.manualSkipAnimeId ?? "none"}`;
+    case "missing":
+      return "missing";
+    case "bulkEdit":
+      return "bulkEdit";
+    case "jobs":
+      return "jobs";
+    default:
+      return snapshot.view;
+  }
+}
+
+/** Distinct URLs so WebView2 keeps one history slot per view instead of coalescing. */
+export function historyUrlForPageKey(pageKey: string): string {
+  return `#${encodeURIComponent(pageKey)}`;
+}
+
 export function isBrowserBackKey(event: KeyboardEvent): boolean {
   return event.key === "BrowserBack" || event.code === "BrowserBack";
 }
