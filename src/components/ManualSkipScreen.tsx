@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteManualOpEdTemplate,
   listManualOpEdTemplates,
@@ -129,11 +129,13 @@ export function ManualSkipScreen(props: {
   anime: AnimeSummary;
   animeTitle: string;
   episodes: Episode[];
+  /** Filled with the Escape step-back handler so App's Back gestures use it. */
+  backRef: MutableRefObject<(() => void) | null>;
   onBack: () => void;
   onDirtyClose: () => void;
   onError: (message: string) => void;
 }) {
-  const { anime, animeTitle, episodes, onBack, onDirtyClose, onError } = props;
+  const { anime, animeTitle, episodes, backRef, onBack, onDirtyClose, onError } = props;
   const [view, setView] = useState<ScreenView>({ kind: "list" });
   const [templates, setTemplates] = useState<ManualOpEdTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -610,6 +612,13 @@ export function ManualSkipScreen(props: {
     }
     exitScreen();
   }, [exitScreen, leaveEditor, view.kind]);
+
+  useEffect(() => {
+    backRef.current = handleBackStep;
+    return () => {
+      if (backRef.current === handleBackStep) backRef.current = null;
+    };
+  }, [backRef, handleBackStep]);
 
   const handleDelete = useCallback(
     async (template: ManualOpEdTemplate) => {

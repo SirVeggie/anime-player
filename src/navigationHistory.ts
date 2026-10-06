@@ -1,4 +1,10 @@
-/** Session-history snapshots for BrowserBack / BrowserForward navigation. */
+/** In-app session history for Back / Forward navigation.
+ *
+ * The stack lives only in memory. `window.history` is deliberately left
+ * untouched: WebView2 performs its own native history step for BrowserBack /
+ * mouse X1 even after `preventDefault`, so mirroring entries there made one
+ * gesture walk more than one step. With a single native entry that native
+ * step is a no-op. */
 
 export type AppView =
   | "categories"
@@ -14,60 +20,30 @@ export type AppView =
 
 export type EpisodeReturnView = "anime" | "search" | "bulkEdit" | "categories";
 
-export type HistoryMode = "push" | "replace" | "none";
+/**
+ * - `push`: new entry after the current one (drops forward entries).
+ * - `replace`: overwrite the current entry (forced leaves). Collapses into the
+ *   previous entry when that is the same page, so no duplicate slot remains.
+ * - `back`: a leave path (player Q / back arrow, manual skip exit). Steps back
+ *   onto the previous entry when it is the target page, keeping forward
+ *   entries; otherwise behaves like `replace`.
+ * - `none`: a Back / Forward restore already moved the index; only refresh it.
+ */
+export type HistoryMode = "push" | "replace" | "back" | "none";
 
 export type NavSnapshot = {
-  v: 1;
   view: AppView;
   selectedCategoryId: number | null;
   selectedAnimeId: number | null;
   selectedEpisodeId: number | null;
   episodeReturnView: EpisodeReturnView;
   manualSkipAnimeId: number | null;
-  /** Position in the in-app session stack. 0 is the first entry (usually home). */
-  index?: number;
 };
 
-export function isNavSnapshot(value: unknown): value is NavSnapshot {
-  if (value == null || typeof value !== "object") return false;
-  const snap = value as Partial<NavSnapshot>;
-  return (
-    snap.v === 1 &&
-    typeof snap.view === "string" &&
-    (snap.selectedCategoryId === null || typeof snap.selectedCategoryId === "number") &&
-    (snap.selectedAnimeId === null || typeof snap.selectedAnimeId === "number") &&
-    (snap.selectedEpisodeId === null || typeof snap.selectedEpisodeId === "number") &&
-    (snap.episodeReturnView === "anime" ||
-      snap.episodeReturnView === "search" ||
-      snap.episodeReturnView === "bulkEdit" ||
-      snap.episodeReturnView === "categories") &&
-    (snap.manualSkipAnimeId === null || typeof snap.manualSkipAnimeId === "number") &&
-    (snap.index === undefined || typeof snap.index === "number")
-  );
-}
-
-export function attachHistoryIndex(snapshot: NavSnapshot, index: number): NavSnapshot {
-  return { ...snapshot, index };
-}
-
-export function snapshotHistoryIndex(snapshot: unknown): number {
-  if (isNavSnapshot(snapshot) && typeof snapshot.index === "number") {
-    return snapshot.index;
-  }
-  return 0;
-}
-
-export function navSnapshotsEqual(a: NavSnapshot, b: NavSnapshot): boolean {
-  return (
-    a.v === b.v &&
-    a.view === b.view &&
-    a.selectedCategoryId === b.selectedCategoryId &&
-    a.selectedAnimeId === b.selectedAnimeId &&
-    a.selectedEpisodeId === b.selectedEpisodeId &&
-    a.episodeReturnView === b.episodeReturnView &&
-    a.manualSkipAnimeId === b.manualSkipAnimeId
-  );
-}
+export type NavHistory = {
+  entries: NavSnapshot[];
+  index: number;
+};
 
 export function pageKeyFromSnapshot(snapshot: NavSnapshot): string {
   switch (snapshot.view) {
@@ -79,27 +55,52 @@ export function pageKeyFromSnapshot(snapshot: NavSnapshot): string {
       return `player:${snapshot.selectedEpisodeId ?? "none"}`;
     case "manualSkip":
       return `manualSkip:${snapshot.manualSkipAnimeId ?? "none"}`;
-    case "missing":
-      return "missing";
-    case "bulkEdit":
-      return "bulkEdit";
-    case "jobs":
-      return "jobs";
     default:
       return snapshot.view;
   }
 }
 
-/** Distinct URLs so WebView2 keeps one history slot per view instead of coalescing. */
-export function historyUrlForPageKey(pageKey: string): string {
-  return `#${encodeURIComponent(pageKey)}`;
+/** Record `snapshot` as the newly shown view. Mutates `history`. */
+export function recordNavigation(history: NavHistory, snapshot: NavSnapshot, mode: HistoryMode): void {
+  const { entries } = history;
+  const current = entries[history.index];
+  if (!current) {
+    history.entries = [snapshot];
+    history.index = 0;
+    return;
+  }
+
+  const key = pageKeyFromSnapshot(snapshot);
+  // Episode switches inside the player (next/prev, EOF advance) are one session.
+  const samePlayerSession = snapshot.view === "player" && current.view === "player";
+  if (mode === "none" || key === pageKeyFromSnapshot(current) || samePlayerSession) {
+    entries[history.index] = snapshot;
+    return;
+  }
+
+  const previous = entries[history.index - 1];
+  const previousMatches = previous != null && pageKeyFromSnapshot(previous) === key;
+  if (mode === "back" && previousMatches) {
+    history.index -= 1;
+    entries[history.index] = snapshot;
+    return;
+  }
+  if (mode === "back" || mode === "replace") {
+    if (previousMatches) {
+      entries.splice(history.index, 1);
+      history.index -= 1;
+    }
+    entries[history.index] = snapshot;
+    return;
+  }
+
+  history.entries = entries.slice(0, history.index + 1);
+  history.entries.push(snapshot);
+  history.index += 1;
 }
 
-/** Collapse duplicate BrowserBack / X1 events (keydown + native history, mouseup + auxclick). */
-export const HISTORY_GESTURE_MS = 80;
-
-/** Keep ignoring popstate while an in-app Back/Forward already applied the snapshot. */
-export const HISTORY_POP_IGNORE_MS = 120;
+/** Collapse a BrowserBack key and X1 mouse event delivered for one press. */
+export const HISTORY_GESTURE_MS = 150;
 
 export function isBrowserBackKey(event: KeyboardEvent): boolean {
   return event.key === "BrowserBack" || event.code === "BrowserBack";

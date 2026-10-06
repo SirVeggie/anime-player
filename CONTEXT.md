@@ -208,25 +208,29 @@ view components. Per-screen UI lives in `src/components/`:
   only during a player session (F11, F, or double-click on the video) is
   reverted to windowed when leaving the player; if the window was already
   fullscreen when playback started, it stays fullscreen after exit. **Escape**
-  matches the per-screen back control. In the player it uses the same path as
+  matches   the per-screen back control. In the player it uses the same path as
   **Q** / the back arrow (pause + persist + return to episodes). **Browser Back /
-  Browser Forward** (multimedia
-  keys and mouse X1/X2) walk a session history of visited views, including
-  sidebar pages and player episodes. `App.tsx` keeps that stack with
-  `history.pushState` / `popstate` (`src/navigationHistory.ts`) so WebView2
-  does not leave the page; forced leaves (deleted title, empty Missing page)
-  replace the current entry. WebView2 still performs a native history step
-  for BrowserBack / X1 even after `preventDefault`, so those gestures use the
-  same one-step restore as the on-screen Back arrow (`goViewBack`) and extra
-  `popstate` events are ignored or undone. **Escape** and on-screen Back pop that same
-  session history when there is a previous entry (Search or Settings opened
-  from a category or title page return there instead of always going home).
-  Each view is recorded as its own `#pageKey` history URL so WebView2 does
-  not collapse nested pages. The home
-  categories view does not pop. The player and manual-skip screens keep their
-  own Back / Escape paths. With no previous entry, Back falls back to the
-  parent view (episodes → `episodeReturnView`, other pages → home). Search
-  Escape still clears a non-empty query first. Those actions
+  Browser Forward** (multimedia keys, Alt+Arrow, and mouse X1/X2), **Escape**,
+  and the on-screen Back arrow all walk one in-memory session stack
+  (`src/navigationHistory.ts`, `recordNavigation`; `goViewBack` /
+  `goViewForward` in `App.tsx`). `window.history` is intentionally **not**
+  used: WebView2 performs a native history step for BrowserBack / X1 even
+  after `preventDefault`, and with a single native entry that step is a
+  no-op. X1/X2 navigate on `mouseup` only (down/auxclick are swallowed), and a
+  150ms dedupe collapses a key + mouse event for one press. Navigations record
+  with a mode: `push` (normal), `replace` (forced leaves such as a deleted
+  title or empty Missing page; collapses into the previous entry when it is
+  the same page), and `back` (leaving the player or manual skip: steps back
+  onto the previous entry when it is the episode list, keeping the player as
+  a forward entry, otherwise replaces). Episode switches inside the player
+  overwrite one player entry rather than stacking. In the player and manual
+  skip, Back gestures call the screen's own leave path through
+  `playerBackRef` / `manualSkipBackRef` (pause + persist, or editor step-back
+  + rematch), and PlayerView also pauses mpv whenever it becomes hidden.
+  Search or Settings opened from a category or title page return there. The
+  home categories view does not pop. With no previous entry, Back falls back
+  to the parent view (episodes → `episodeReturnView`, other pages → home).
+  Search Escape still clears a non-empty query first. Those actions
   require explicit `core:window:allow-*` entries in
   `src-tauri/capabilities/default.json` (Tauri v2 ACL).
   Even though the custom title bar hides the **Anime Player** label in the
@@ -484,9 +488,9 @@ view components. Per-screen UI lives in `src/components/`:
   on unmute); adjusting volume with **W**/**S**, the wheel, or the slider
   clears mute;
   **Q**, **Escape**, or the back
-  control returns to the episode list (without unloading mpv). **Browser Back /
-  Browser Forward** (and mouse X1/X2) walk session history, including previous
-  player episodes. On the
+  control returns to the episode list (without unloading mpv). **Browser Back**
+  (and mouse X1) in the player takes the same path; Forward from the episode
+  list returns to the player session. On the
   episode list, **Q** is owned by `App.tsx`'s `pickQuickPlayEpisode`
   helper: it plays the current anime's most recently played episode, the
   next unwatched episode in list order if that one is already watched, or the
@@ -783,8 +787,9 @@ mpv load/init. Set `RUST_BACKTRACE=1` before launch for richer panic stacks.
   — split-out view components composed by `App.tsx`.
 - `src/animeGridSort.ts`, `src/animeGridFilter.ts` — category/search grid sort
   and category text-filter helpers (storage keys included).
-- `src/navigationHistory.ts` — session-history snapshots and BrowserBack /
-  BrowserForward / mouse X-button helpers used by `App.tsx`.
+- `src/navigationHistory.ts` — in-memory session-history stack
+  (`recordNavigation`, history modes) and BrowserBack / BrowserForward /
+  mouse X-button helpers used by `App.tsx`.
 - `src/quickPlay.ts` — Q-hotkey "next episode to play" picker.
 - `src/volume.ts` — volume constants and clamping for
   mpv's native 0–130 log scale.

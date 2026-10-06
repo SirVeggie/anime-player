@@ -359,6 +359,8 @@ export function PlayerView(props: {
   /** When true, PlayerView must not touch mpv (e.g. manual skip editor owns it). */
   playbackSuspended?: boolean;
   playbackProgressFlushRef: MutableRefObject<(() => Promise<void>) | null>;
+  /** Filled with the Q / back-arrow leave path so App's Back gestures pause and persist too. */
+  backRef: MutableRefObject<(() => void) | null>;
   onSelectEpisode: (episode: Episode) => void;
   onBack: () => void;
   onClose: () => void;
@@ -379,6 +381,7 @@ export function PlayerView(props: {
     visible,
     playbackSuspended = false,
     playbackProgressFlushRef,
+    backRef,
     onSelectEpisode,
     onBack,
     onClose,
@@ -817,6 +820,11 @@ export function PlayerView(props: {
     const wasVisible = wasVisibleForAutoPersistRef.current;
     wasVisibleForAutoPersistRef.current = visible;
     if (!wasVisible || visible) return;
+    // Every way out of the player must leave mpv paused, not only hidePlayer.
+    if (!playbackSuspendedRef.current) {
+      void invoke("mpv_set_pause", { paused: true }).catch(() => undefined);
+      setPaused(true);
+    }
     const current = playbackRef.current.episode;
     if (shouldSkipAutoPersist(current.id)) return;
     void persistTrackPrefsIfChangedRef.current(current);
@@ -1504,7 +1512,10 @@ export function PlayerView(props: {
     };
   }, []);
 
+  const hidingPlayerRef = useRef(false);
   const hidePlayer = useCallback(async () => {
+    if (hidingPlayerRef.current) return;
+    hidingPlayerRef.current = true;
     cancelScrubSession();
     try {
       await invoke("mpv_set_pause", { paused: true });
@@ -1514,8 +1525,18 @@ export function PlayerView(props: {
       onBack();
     } catch (e) {
       onError(errorMessage(e));
+    } finally {
+      hidingPlayerRef.current = false;
     }
   }, [cancelScrubSession, onBack, onError, persistProgress, persistTrackPrefsIfChanged]);
+
+  useEffect(() => {
+    const leave = () => void hidePlayer();
+    backRef.current = leave;
+    return () => {
+      if (backRef.current === leave) backRef.current = null;
+    };
+  }, [backRef, hidePlayer]);
 
   const loadSibling = useCallback(
     (delta: number) => {

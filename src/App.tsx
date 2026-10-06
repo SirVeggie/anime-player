@@ -102,21 +102,17 @@ import { type Toast, ToastStack } from "./components/ToastStack";
 import { UpdatePopup } from "./components/UpdatePopup";
 import { WindowTitleBar } from "./components/WindowTitleBar";
 import {
-  attachHistoryIndex,
   HISTORY_GESTURE_MS,
-  HISTORY_POP_IGNORE_MS,
-  historyUrlForPageKey,
   isBrowserBackButton,
   isBrowserBackKey,
   isBrowserForwardButton,
   isBrowserForwardKey,
-  isNavSnapshot,
-  navSnapshotsEqual,
   pageKeyFromSnapshot,
-  snapshotHistoryIndex,
+  recordNavigation,
   type AppView,
   type EpisodeReturnView,
   type HistoryMode,
+  type NavHistory,
   type NavSnapshot,
 } from "./navigationHistory";
 import { pickQuickPlayEpisode } from "./quickPlay";
@@ -234,18 +230,12 @@ function App() {
   const pendingScrollRestorationRef = useRef<ScrollRestoration>("top");
   const scrollPositionsRef = useRef(new Map<string, number>());
   const pendingHistoryModeRef = useRef<HistoryMode>("push");
-  const applyingHistoryRef = useRef(false);
-  const lastHistoryPageKeyRef = useRef<string | null>(null);
-  const historyIndexRef = useRef(0);
-  const historyEntriesRef = useRef<NavSnapshot[]>([]);
-  const ignorePopStateRestoreRef = useRef(false);
-  const ignorePopStateTimerRef = useRef<number | null>(null);
-  const historyGestureLockRef = useRef(false);
-  const historyGestureUnlockTimerRef = useRef<number | null>(null);
-  const lastPopStateAtRef = useRef(0);
-  const lastPopStateIndexRef = useRef(0);
-  const revertingExtraPopRef = useRef(false);
+  const navHistoryRef = useRef<NavHistory>({ entries: [], index: 0 });
+  const lastHistoryGestureAtRef = useRef(-Infinity);
   const restoreGenerationRef = useRef(0);
+  /** Set by `PlayerView` / `ManualSkipScreen` so Back gestures run their own leave paths. */
+  const playerBackRef = useRef<(() => void) | null>(null);
+  const manualSkipBackRef = useRef<(() => void) | null>(null);
   const episodesRef = useRef<Episode[]>([]);
   episodesRef.current = episodes;
   /** Set by `PlayerView` when a session is active; used to flush SQLite before `destroy()` on window close. */
@@ -550,7 +540,6 @@ function App() {
 
   const navSnapshot = useMemo<NavSnapshot>(
     () => ({
-      v: 1,
       view,
       selectedCategoryId,
       selectedAnimeId: selectedAnime?.id ?? null,
@@ -568,34 +557,6 @@ function App() {
     ],
   );
   const pageKey = useMemo(() => pageKeyFromSnapshot(navSnapshot), [navSnapshot]);
-  const navSnapshotRef = useRef(navSnapshot);
-  navSnapshotRef.current = navSnapshot;
-  const pageKeyRef = useRef(pageKey);
-  pageKeyRef.current = pageKey;
-
-  const recordHistory = useCallback((snapshot: NavSnapshot, key: string, mode: "push" | "replace") => {
-    const index = mode === "push" ? historyIndexRef.current + 1 : historyIndexRef.current;
-    const recorded = attachHistoryIndex(snapshot, index);
-    historyIndexRef.current = index;
-    if (mode === "push") {
-      historyEntriesRef.current = historyEntriesRef.current.slice(0, index);
-      historyEntriesRef.current.push(recorded);
-      history.pushState(recorded, "", historyUrlForPageKey(key));
-    } else {
-      historyEntriesRef.current[index] = recorded;
-      history.replaceState(recorded, "", historyUrlForPageKey(key));
-    }
-    lastHistoryPageKeyRef.current = key;
-  }, []);
-
-  const ensureCurrentViewInHistory = useCallback(() => {
-    if (lastHistoryPageKeyRef.current === null) return;
-    const snapshot = navSnapshotRef.current;
-    const key = pageKeyRef.current;
-    const top = historyEntriesRef.current[historyIndexRef.current];
-    if (top && navSnapshotsEqual(top, snapshot) && lastHistoryPageKeyRef.current === key) return;
-    recordHistory(snapshot, key, "push");
-  }, [recordHistory]);
 
   const saveCurrentScrollPosition = useCallback(() => {
     const content = contentRef.current;
@@ -608,13 +569,10 @@ function App() {
     (nextView: View, restoration: ScrollRestoration = "top", historyMode: HistoryMode = "push") => {
       saveCurrentScrollPosition();
       pendingScrollRestorationRef.current = restoration;
-      if (historyMode === "push") {
-        ensureCurrentViewInHistory();
-      }
       pendingHistoryModeRef.current = historyMode;
       setView(nextView);
     },
-    [ensureCurrentViewInHistory, saveCurrentScrollPosition],
+    [saveCurrentScrollPosition],
   );
 
   useEffect(() => {
@@ -664,39 +622,10 @@ function App() {
   }, [pageKey, view]);
 
   useLayoutEffect(() => {
-    const mode = applyingHistoryRef.current ? "none" : pendingHistoryModeRef.current;
+    const mode = pendingHistoryModeRef.current;
     pendingHistoryModeRef.current = "push";
-
-    if (lastHistoryPageKeyRef.current === null) {
-      historyIndexRef.current = 0;
-      historyEntriesRef.current = [attachHistoryIndex(navSnapshot, 0)];
-      history.replaceState(historyEntriesRef.current[0], "", historyUrlForPageKey(pageKey));
-      lastHistoryPageKeyRef.current = pageKey;
-      applyingHistoryRef.current = false;
-      return;
-    }
-
-    const historyTop = isNavSnapshot(history.state) ? history.state : null;
-    const sameHistorySlot = historyTop != null && historyTop.view === navSnapshot.view;
-
-    if (mode === "none") {
-      // After popstate, update the landed slot. If a user navigation raced in
-      // with a stale apply flag, push instead of clobbering the previous view.
-      recordHistory(navSnapshot, pageKey, sameHistorySlot ? "replace" : "push");
-      applyingHistoryRef.current = false;
-      return;
-    }
-
-    if (lastHistoryPageKeyRef.current === pageKey && sameHistorySlot) {
-      const current = attachHistoryIndex(navSnapshot, historyIndexRef.current);
-      if (!historyTop || !navSnapshotsEqual(historyTop, current)) {
-        recordHistory(navSnapshot, pageKey, "replace");
-      }
-      return;
-    }
-
-    recordHistory(navSnapshot, pageKey, mode === "replace" ? "replace" : "push");
-  }, [navSnapshot, pageKey, recordHistory]);
+    recordNavigation(navHistoryRef.current, navSnapshot, mode);
+  }, [navSnapshot]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
@@ -1284,7 +1213,7 @@ function App() {
 
   const closeManualSkip = useCallback(() => {
     setManualSkipAnimeId(null);
-    navigateToView("episodes", "restore");
+    navigateToView("episodes", "restore", "back");
   }, [navigateToView]);
 
   const handleManualSkipDirtyClose = useCallback(async () => {
@@ -1824,7 +1753,7 @@ function App() {
         await runScreenTransition(
           () => {
             if (unload) setSelectedEpisode(null);
-            navigateToView("episodes", "restore");
+            navigateToView("episodes", "restore", "back");
           },
           unload
             ? { afterCover: () => stopMpv().catch(() => undefined) }
@@ -1834,34 +1763,6 @@ function App() {
     },
     [navigateToView, restoreFullscreenAfterPlayerIfNeeded, runScreenTransition],
   );
-
-  const lockHistoryGesture = useCallback(() => {
-    historyGestureLockRef.current = true;
-    if (historyGestureUnlockTimerRef.current != null) {
-      window.clearTimeout(historyGestureUnlockTimerRef.current);
-    }
-    historyGestureUnlockTimerRef.current = window.setTimeout(() => {
-      historyGestureLockRef.current = false;
-      historyGestureUnlockTimerRef.current = null;
-    }, HISTORY_GESTURE_MS);
-  }, []);
-
-  const beginIgnorePopStateRestore = useCallback(() => {
-    ignorePopStateRestoreRef.current = true;
-    if (ignorePopStateTimerRef.current != null) {
-      window.clearTimeout(ignorePopStateTimerRef.current);
-    }
-    ignorePopStateTimerRef.current = window.setTimeout(() => {
-      ignorePopStateRestoreRef.current = false;
-      ignorePopStateTimerRef.current = null;
-    }, HISTORY_POP_IGNORE_MS);
-  }, []);
-
-  const goSessionForward = useCallback(() => {
-    if (historyGestureLockRef.current) return;
-    lockHistoryGesture();
-    history.forward();
-  }, [lockHistoryGesture]);
 
   const restoreNavSnapshot = useCallback(
     async (snapshot: NavSnapshot) => {
@@ -1975,152 +1876,98 @@ function App() {
     ],
   );
 
-  /** Escape / on-screen Back: pop session history so Search or Settings opened
-   * from a category (or title page) return there. Home does not pop. Player
-   * and manual-skip keep their own leave paths. BrowserBack uses this same
-   * path so WebView2's native history navigation cannot skip an extra slot. */
+  /** Escape / on-screen Back / BrowserBack: step back in session history so
+   * Search or Settings opened from a category (or title page) return there.
+   * Home does not pop. Player and manual skip run their own leave paths
+   * (pause + persist, editor step-back + rematch), which record a `back`
+   * navigation instead of a new entry. */
   const goViewBack = useCallback(() => {
-    if (historyGestureLockRef.current) return;
-    if (historyIndexRef.current > 0) {
-      const prev = historyEntriesRef.current[historyIndexRef.current - 1];
-      if (prev) {
-        lockHistoryGesture();
-        beginIgnorePopStateRestore();
-        applyingHistoryRef.current = true;
-        pendingHistoryModeRef.current = "none";
-        historyIndexRef.current -= 1;
-        lastHistoryPageKeyRef.current = pageKeyFromSnapshot(prev);
-        history.back();
-        void restoreNavSnapshot(prev);
-        return;
-      }
-    }
     const current = viewRef.current;
-    if (current === "episodes") {
-      navigateToView(episodeReturnViewRef.current, "restore");
+    if (current === "player") {
+      playerBackRef.current?.();
       return;
     }
-    if (current !== "categories" && current !== "player" && current !== "manualSkip") {
-      navigateToView("categories", "restore");
+    if (current === "manualSkip") {
+      manualSkipBackRef.current?.();
+      return;
     }
-  }, [beginIgnorePopStateRestore, lockHistoryGesture, navigateToView, restoreNavSnapshot]);
+    const nav = navHistoryRef.current;
+    const prev = nav.entries[nav.index - 1];
+    if (prev) {
+      nav.index -= 1;
+      void restoreNavSnapshot(prev);
+      return;
+    }
+    if (current === "episodes") {
+      navigateToView(episodeReturnViewRef.current, "restore", "replace");
+      return;
+    }
+    if (current !== "categories") {
+      navigateToView("categories", "restore", "replace");
+    }
+  }, [navigateToView, restoreNavSnapshot]);
 
   const goViewForward = useCallback(() => {
-    if (historyGestureLockRef.current) return;
-    const next = historyEntriesRef.current[historyIndexRef.current + 1];
-    if (!next) {
-      goSessionForward();
-      return;
-    }
-    lockHistoryGesture();
-    beginIgnorePopStateRestore();
-    applyingHistoryRef.current = true;
-    pendingHistoryModeRef.current = "none";
-    historyIndexRef.current += 1;
-    lastHistoryPageKeyRef.current = pageKeyFromSnapshot(next);
-    history.forward();
+    const current = viewRef.current;
+    if (current === "player" || current === "manualSkip") return;
+    const nav = navHistoryRef.current;
+    const next = nav.entries[nav.index + 1];
+    if (!next) return;
+    nav.index += 1;
     void restoreNavSnapshot(next);
-  }, [beginIgnorePopStateRestore, goSessionForward, lockHistoryGesture, restoreNavSnapshot]);
+  }, [restoreNavSnapshot]);
 
   useEffect(() => {
-    const revertHistoryIndex = (delta: number) => {
-      if (delta === 0) return;
-      revertingExtraPopRef.current = true;
-      queueMicrotask(() => {
-        history.go(delta);
-      });
-    };
-
-    const onPopState = (event: PopStateEvent) => {
-      if (revertingExtraPopRef.current) {
-        revertingExtraPopRef.current = false;
-        return;
-      }
-      if (!isNavSnapshot(event.state)) return;
-      const landedIndex = snapshotHistoryIndex(event.state);
-
-      if (ignorePopStateRestoreRef.current) {
-        applyingHistoryRef.current = true;
-        pendingHistoryModeRef.current = "none";
-        const delta = historyIndexRef.current - landedIndex;
-        // WebView2 often still performs a native history step after preventDefault.
-        // Undo a single extra step so we stay on the snapshot goViewBack already applied.
-        if (Math.abs(delta) === 1) {
-          revertHistoryIndex(delta);
-        } else {
-          const expected = historyEntriesRef.current[historyIndexRef.current];
-          if (expected && !navSnapshotsEqual(expected, event.state)) {
-            history.replaceState(
-              attachHistoryIndex(expected, historyIndexRef.current),
-              "",
-              historyUrlForPageKey(pageKeyFromSnapshot(expected)),
-            );
-          }
-        }
-        return;
-      }
-
+    // One physical press can arrive as both a BrowserBack key and an X1 mouse
+    // event (driver / app-command dependent); only the first one navigates.
+    const runGesture = (action: () => void) => {
       const now = performance.now();
-      if (
-        now - lastPopStateAtRef.current < HISTORY_GESTURE_MS &&
-        lastPopStateIndexRef.current !== landedIndex
-      ) {
-        revertHistoryIndex(lastPopStateIndexRef.current - landedIndex);
-        return;
-      }
-      lastPopStateAtRef.current = now;
-      lastPopStateIndexRef.current = landedIndex;
-
-      lockHistoryGesture();
-      historyIndexRef.current = landedIndex;
-      applyingHistoryRef.current = true;
-      pendingHistoryModeRef.current = "none";
-      const landed = attachHistoryIndex(event.state, landedIndex);
-      historyEntriesRef.current[landedIndex] = landed;
-      void restoreNavSnapshot(landed);
+      if (now - lastHistoryGestureAtRef.current < HISTORY_GESTURE_MS) return;
+      lastHistoryGestureAtRef.current = now;
+      action();
     };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [lockHistoryGesture, restoreNavSnapshot]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
       const altArrow = event.altKey && !event.ctrlKey && !event.metaKey;
       if (isBrowserBackKey(event) || (altArrow && event.code === "ArrowLeft")) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        goViewBack();
+        runGesture(goViewBack);
         return;
       }
       if (isBrowserForwardKey(event) || (altArrow && event.code === "ArrowRight")) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        goViewForward();
+        runGesture(goViewForward);
       }
     };
-    const onMouseNavigate = (event: MouseEvent) => {
+    const swallowMouseNavigate = (event: MouseEvent) => {
+      if (!isBrowserBackButton(event) && !isBrowserForwardButton(event)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    // Navigate on release only: listening to down + up + auxclick made one
+    // press held longer than the dedupe window step back twice.
+    const onMouseUp = (event: MouseEvent) => {
       if (isBrowserBackButton(event)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        goViewBack();
+        swallowMouseNavigate(event);
+        runGesture(goViewBack);
         return;
       }
       if (isBrowserForwardButton(event)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        goViewForward();
+        swallowMouseNavigate(event);
+        runGesture(goViewForward);
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("pointerdown", onMouseNavigate, true);
-    window.addEventListener("mouseup", onMouseNavigate, true);
-    window.addEventListener("auxclick", onMouseNavigate, true);
+    window.addEventListener("mousedown", swallowMouseNavigate, true);
+    window.addEventListener("mouseup", onMouseUp, true);
+    window.addEventListener("auxclick", swallowMouseNavigate, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("pointerdown", onMouseNavigate, true);
-      window.removeEventListener("mouseup", onMouseNavigate, true);
-      window.removeEventListener("auxclick", onMouseNavigate, true);
+      window.removeEventListener("mousedown", swallowMouseNavigate, true);
+      window.removeEventListener("mouseup", onMouseUp, true);
+      window.removeEventListener("auxclick", swallowMouseNavigate, true);
     };
   }, [goViewBack, goViewForward]);
 
@@ -2386,6 +2233,7 @@ function App() {
           visible={Boolean(showPlayer)}
           playbackSuspended={showManualSkip}
           playbackProgressFlushRef={playbackProgressFlushRef}
+          backRef={playerBackRef}
           onSelectEpisode={setSelectedEpisode}
           onBack={() => closePlayer()}
           onClose={() => closePlayer({ unload: true })}
@@ -2567,6 +2415,7 @@ function App() {
           anime={manualSkipAnime}
           animeTitle={animeDisplayTitle(manualSkipAnime, library.prefer_anilist_display_title)}
           episodes={episodes}
+          backRef={manualSkipBackRef}
           onBack={closeManualSkip}
           onDirtyClose={() => void handleManualSkipDirtyClose()}
           onError={(message) => showToast("error", message)}
