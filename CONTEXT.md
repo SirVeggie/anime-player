@@ -215,7 +215,10 @@ view components. Per-screen UI lives in `src/components/`:
   sidebar pages and player episodes. `App.tsx` keeps that stack with
   `history.pushState` / `popstate` (`src/navigationHistory.ts`) so WebView2
   does not leave the page; forced leaves (deleted title, empty Missing page)
-  replace the current entry. **Escape** and on-screen Back pop that same
+  replace the current entry. WebView2 still performs a native history step
+  for BrowserBack / X1 even after `preventDefault`, so those gestures use the
+  same one-step restore as the on-screen Back arrow (`goViewBack`) and extra
+  `popstate` events are ignored or undone. **Escape** and on-screen Back pop that same
   session history when there is a previous entry (Search or Settings opened
   from a category or title page return there instead of always going home).
   Each view is recorded as its own `#pageKey` history URL so WebView2 does

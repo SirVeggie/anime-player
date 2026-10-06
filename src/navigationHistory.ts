@@ -95,6 +95,12 @@ export function historyUrlForPageKey(pageKey: string): string {
   return `#${encodeURIComponent(pageKey)}`;
 }
 
+/** Collapse duplicate BrowserBack / X1 events (keydown + native history, mouseup + auxclick). */
+export const HISTORY_GESTURE_MS = 80;
+
+/** Keep ignoring popstate while an in-app Back/Forward already applied the snapshot. */
+export const HISTORY_POP_IGNORE_MS = 120;
+
 export function isBrowserBackKey(event: KeyboardEvent): boolean {
   return event.key === "BrowserBack" || event.code === "BrowserBack";
 }

@@ -103,6 +103,8 @@ import { UpdatePopup } from "./components/UpdatePopup";
 import { WindowTitleBar } from "./components/WindowTitleBar";
 import {
   attachHistoryIndex,
+  HISTORY_GESTURE_MS,
+  HISTORY_POP_IGNORE_MS,
   historyUrlForPageKey,
   isBrowserBackButton,
   isBrowserBackKey,
@@ -237,7 +239,13 @@ function App() {
   const historyIndexRef = useRef(0);
   const historyEntriesRef = useRef<NavSnapshot[]>([]);
   const ignorePopStateRestoreRef = useRef(false);
+  const ignorePopStateTimerRef = useRef<number | null>(null);
   const historyGestureLockRef = useRef(false);
+  const historyGestureUnlockTimerRef = useRef<number | null>(null);
+  const lastPopStateAtRef = useRef(0);
+  const lastPopStateIndexRef = useRef(0);
+  const revertingExtraPopRef = useRef(false);
+  const restoreGenerationRef = useRef(0);
   const episodesRef = useRef<Episode[]>([]);
   episodesRef.current = episodes;
   /** Set by `PlayerView` when a session is active; used to flush SQLite before `destroy()` on window close. */
@@ -1829,16 +1837,25 @@ function App() {
 
   const lockHistoryGesture = useCallback(() => {
     historyGestureLockRef.current = true;
-    queueMicrotask(() => {
+    if (historyGestureUnlockTimerRef.current != null) {
+      window.clearTimeout(historyGestureUnlockTimerRef.current);
+    }
+    historyGestureUnlockTimerRef.current = window.setTimeout(() => {
       historyGestureLockRef.current = false;
-    });
+      historyGestureUnlockTimerRef.current = null;
+    }, HISTORY_GESTURE_MS);
   }, []);
 
-  const goSessionBack = useCallback(() => {
-    if (historyGestureLockRef.current) return;
-    lockHistoryGesture();
-    history.back();
-  }, [lockHistoryGesture]);
+  const beginIgnorePopStateRestore = useCallback(() => {
+    ignorePopStateRestoreRef.current = true;
+    if (ignorePopStateTimerRef.current != null) {
+      window.clearTimeout(ignorePopStateTimerRef.current);
+    }
+    ignorePopStateTimerRef.current = window.setTimeout(() => {
+      ignorePopStateRestoreRef.current = false;
+      ignorePopStateTimerRef.current = null;
+    }, HISTORY_POP_IGNORE_MS);
+  }, []);
 
   const goSessionForward = useCallback(() => {
     if (historyGestureLockRef.current) return;
@@ -1848,6 +1865,7 @@ function App() {
 
   const restoreNavSnapshot = useCallback(
     async (snapshot: NavSnapshot) => {
+      const generation = ++restoreGenerationRef.current;
       const previousView = viewRef.current;
       const leavingPlayer = previousView === "player" && snapshot.view !== "player";
       const enteringPlayer = previousView !== "player" && snapshot.view === "player";
@@ -1893,6 +1911,7 @@ function App() {
       }
 
       const commit = () => {
+        if (generation !== restoreGenerationRef.current) return;
         saveCurrentScrollPosition();
         pendingScrollRestorationRef.current = "restore";
         pendingHistoryModeRef.current = "none";
@@ -1923,7 +1942,9 @@ function App() {
             showToast("error", errorMessage(e));
           }
         }
+        if (generation !== restoreGenerationRef.current) return;
         await restoreFullscreenAfterPlayerIfNeeded();
+        if (generation !== restoreGenerationRef.current) return;
         if (screenTransitionRef.current === "idle") {
           await runScreenTransition(commit);
         } else {
@@ -1934,6 +1955,7 @@ function App() {
 
       if (enteringPlayer) {
         await captureFullscreenAtPlayerEntry();
+        if (generation !== restoreGenerationRef.current) return;
         if (screenTransitionRef.current === "idle") {
           await runScreenTransition(commit);
         } else {
@@ -1955,26 +1977,23 @@ function App() {
 
   /** Escape / on-screen Back: pop session history so Search or Settings opened
    * from a category (or title page) return there. Home does not pop. Player
-   * and manual-skip keep their own leave paths. */
+   * and manual-skip keep their own leave paths. BrowserBack uses this same
+   * path so WebView2's native history navigation cannot skip an extra slot. */
   const goViewBack = useCallback(() => {
+    if (historyGestureLockRef.current) return;
     if (historyIndexRef.current > 0) {
       const prev = historyEntriesRef.current[historyIndexRef.current - 1];
       if (prev) {
-        ignorePopStateRestoreRef.current = true;
+        lockHistoryGesture();
+        beginIgnorePopStateRestore();
         applyingHistoryRef.current = true;
         pendingHistoryModeRef.current = "none";
         historyIndexRef.current -= 1;
-        historyEntriesRef.current = historyEntriesRef.current.slice(0, historyIndexRef.current + 1);
         lastHistoryPageKeyRef.current = pageKeyFromSnapshot(prev);
-        goSessionBack();
+        history.back();
         void restoreNavSnapshot(prev);
-      } else {
-        goSessionBack();
+        return;
       }
-      window.setTimeout(() => {
-        ignorePopStateRestoreRef.current = false;
-      }, 100);
-      return;
     }
     const current = viewRef.current;
     if (current === "episodes") {
@@ -1984,32 +2003,80 @@ function App() {
     if (current !== "categories" && current !== "player" && current !== "manualSkip") {
       navigateToView("categories", "restore");
     }
-  }, [goSessionBack, navigateToView, restoreNavSnapshot]);
+  }, [beginIgnorePopStateRestore, lockHistoryGesture, navigateToView, restoreNavSnapshot]);
+
+  const goViewForward = useCallback(() => {
+    if (historyGestureLockRef.current) return;
+    const next = historyEntriesRef.current[historyIndexRef.current + 1];
+    if (!next) {
+      goSessionForward();
+      return;
+    }
+    lockHistoryGesture();
+    beginIgnorePopStateRestore();
+    applyingHistoryRef.current = true;
+    pendingHistoryModeRef.current = "none";
+    historyIndexRef.current += 1;
+    lastHistoryPageKeyRef.current = pageKeyFromSnapshot(next);
+    history.forward();
+    void restoreNavSnapshot(next);
+  }, [beginIgnorePopStateRestore, goSessionForward, lockHistoryGesture, restoreNavSnapshot]);
 
   useEffect(() => {
+    const revertHistoryIndex = (delta: number) => {
+      if (delta === 0) return;
+      revertingExtraPopRef.current = true;
+      queueMicrotask(() => {
+        history.go(delta);
+      });
+    };
+
     const onPopState = (event: PopStateEvent) => {
-      lockHistoryGesture();
+      if (revertingExtraPopRef.current) {
+        revertingExtraPopRef.current = false;
+        return;
+      }
       if (!isNavSnapshot(event.state)) return;
-      historyIndexRef.current = snapshotHistoryIndex(event.state);
+      const landedIndex = snapshotHistoryIndex(event.state);
+
       if (ignorePopStateRestoreRef.current) {
-        ignorePopStateRestoreRef.current = false;
         applyingHistoryRef.current = true;
         pendingHistoryModeRef.current = "none";
-        const expected = historyEntriesRef.current[historyIndexRef.current];
-        if (expected && !navSnapshotsEqual(expected, event.state)) {
-          history.replaceState(
-            attachHistoryIndex(expected, historyIndexRef.current),
-            "",
-            historyUrlForPageKey(pageKeyFromSnapshot(expected)),
-          );
+        const delta = historyIndexRef.current - landedIndex;
+        // WebView2 often still performs a native history step after preventDefault.
+        // Undo a single extra step so we stay on the snapshot goViewBack already applied.
+        if (Math.abs(delta) === 1) {
+          revertHistoryIndex(delta);
+        } else {
+          const expected = historyEntriesRef.current[historyIndexRef.current];
+          if (expected && !navSnapshotsEqual(expected, event.state)) {
+            history.replaceState(
+              attachHistoryIndex(expected, historyIndexRef.current),
+              "",
+              historyUrlForPageKey(pageKeyFromSnapshot(expected)),
+            );
+          }
         }
         return;
       }
+
+      const now = performance.now();
+      if (
+        now - lastPopStateAtRef.current < HISTORY_GESTURE_MS &&
+        lastPopStateIndexRef.current !== landedIndex
+      ) {
+        revertHistoryIndex(lastPopStateIndexRef.current - landedIndex);
+        return;
+      }
+      lastPopStateAtRef.current = now;
+      lastPopStateIndexRef.current = landedIndex;
+
+      lockHistoryGesture();
+      historyIndexRef.current = landedIndex;
       applyingHistoryRef.current = true;
       pendingHistoryModeRef.current = "none";
-      const landed = attachHistoryIndex(event.state, historyIndexRef.current);
-      historyEntriesRef.current[historyIndexRef.current] = landed;
-      historyEntriesRef.current = historyEntriesRef.current.slice(0, historyIndexRef.current + 1);
+      const landed = attachHistoryIndex(event.state, landedIndex);
+      historyEntriesRef.current[landedIndex] = landed;
       void restoreNavSnapshot(landed);
     };
     window.addEventListener("popstate", onPopState);
@@ -2018,42 +2085,44 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const altArrow =
-        event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat;
+      if (event.repeat) return;
+      const altArrow = event.altKey && !event.ctrlKey && !event.metaKey;
       if (isBrowserBackKey(event) || (altArrow && event.code === "ArrowLeft")) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        goSessionBack();
+        goViewBack();
         return;
       }
       if (isBrowserForwardKey(event) || (altArrow && event.code === "ArrowRight")) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        goSessionForward();
+        goViewForward();
       }
     };
     const onMouseNavigate = (event: MouseEvent) => {
       if (isBrowserBackButton(event)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        goSessionBack();
+        goViewBack();
         return;
       }
       if (isBrowserForwardButton(event)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        goSessionForward();
+        goViewForward();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("pointerdown", onMouseNavigate, true);
     window.addEventListener("mouseup", onMouseNavigate, true);
     window.addEventListener("auxclick", onMouseNavigate, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("pointerdown", onMouseNavigate, true);
       window.removeEventListener("mouseup", onMouseNavigate, true);
       window.removeEventListener("auxclick", onMouseNavigate, true);
     };
-  }, [goSessionBack, goSessionForward]);
+  }, [goViewBack, goViewForward]);
 
   // Q on the episodes screen jumps into the current anime's last-played episode
   // (or the next one if that episode is already watched). Scoped to the
