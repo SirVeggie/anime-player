@@ -27,7 +27,6 @@ const AUTOMATIC_FILE_DISCOVERY_KEY: &str = "automatic_file_discovery";
 const LAUNCH_AT_STARTUP_KEY: &str = "launch_at_startup";
 const CLOSE_INTO_TRAY_KEY: &str = "close_into_tray";
 const CHECK_FOR_UPDATES_KEY: &str = "check_for_updates";
-const UPDATE_REMINDERS_KEY: &str = "update_reminders";
 const SKIPPED_UPDATE_VERSION_KEY: &str = "skipped_update_version";
 const LOCAL_DATA_STATS_CACHE_KEY: &str = "local_data_stats_cache";
 
@@ -178,7 +177,6 @@ pub struct LibraryState {
     launch_at_startup: bool,
     close_into_tray: bool,
     check_for_updates: bool,
-    update_reminders: bool,
     skipped_update_version: Option<String>,
 }
 
@@ -504,14 +502,6 @@ fn write_check_for_updates(conn: &Connection, enabled: bool) -> Result<(), Strin
     write_bool_setting(conn, CHECK_FOR_UPDATES_KEY, enabled)
 }
 
-fn read_update_reminders(conn: &Connection) -> Result<bool, String> {
-    read_bool_setting(conn, UPDATE_REMINDERS_KEY, true)
-}
-
-fn write_update_reminders(conn: &Connection, enabled: bool) -> Result<(), String> {
-    write_bool_setting(conn, UPDATE_REMINDERS_KEY, enabled)
-}
-
 fn read_skipped_update_version(conn: &Connection) -> Result<Option<String>, String> {
     read_string_setting(conn, SKIPPED_UPDATE_VERSION_KEY)
 }
@@ -557,7 +547,6 @@ fn build_library_state(conn: &Connection, db: &AppDatabase) -> Result<LibrarySta
         launch_at_startup: read_launch_at_startup(conn)?,
         close_into_tray: read_close_into_tray(conn)?,
         check_for_updates: read_check_for_updates(conn)?,
-        update_reminders: read_update_reminders(conn)?,
         skipped_update_version: read_skipped_update_version(conn)?,
     })
 }
@@ -671,17 +660,6 @@ pub fn set_check_for_updates(
 ) -> Result<LibraryState, String> {
     db.with_conn(|conn| {
         write_check_for_updates(conn, enabled)?;
-        build_library_state(conn, &db)
-    })
-}
-
-#[tauri::command]
-pub fn set_update_reminders(
-    db: State<'_, AppDatabase>,
-    enabled: bool,
-) -> Result<LibraryState, String> {
-    db.with_conn(|conn| {
-        write_update_reminders(conn, enabled)?;
         build_library_state(conn, &db)
     })
 }

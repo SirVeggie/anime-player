@@ -54,7 +54,6 @@ import {
   setHideAnilistFeatures,
   setLaunchAtStartup,
   setSkipOpEd,
-  setUpdateReminders,
   confirmQuit,
   hideToTray,
   setAnimeCustomThumbnailPath,
@@ -1507,12 +1506,6 @@ function App() {
     setLibrary(state);
   }, []);
 
-  const handleUpdateRemindersSetting = useCallback(async (enabled: boolean) => {
-    const state = await setUpdateReminders(enabled);
-    setLibrary(state);
-    if (!enabled) setUpdatePopupOpen(false);
-  }, []);
-
   const handleRemindUpdateLater = useCallback(() => {
     updatePopupDismissedVersionRef.current = updateStatus?.latest_version?.trim() ?? "";
     setUpdatePopupOpen(false);
@@ -2490,7 +2483,6 @@ function App() {
               onLaunchAtStartup={(enabled) => void handleLaunchAtStartup(enabled)}
               onCloseIntoTray={(enabled) => void handleCloseIntoTray(enabled)}
               onCheckForUpdates={(enabled) => void handleCheckForUpdatesSetting(enabled)}
-              onUpdateReminders={(enabled) => void handleUpdateRemindersSetting(enabled)}
               onCleanLocalData={() => void handleCleanLocalData()}
               updateStatus={updateStatus}
               onCheckUpdatesNow={() => void handleCheckUpdatesNow()}

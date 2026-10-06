@@ -4,7 +4,7 @@ export function shouldRemindAboutUpdate(
   library: LibraryState | null | undefined,
   status: UpdateStatus | null | undefined,
 ): boolean {
-  if (!library?.update_reminders || !status) return false;
+  if (!library || !status) return false;
   if (!status.available && !status.pending_apply) return false;
   const latest = status.latest_version?.trim();
   const skipped = library.skipped_update_version?.trim();

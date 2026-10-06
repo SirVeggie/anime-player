@@ -248,14 +248,12 @@ view components. Per-screen UI lives in `src/components/`:
 - Settings **Application** panel exposes SQLite-backed booleans on
   `LibraryState`: **Automatic file discovery** (`automatic_file_discovery`,
   default on), **Launch at startup** (`launch_at_startup`, default off),
-  **Close into tray** (`close_into_tray`, default off), and   **Check for updates
-  on startup** (`check_for_updates`, default on), and **Show update reminders**
-  (`update_reminders`, default on). When a startup check finds a newer release
-  and reminders are on, a modal offers **Update**, **Remind me later** (this
-  session), or **Skip version** (persisted as `skipped_update_version` until a
-  different latest tag appears). Reminders also drive the Settings sidebar
-  badge; turning them off hides the popup, toast, and blip, but Settings still
-  shows download/restart. The **Updates** panel shows
+  **Close into tray** (`close_into_tray`, default off), and **Check for updates
+  on startup** (`check_for_updates`, default on). When a startup check finds a
+  newer release, a modal offers **Update**, **Remind me later** (this session),
+  or **Skip version** (persisted as `skipped_update_version` until a different
+  latest tag appears). The same reminder state drives the Settings sidebar
+  badge; Settings still shows download/restart. The **Updates** panel shows
   the portable `VERSION.txt` tag, checks
   `https://github.com/SirVeggie/anime-player/releases/latest/download/manifest.json`,
   downloads only files whose SHA256 changed into `<install>/_pending/`, then
